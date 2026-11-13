@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# 运行时产物 / 凭证（绝不入库）
+fixtures/raw/
+*.cookie
+*.storage_state.json
+.onefeed/
+.dy/
+*.db
+*.sqlite
+*.sqlite3
+
+# 探针产物
+probes/tmp_*.json
+probes/*.png
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
