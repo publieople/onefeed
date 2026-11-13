@@ -90,3 +90,70 @@ pull_all.py      本地试跑：python pull_all.py douyin bili juejin
 [v2ex  ] 11-13 10:55 ♥     0 💬  97 | cpsony       | 同事老婆昨天被诈骗了 2W+，分享下骗局
 [zhihu ] --          ♥     0 💬   0 |              | 古代没有电灯，晚上过了8点，古人都怎么打发时间？
 ```
+---
+
+# 第二轮：开放平台普查（2026-11-13 22:20–22:35）
+
+> 问题：还有哪些**常见的、比较开放的**社交/内容平台适合接？
+> 方法：37 个端点逐个打点（直连 → 代理兜底），记状态码/体积/字段；脚本在 `probes/probe_platforms_survey.py`、`probe_platforms_survey2.py`、`probe_field_richness.py`。
+
+## 先修正上一轮的两个结论
+
+| 上轮结论 | 实测 | 修正 |
+|---|---|---|
+| 知乎热榜 API 要登录 | `api/v3/feed/topstory/hot-list-web?limit=20&desktop=true` → **200 / 30KB / 20 条** | 换端点即可，免登录 |
+| 36 氪 RSS 已废弃 | RSS 确实返回 HTML，但 `POST gateway.36kr.com/api/mis/nav/home/nav/rank/hot` → **200 / 28KB / 50 条** | 接口活着，只是 RSS 死了 |
+
+## A. 真正「开放」：官方 API、有文档、能拿你自己的流
+
+| 平台 | 开放协议 / 接口 | 实测 | 拿个人流要什么 | 判断 |
+|---|---|---|---|---|
+| **Bluesky** | AT Protocol，`public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed` | 200 / 24KB，免登录可读任意公开账号 | app password（几行代码换代币），`getTimeline` 即个人关注流 | 最干净的「开放社交」样本，接入约 1 小时 |
+| **Mastodon** | `/api/v1/timelines/home` | 公共时间线现在**必须登录**（422 requires an authenticated user）；`POST /api/v1/apps` 应用注册 **200**（返回 client_id/secret） | 用户在自己实例授权一次 | 协议开放，但要走过 OAuth，演示流程长 |
+| **V2EX** | API v2 `api/v2/nodes/...` | **401 Token not found** | Personal Access Token（个人设置页自助申请） | 有 token 就能拿关注/通知；无 token 只能热帖 |
+| **YouTube** | Data API v3 / 频道 RSS | RSS 200（27KB）；Data API 无 key 时 403 Method doesn't allow unregistered callers | OAuth 授权订阅列表；或只订频道 RSS | 需代理，国内场景弱 |
+| **Reddit** | .json / OAuth | 直连与代理均 **403**（返回 Blocked 页） | 即便有 token 也受网络限制 | 放弃 |
+
+**结论**：真正「开放 + 能拿个人流 + 国内可直连」的只有 Bluesky；Mastodon 次之（协议开放但要 OAuth 跳转）。
+它们对演示的价值是「故事」，对用户的价值接近零（我们不在上面）。
+
+## B. 免登录公开流，能立刻接（第二轮新发现）
+
+| 平台 | 接口 | 实测 | 字段 | 成本 |
+|---|---|---|---|---|
+| **知乎热榜** | `GET zhihu.com/api/v3/feed/topstory/hot-list-web` | 200 / 30KB / 20 条 | 标题、摘要、封面、问题链接、「442 万热度」 | ~35 行 |
+| **头条热榜** | `GET toutiao.com/hot-event/hot-board/?origin=toutiao_pc` | 200 / 120KB / 50 条 | 标题、HotValue、封面、跳转 URL | ~35 行 |
+| **36 氪热榜** | `POST gateway.36kr.com/.../rank/hot` | 200 / 28KB / 50 条 | 标题、作者、封面、阅读/点赞/收藏数 | ~40 行 |
+| **B 站热门** | `GET api.bilibili.com/x/web-interface/popular` | 200 / 16KB / 100 条 | 标题、UP 主、播放、封面、时长 | ~30 行 |
+| **什么值得买** | `post.smzdm.com/feed/` | 200 / 45KB，标准 RSS | 标题、链接、摘要、图 | ~20 行（RSS 通用） |
+| **快手热榜** | `POST kuaishou.com/graphql`（visionHotRank） | 200 / 5KB / 49 条，**无需签名** | 只有词条名，hotValue 为 null | 不建议（拼不出卡片） |
+
+## C. 要登录 cookie 才拿得到「自己的流」（未验证到底）
+
+| 平台 | 实测无 cookie | 判断 |
+|---|---|---|
+| 微博 | `m.weibo.cn` container API **432**、`weibo.com/ajax/side/hotSearch` **403** | 带 cookie 大概率能通（纯 JSON 无签名），但风控严、易掉线 |
+| 知乎关注流 | 热榜可用，关注流需 `x-zse-96` 签名 | 投入等同抖音，不划算 |
+| 豆瓣 | 电影新片 `j/new_search_subjects` 200 可用；广播/关注流需登录 | 只有「公开榜单」，没有个人化流 |
+| 雪球 | 热帖接口被 WAF 拦（返回 renderData 验证页） | 放弃 |
+| 贴吧 | 热榜 topicList 200（44KB，真数据） | 可用但内容质量差 |
+| 虎扑 | 步行街 HTML 200，无内嵌 JSON | 要写 HTML 解析，性价比低 |
+
+## D. 明确不可用（本轮复核）
+
+| 平台 | 实测 |
+|---|---|
+| 小红书 homefeed（web API） | 406（code -1），需 `x-s` 签名，只能走 CLI |
+| 抖音热榜（免签） | 200 但 **0 字节** — 仍需 a_bogus |
+| 今日头条 feed | 200 但 **0 字节** — 反爬 |
+| CSDN 首页推荐 | 404 |
+| InfoQ 列表 | 451（地域/风控拦截） |
+| 微信公众号 | 无公开接口 |
+
+## 第二轮建议
+
+1. **加一栏「热榜」**，不混进主时间线：知乎热榜 + 头条热榜 + 36 氪热榜，三个共约 110 行，免登录、零风控。
+   好处：chip 从 4 个变 7 个，演示时「一屏看全平台」的观感立起来，而且**不依赖扫码**（扫码失败也不影响）。
+2. **Bluesky 当「开放协议」故事**，进 roadmap 不进 V1：接入 1 小时，讲「连国际开放社交协议都能接」很加分，但用户自己不刷，演示时最多占 5 秒。
+3. **微博 / 知乎关注流 / 快手**继续不做：机制与抖音重复，且都有风控。
+4. **Mastodon / YouTube / Reddit** 直接排除：要 OAuth 跳转或需要代理，现场演示是定时炸弹。
