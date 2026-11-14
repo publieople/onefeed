@@ -24,7 +24,8 @@ from .capabilities import Capabilities
 from .manifest import ManifestError, load_manifest
 
 MEMORY_LIMIT = 64 * 1024 * 1024
-DEADLINE_SEC = 25.0          # 小于宿主的 30s 硬超时，留出进程退出时间
+DEADLINE_DEFAULT = 25.0      # 单次调用的软上限；宿主会用 ONEFEED_DEADLINE_SEC 覆盖
+DEADLINE_MAX = 120.0
 
 SHIM = r"""
 var __HOST_CALL__ = host_call;
@@ -133,7 +134,7 @@ def run(plugin_dir: Path, method: str, args: dict, settings: dict, demo: bool) -
              .replace("__METHOD__", json.dumps(method))
              .replace("__ARGS__", json.dumps(args, ensure_ascii=False)))
 
-    deadline = time.time() + DEADLINE_SEC
+    deadline = time.time() + _deadline_sec()
     while time.time() < deadline:
         ctx.execute_pending_job()
         if ctx.eval("__result__ && __result__.done"):
@@ -144,8 +145,19 @@ def run(plugin_dir: Path, method: str, args: dict, settings: dict, demo: bool) -
     result = json.loads(raw)
     if not result.get("done"):
         result = {"done": True, "value": None,
-                  "error": "插件在 %.0fs 内没有返回（可能是死循环或未 resolve 的 Promise）" % DEADLINE_SEC}
+                  "error": "插件在 %.0fs 内没有返回（可能是死循环或未 resolve 的 Promise）" % _deadline_sec()}
     return result
+
+
+def _deadline_sec() -> float:
+    raw = os.environ.get("ONEFEED_DEADLINE_SEC")
+    if not raw:
+        return DEADLINE_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEADLINE_DEFAULT
+    return max(5.0, min(value, DEADLINE_MAX))
 
 
 def _safe_clamp(s: str) -> int:

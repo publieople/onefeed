@@ -124,6 +124,8 @@ class PluginHost:
                method, json.dumps(args or {}, ensure_ascii=False)]
         env = clean_env()
         env["ONEFEED_SETTINGS"] = json.dumps(self.settings.get(plugin_id) or {}, ensure_ascii=False)
+        # 让 worker 在宿主强杀前自己收尾：留 6s 给进程退出与结果写出
+        env["ONEFEED_DEADLINE_SEC"] = f"{max(5.0, timeout - 6.0):.0f}"
         if self.demo:
             env["ONEFEED_DEMO"] = "1"
 
