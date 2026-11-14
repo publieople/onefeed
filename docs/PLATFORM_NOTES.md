@@ -5,7 +5,7 @@
 
 ## 一句话结论
 
-**六个平台已经能跑**（B 站、抖音、掘金、V2EX、知乎日报、小红书待登录）。
+**六个平台已经全部跑通**（B 站、抖音、小红书、掘金、V2EX、知乎热榜）。
 其中三个是**纯 HTTP 免登录**，每个 adapter 不到 50 行，这是性价比最高的扩平台方式；
 真正难的从来不是「接多少平台」，而是「接进来的是不是你的个性化流」。
 
@@ -27,7 +27,7 @@ A 级的特点：**没有登录态、没有签名、没有风控**，失败率�
 | 平台 | 工具 | 状态 | 说明 |
 |---|---|---|---|
 | B 站 | `bili 0.8.0` | ✅ 已登录 Publieople（mid 324858924），feed recommend 个性化 30 条 + 封面 + 评论楼中楼 | 唯一「登录态开箱可用」的平台 |
-| 小红书 | `xhs 0.1.4` | ⚠️ 未登录（`xhs feed --json` 报 `Not logged in. Run "xhs login" first.`） | 扫码后能拿探索页推荐流 |
+| 小红书 | 宿主 `browser`（截 `/api/sns/web/v1/homefeed`） | ✅ 已登录并跑通（2026-11-14）：注入 cookie 后一屏 29 条，带封面/点赞/作者；不再依赖 `xhs` CLI | 详情链接必须带 `xsec_token` |
 | 抖音 | 自研 `douyin_browser` adapter（浏览器回放） | ✅ 免登录即出 20 条，登录后是个性化流 | 不走 CLI，见 `DY_FEED_FINDINGS.md` |
 
 ### C 级：浏览器回放能接，但要写第二个 adapter
@@ -143,7 +143,7 @@ pull_all.py      本地试跑：python pull_all.py douyin bili juejin
 
 | 平台 | 实测 |
 |---|---|
-| 小红书 homefeed（web API） | 406（code -1），需 `x-s` 签名，只能走 CLI |
+| 小红书 homefeed（纯 HTTP 直连） | 406（code -1），需 `x-s` 签名；**改用 `ctx.browser.capture` 截页面自己发的请求后可用**（见 B 级表） |
 | 抖音热榜（免签） | 200 但 **0 字节** — 仍需 a_bogus |
 | 今日头条 feed | 200 但 **0 字节** — 反爬 |
 | CSDN 首页推荐 | 404 |
@@ -176,7 +176,7 @@ B 站开放平台只放开投稿与直播；抖音开放平台只有分享与授
 |---|---|---|---|---|
 | **已跑通** | B 站 | `bili feed recommend` / `feed timeline` 在本机已登录态可用 | CLI 复用 cookie | 0（已完成） |
 | **已跑通** | 抖音 | 浏览器回放 `/aweme/v2/web/module/feed/`，未登录即出 20 条 | Playwright + 持久化登录目录 | 0（已完成） |
-| **已跑通（待扫码）** | 小红书 | `xhs feed --json` 报 `Not logged in` | CLI 扫码 | 0（等一次扫码） |
+| **已跑通** | 小红书 | 已登录（cookie 含 `id_token`），`explore` 页 `homefeed` 截到 29 条 | 浏览器截接口 + 宿主注入 cookie | 0（已完成） |
 | **只差 cookie** | B 站动态 | `x/polymer/web-dynamic/...` 返回 `{"code":-101,"message":"账号未登录"}` | 同 B 站，cookie 即可 | ~30 行 |
 | **只差 cookie（风控中）** | 微博 | 移动端推荐流 **432**、关注流 **432**、web 端 **403** | cookie + 设备参数，纯 JSON 无签名 | ~150 行 + 调试风控 |
 | **只差 cookie** | 网易云音乐动态 | `api/event/get` 返回 `{"code":301}`（需登录） | cookie | ~40 行 |

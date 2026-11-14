@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .manifest import Manifest
-from .paths import browser_profile, ensure_temp_env, plugin_dir
+from .paths import browser_profile, ensure_temp_env, plugin_dir, state_root
 
 MAX_BODY_BYTES = 5 * 1024 * 1024     # http 响应体上限 5MB
 MAX_HTML_CHARS = 2_000_000
@@ -337,27 +337,41 @@ class Capabilities:
             finally:
                 pw.stop()
 
+    def _cookie_path(self) -> Path | None:
+        """cookie 文件查找顺序：settings.cookieFile → 状态目录 cookies/<plugin_id>.json。
+
+        后者是客户端登录成功后该写的地方（宿主与客户端约定，插件看不到内容）。
+        """
+        raw = self.settings.get("cookieFile")
+        if raw:
+            path = Path(os.path.expanduser(str(raw)))
+            if path.is_file():
+                return path
+        fallback = state_root() / "cookies" / f"{self.manifest.id}.json"
+        return fallback if fallback.is_file() else None
+
     def _inject_browser_cookies(self, ctx) -> None:
-        cookie_file = self.settings.get("cookieFile")
-        if not cookie_file:
-            return
-        path = Path(os.path.expanduser(str(cookie_file)))
-        if not path.is_file():
+        path = self._cookie_path()
+        if path is None:
+            self.log("warn", "没有 cookie 文件，按未登录抓取")
             return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
         cookies = data.get("cookies") if isinstance(data, dict) else None
+        if isinstance(cookies, dict):   # 兼容 {name: value} 形式
+            cookies = [{"name": k, "value": v} for k, v in cookies.items()]
         if not isinstance(cookies, list):
             return
+        default_domain = str(self.settings.get("cookieDomain") or ".douyin.com")
         prepared = []
         for c in cookies:
             if not isinstance(c, dict) or not c.get("name"):
                 continue
             prepared.append({
                 "name": c["name"], "value": c.get("value", ""),
-                "domain": c.get("domain") or ".douyin.com",
+                "domain": c.get("domain") or default_domain,
                 "path": c.get("path") or "/",
                 "httpOnly": bool(c.get("httpOnly")),
                 "secure": bool(c.get("secure")),

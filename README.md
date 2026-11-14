@@ -56,7 +56,7 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 |---|---|---|
 | bilibili | `cli`（bili CLI） | ✅ 推荐流 + 封面 + 评论；关注动态 |
 | douyin | `browser`（浏览器回放） | ✅ 推荐流 20 条 + 封面 |
-| xiaohongshu | `cli`（xhs CLI） | ⚠️ 待扫码登录（未登录时报错清晰） |
+| xiaohongshu | `browser`（截 `homefeed` 接口） | ✅ 已跑通：注入 cookie 后 15.8s 出 29 条，带封面/点赞/作者 |
 | juejin | `http` | ✅ 免登录 |
 | v2ex | `http` | ✅ 免登录（部分网络需代理） |
 | zhihu-hot | `http` | ✅ 免登录热榜 |
@@ -71,8 +71,7 @@ uv venv .venv
 uv pip install --python .venv\Scripts\python.exe quickjs playwright
 
 # 2) 插件工具（只装用得到的）
-uv tool install bili-agent   # B 站
-uv tool install xhs-cli      # 小红书
+uv tool install bili-agent   # B 站（xiaohongshu 插件不再需要 xhs-cli，走浏览器截接口）
 
 # 3) 拉一轮数据（插件目录指向插件仓库）
 .venv\Scripts\python.exe pull_all.py --plugins-dir ..\onefeed-plugins\plugins zhihu-hot juejin v2ex --limit 5
@@ -81,6 +80,11 @@ uv tool install xhs-cli      # 小红书
 
 抖音插件用系统 Chrome 跑 headless 回放，首次会建持久档案；
 状态目录默认 `~/.onefeed`，不可写时自动退回仓库内 `.onefeed/`（已 gitignore），也可用 `ONEFEED_HOME` 指定。
+
+**登录态怎么给插件**：客户端把 cookie 写到 `<状态目录>/cookies/<plugin-id>.json`
+（`{"cookies":[{"name","value","domain",...}]}`，也接受 `{name: value}` 的字典形式），
+宿主按插件 `settings.cookieFile` → 该默认路径的顺序找到它，在 `browser` 抓取前注入。
+插件始终读不到 cookie 明文。
 
 ## 目录
 
