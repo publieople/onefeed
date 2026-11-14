@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "dead-loop",
+  "name": "死循环测试",
+  "version": "0.0.1",
+  "author": "test",
+  "description": "故意死循环，验证宿主超时击杀",
+  "license": "MIT",
+  "minHostVersion": "0.2.0",
+  "entry": "index.js",
+  "capabilities": [],
+  "kinds": [
+    "short"
+  ],
+  "feeds": []
+}

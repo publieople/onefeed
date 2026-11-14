@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "zhihu-hot",
+  "name": "知乎热榜",
+  "version": "0.1.0",
+  "author": "onefeed-plugins",
+  "description": "知乎热榜（只读）",
+  "license": "MIT",
+  "minHostVersion": "0.2.0",
+  "entry": "index.js",
+  "capabilities": [
+    "http"
+  ],
+  "kinds": [
+    "list"
+  ],
+  "feeds": [
+    {
+      "id": "hot",
+      "name": "热榜"
+    }
+  ]
+}

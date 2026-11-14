@@ -8,11 +8,10 @@
 ## 它解决什么
 
 同一个人每天要开三个 App、各刷十分钟，才能看完自己真正关心的内容。
-OneFeed 把三个平台（以及技术社区）的**个人信息流**拉到一个本地面板里：
+OneFeed 把各平台的**个人信息流**拉到一个本地面板里：
 
 - 扫码登录一次，之后不用来回切 App
 - 一条时间线混排，卡片标出来源平台，点开能看评论
-- 跨平台讲同一件事的内容合成一张卡，展开看各平台怎么说
 - 每条卡片能回答「为什么推给我」
 - 用一句话过滤：`只看 AI 和上海相关的`
 
@@ -25,53 +24,75 @@ OneFeed 把三个平台（以及技术社区）的**个人信息流**拉到一�
 | 复用平台网页端的公开接口 | 不逆向签名、不接第三方付费接口 |
 | 失败就降级（缓存 / DEMO 快照） | 不为「多一个平台」牺牲稳定性 |
 
+## 架构：宿主 + 插件
+
+主仓库只放**宿主**（运行时、数据契约、呈现、调度），一个平台的代码都不留。
+每个平台是一个独立插件目录，放在另一个仓库 [`publieople/onefeed-plugins`](https://github.com/publieople/onefeed-plugins)。
+
+```
+插件（plugin.json + index.js）
+        ↓ pull(ctx, {limit, cursor})
+宿主：QuickJS 沙箱子进程 → 能力层（http / cli / browser）→ RawItem → 统一 Item → 卡片
+```
+
+这么拆的三个理由：
+
+1. **平台挂了不牵连宿主**：插件抛错只影响自己那张卡，宿主照常渲染其余内容；
+2. **第三方好写**：一个目录、一个 `module.exports`，不碰宿主的数据库和凭证；
+3. **责任边界清楚**：宿主是播放器，插件是内容源。
+
+插件规范见 [`specs/002-plugin-arch/spec.md`](specs/002-plugin-arch/spec.md)（完整版）与插件仓库的 `SPEC.md`（公开版）。
+
 ## 当前状态
 
-采集层已经跑通，五个平台能吐统一结构的数据（2026-11-13 实测）：
+运行时（`plugin_runtime/`）与官方插件集已跑通，六个平台吐同一套 `Item`（2026-11-14 实测）：
 
-| 平台 | 取数方式 | 状态 |
+| 插件 | 引擎 | 状态 |
 |---|---|---|
-| B 站 | `bili` CLI（已登录） | ✅ 推荐流 + 封面 + 评论 |
-| 抖音 | Playwright 回放网页端（不碰签名） | ✅ 推荐流 20 条 + 热评 |
-| 小红书 | `xhs` CLI | ⚠️ 待扫码登录 |
-| 掘金 | 公开推荐接口 | ✅ 免登录 |
-| V2EX | 公开热帖接口 | ✅（需本地代理） |
-| 知乎日报 | 公开接口 | ✅ 免登录 |
+| bilibili | `cli`（bili CLI） | ✅ 推荐流 + 封面 + 评论；关注动态 |
+| douyin | `browser`（浏览器回放） | ✅ 推荐流 20 条 + 封面 |
+| xiaohongshu | `cli`（xhs CLI） | ⚠️ 待扫码登录（未登录时报错清晰） |
+| juejin | `http` | ✅ 免登录 |
+| v2ex | `http` | ✅ 免登录（部分网络需代理） |
+| zhihu-hot | `http` | ✅ 免登录热榜 |
 
 前端、Agent 编排、去重合并**尚未开始**，等 `specs/001-v1-core/spec.md` 的待定项定稿。
 
 ## 快速开始
 
 ```bash
-# 依赖（Python 3.11+）
+# 1) 运行时（Python 3.12）
+uv venv .venv
+uv pip install --python .venv\Scripts\python.exe quickjs playwright
+
+# 2) 插件工具（只装用得到的）
 uv tool install bili-agent   # B 站
 uv tool install xhs-cli      # 小红书
-uv pip install playwright && playwright install chromium  # 抖音回放
 
-# 拉一轮真实数据看看
-python pull_all.py bili douyin juejin --limit 5
-python pull_all.py douyin --json --limit 20 > /tmp/feed.json
+# 3) 拉一轮数据（插件目录指向插件仓库）
+.venv\Scripts\python.exe pull_all.py --plugins-dir ..\onefeed-plugins\plugins zhihu-hot juejin v2ex --limit 5
+.venv\Scripts\python.exe pull_all.py --plugins-dir ..\onefeed-plugins\plugins bilibili --limit 3
 ```
 
-抖音 adapter 会用系统 Chrome（headed），首次运行请手动扫码登录一次。
+抖音插件用系统 Chrome 跑 headless 回放，首次会建持久档案；
+状态目录默认 `~/.onefeed`，不可写时自动退回仓库内 `.onefeed/`（已 gitignore），也可用 `ONEFEED_HOME` 指定。
 
 ## 目录
 
 ```
 onefeed/
-├── adapters/              采集层：一个平台一个实现，统一 Item/Comment
-│   ├── models.py          数据模型
-│   ├── base.py            Adapter 协议
-│   ├── cli_adapters.py    B 站 / 小红书（子进程 + 干净 env）
-│   ├── douyin_browser.py  抖音（浏览器回放）
-│   └── simple_adapters.py 掘金 / V2EX / 知乎日报（HTTP）
+├── plugin_runtime/        插件运行时（宿主侧，唯一允许碰平台的地方是能力层）
+│   ├── manifest.py        plugin.json 校验与加载
+│   ├── worker.py          QuickJS 子进程：内存上限 + 超时强杀
+│   ├── capabilities.py    能力层：http / cli 白名单 / browser 回放 / storage / cache
+│   ├── paths.py           状态目录解析（可写探测 + 兜底）
+│   └── host.py            插件发现、调度、RawItem → Item 归一化
+├── models.py              统一数据模型 Item / Comment
 ├── specs/                 规格（唯一事实来源）
 │   ├── 000-constitution.md
-│   └── 001-v1-core/
-│       ├── spec.md        产品规格：需求 + 验收标准 + 待定项
-│       ├── plan.md        技术方案：架构、算法、排期
-│       └── tasks.md       任务清单（含完成状态）
-├── docs/                  调研记录（抖音 feed 机制、扩平台实测）
+│   ├── 001-v1-core/       产品规格 / 技术方案 / 任务清单
+│   └── 002-plugin-arch/   插件架构提案（manifest / 生命周期 / 呈现规范 / 风险边界）
+├── docs/                  调研记录（抖音 feed 机制、平台开放度普查）
 ├── probes/                一次性探针脚本，历史留档
 └── pull_all.py            多平台试跑入口
 ```
@@ -91,6 +112,7 @@ spec 变更 → 评审通过 → 同步 tasks.md → 写代码 → PR 关联 tas
 - [`specs/001-v1-core/spec.md`](specs/001-v1-core/spec.md) — 产品规格与验收标准
 - [`specs/001-v1-core/plan.md`](specs/001-v1-core/plan.md) — 技术方案（架构 / 排序 / 排期）
 - [`specs/001-v1-core/tasks.md`](specs/001-v1-core/tasks.md) — 任务清单
+- [`specs/002-plugin-arch/spec.md`](specs/002-plugin-arch/spec.md) — 插件架构（运行时选型 / manifest / 呈现规范）
 - [`docs/PLATFORM_NOTES.md`](docs/PLATFORM_NOTES.md) — 还能接哪些平台（实测）
 - [`docs/DY_FEED_FINDINGS.md`](docs/DY_FEED_FINDINGS.md) — 抖音 feed 机制与签名坑
 
