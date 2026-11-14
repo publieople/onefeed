@@ -111,6 +111,8 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._write_lock = threading.Lock()
+        self._all_conns: list[sqlite3.Connection] = []
+        self._conns_lock = threading.Lock()
         self._migrate()
 
     # ------------------------------------------------------------ 连接
@@ -124,13 +126,27 @@ class Store:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.conn = conn
+            with self._conns_lock:
+                self._all_conns.append(conn)
         return conn
 
     def close(self) -> None:
+        """关掉本线程的连接。"""
         conn = getattr(self._local, "conn", None)
         if conn is not None:
             conn.close()
             self._local.conn = None
+
+    def close_all(self) -> None:
+        """关掉所有线程的连接 —— 测试与进程退出时用，否则 Windows 删不掉库文件。"""
+        with self._conns_lock:
+            conns, self._all_conns = self._all_conns, []
+        for conn in conns:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+        self._local.conn = None
 
     def _migrate(self) -> None:
         conn = self.conn

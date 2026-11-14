@@ -128,7 +128,7 @@ def main() -> int:
             root = client.get("/")
             check(root.status_code == 200 and "hint" in root.json(), "无前端时根路径给提示")
 
-        store.close()
+        store.close_all()
         for leftover in (db, Path(str(db) + "-wal"), Path(str(db) + "-shm")):
             leftover.unlink(missing_ok=True)
 
