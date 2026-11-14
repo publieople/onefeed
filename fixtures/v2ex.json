@@ -1,0 +1,249 @@
+{
+ "plugin": "v2ex",
+ "saved_at": 1794670186,
+ "items": [
+  {
+   "id": "v2ex:topic:1257035",
+   "platform": "v2ex",
+   "raw_id": "topic:1257035",
+   "title": "纠结， Mac 有必要买 AC+么",
+   "kind": "short",
+   "text": "600 多一年，感觉好像还好？\r\n还是说买 3 年。打算用久一点\r\n\r\n以前旧的电脑经常带壳，结果散热又差，而且还会留印子\r\n键盘膜和屏幕贴膜也感觉一定程度影响\r\n\r\n最好还是直接裸奔，但是要非常爱惜，所以感觉好像买 care 还是有必要？\r\n\r\n各位群友买 apple care 么，毕竟是万把来块的电脑",
+   "author": "syh2",
+   "author_id": "553614",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1257035",
+   "published_at": 1794638294,
+   "duration": 0,
+   "like": 0,
+   "comment": 20,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "macbook"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "MacBook"
+   }
+  },
+  {
+   "id": "v2ex:topic:1257030",
+   "platform": "v2ex",
+   "raw_id": "topic:1257030",
+   "title": "iOS 原生多论坛客户端： V2EX / NGA / Linux .do / Chiphell / 4D4Y 一个 App 刷，抽 10 个半年 Pro",
+   "kind": "short",
+   "text": "平时同时逛好几个论坛，一个论坛一个 App 或者一个网页，来回切有点烦。之前一直用论坛助手，支持的论坛多，用着其实也不差，就是我这人比较龟毛，很多地方想按自己的审美和习惯来，索性自己手搓了一个。断断续续做了几个月，前两天终于上架了。\r\n\r\nApp Store 搜「[**Dis 看帖**]( https://apps.apple.com/app/id6821816100)」，需要 iOS 18 以上，iPhone / iPad 都能用，iPhone Duo 也做了初步适配。\r\n\r\n现在支持 V2EX 、NGA 、Linuxdo 、4D4Y 、Chiphell ，后面会接更多。\r\n\r\n![全部视图和聚合搜索]( https://i.imgur.com/Wt1fv61.png)\r\n\r\n## 功能\r\n\r\n- 「全部」里几个论坛的帖子混在一起刷，搜索也可以一次搜好几个论坛\r\n- 帖子没有「页」的概念，一路往下滑就是。想去哪层，按住右下角的胶囊拖一下，楼层实时跟着变，几万楼的帖子也能准确跳过去（喜欢分页的，设置里能切回去）\r\n- 尽量做成 iOS 原生的手感，不是网页套壳\r\n- 不登录也能逛，有账号再登录回帖\r\n- iCloud 同步登录状态、常用节点、看到哪了、外观设置，换设备接着看\r\n- 十几套深浅色主题，列表排版、疏密、字号都能调\r\n- 没广告\r\n\r\n![无极楼层]( https://i",
+   "author": "ae",
+   "author_id": "212144",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1257030",
+   "published_at": 1794636309,
+   "duration": 0,
+   "like": 0,
+   "comment": 39,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "create"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "分享创造"
+   }
+  },
+  {
+   "id": "v2ex:topic:1257008",
+   "platform": "v2ex",
+   "raw_id": "topic:1257008",
+   "title": "睡前安排了一整晚的 agent 全自动任务，一觉醒来被 Windows 自动更新重启杀了",
+   "kind": "short",
+   "text": "期待在醒来时看到项目做好上线发布的页面，结果被 Windows 登录页面迎接。\r\n\r\n这种设计究竟是怎么期待人用它稳定工作开发的？",
+   "author": "grandlq",
+   "author_id": "53526",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1257008",
+   "published_at": 1794625332,
+   "duration": 0,
+   "like": 0,
+   "comment": 27,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "tech"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "科技"
+   }
+  },
+  {
+   "id": "v2ex:topic:1257002",
+   "platform": "v2ex",
+   "raw_id": "topic:1257002",
+   "title": "换了个新 macbook air m5 有没有推荐的软件安装",
+   "kind": "short",
+   "text": "如题，之前的电脑都是旧系统，很多软件都不支持 intel 芯片了，\r\n\r\n看看大家有没有推荐的\r\n\r\n我主要做产品经理，写文档，画原型，搞浏览器自动化\r\n\r\n看看有没有啥好玩的 Mac 软件和玩法推荐",
+   "author": "syh2",
+   "author_id": "553614",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1257002",
+   "published_at": 1794622026,
+   "duration": 0,
+   "like": 0,
+   "comment": 25,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "mba"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "MacBook Air"
+   }
+  },
+  {
+   "id": "v2ex:topic:1257001",
+   "platform": "v2ex",
+   "raw_id": "topic:1257001",
+   "title": "国模真的还可以的",
+   "kind": "short",
+   "text": "最近 codex 特别慢， 尝试体验以下 CodeBuddy Trae 这些。 发现国模(主要用 glm flash deepseek flash)真的效果还是可以的， 不光更便宜，整体其实效果还行。整体下来比 codex 价格合适。\r\n\r\n另外还有一个感受就是即使不用手写代码，但是最好还有一个编辑器，在类似 CodeBuddy trae 这种编辑器里面使用 ai 的时候感觉 ai 对项目整体的感知能力会更好，比如我用 openspec 产出好的 task ，CodeBuddy trae 可以比较顺畅的沿着计划执行下去， 但是 codex 无论是客户端 cli 还是嵌入到 zed 中都总是卡壳断在某个任务上停止。 \r\n\r\n再有就是编辑器中可以连远程机器，直接可以交给 ai 去操作，以及编辑器里打开浏览器去操作验收功能，尽管 codex 也有这种能力，但是要占用系统的 chrome ，相比之下感觉放到编辑器中开个浏览器似乎更友好一点。感觉比起一些各种自己配置的编辑器不如这种拿来就用的效率高，而且相对还更成熟。\r\n\r\n当然顶级模型应该还是国外的领先，我用 codex 也只是 gpt6 sol 和 gpt6.1 terra ，也不敢开太高，主要额度用的太快了。 \r\n\r\n\r\n最近使用的一点感受，不知道你们感受如何",
+   "author": "JohnXu20151211",
+   "author_id": "336746",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1257001",
+   "published_at": 1794621900,
+   "duration": 0,
+   "like": 0,
+   "comment": 32,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "vibecoding"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "🤖Vibe Coding"
+   }
+  },
+  {
+   "id": "v2ex:topic:1256998",
+   "platform": "v2ex",
+   "raw_id": "topic:1256998",
+   "title": "GPT 官 Key 免费用。蹬完即止",
+   "kind": "short",
+   "text": "周末没人上班，Token 用不完。送给 V2EX 的大佬免费用。\r\n\r\nhttps://pixcook.ai\r\n\r\n\r\nsk-6810902ebc0f3256989f528a8727f2e658fff1d483c0ef2e801ddd94fe83629e\r\n\r\n\r\n我们是做 AI 出海应用的团队，因为自身开发团队的需要，为了降低成本，所以自己购买一些 ChatGPT 账号搭建了一个中转站。\r\n\r\n自有的反代理技术，可以做到稳定不降智，缓存率长期保持在 97%以上的体验，缓存写入长期个位数或者 3 位数以内。\r\n\r\nV2EX 的大佬，如果注册后，回帖留下站内 ID （右上角账户下来菜单中可以查阅），我将送上 5 刀 余额，数量有限，送完即止。",
+   "author": "luotao21",
+   "author_id": "341618",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1256998",
+   "published_at": 1794621265,
+   "duration": 0,
+   "like": 0,
+   "comment": 34,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "promotions"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "推广"
+   }
+  },
+  {
+   "id": "v2ex:topic:1256990",
+   "platform": "v2ex",
+   "raw_id": "topic:1256990",
+   "title": "很多火的东西，理解不了为什么火",
+   "kind": "short",
+   "text": "是不是也表示：我自己做出来的产品就不可能火，因为我的品味有问题",
+   "author": "jedeft",
+   "author_id": "427671",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1256990",
+   "published_at": 1794617917,
+   "duration": 0,
+   "like": 0,
+   "comment": 27,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "qna"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "问与答"
+   }
+  },
+  {
+   "id": "v2ex:topic:1256987",
+   "platform": "v2ex",
+   "raw_id": "topic:1256987",
+   "title": "最近做了一个运行在 iPhone 的 agent",
+   "kind": "short",
+   "text": "![图片]( https://i.imgur.com/oowI3Je.jpg)\n\n核心功能如下\n- 支持挂载本地 Linux ，远程 Linux 和沙箱运行环境，让 agent 能干活\n- 支持本地浏览器\n- 支持动态 ui 生成\n- 支持 skill ，能自动扫描远程 skill\n- 支持插件，可以在各种时机插入想要的逻辑\n- 支持定时或者地理位置触发任务\n- 最近用来给截图，视频套手机壳，管理家里的 nas ，控制智能家居等，可玩性非常高\n\ntf 内测中： https://testflight.apple.com/join/WUPfjzh2 欢迎提 bug",
+   "author": "codelover612",
+   "author_id": "601240",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1256987",
+   "published_at": 1794617228,
+   "duration": 0,
+   "like": 0,
+   "comment": 21,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "create"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "分享创造"
+   }
+  },
+  {
+   "id": "v2ex:topic:1256985",
+   "platform": "v2ex",
+   "raw_id": "topic:1256985",
+   "title": "有小孩了,想每年给小孩存一点钱,大家推荐什么",
+   "kind": "short",
+   "text": "目前给弄了个 3 年的定期存款\r\n\r\n希望有点收益,不要太大也不要冒险吧",
+   "author": "diudiuu",
+   "author_id": "1055",
+   "author_avatar": "",
+   "cover": "",
+   "images": [],
+   "url": "https://www.v2ex.com/t/1256985",
+   "published_at": 1794614682,
+   "duration": 0,
+   "like": 0,
+   "comment": 58,
+   "share": 0,
+   "view": 0,
+   "tags": [
+    "life"
+   ],
+   "fetched_at": 1794670186,
+   "extra": {
+    "node_title": "生活"
+   }
+  }
+ ]
+}

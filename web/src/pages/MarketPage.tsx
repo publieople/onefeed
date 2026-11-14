@@ -1,0 +1,165 @@
+import { useCallback, useEffect, useState } from "react";
+import { Check, Download, RefreshCw, Trash2 } from "lucide-react";
+import type { OutletCtx } from "../App";
+import { deleteJSON, getJSON, postJSON, type MarketEntry, type PluginsResponse } from "../api";
+import { KIND_LABEL } from "../platform";
+
+export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
+  const [data, setData] = useState<PluginsResponse | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+  const [note, setNote] = useState("");
+  const [reload, setReload] = useState(0);
+
+  const load = useCallback(async (force = false) => {
+    setError("");
+    try {
+      const resp = await getJSON<PluginsResponse>("/api/plugins?refresh_market=" + String(force));
+      setData(resp);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load, reload, ctx.reloadKey]);
+
+  const flash = (text: string) => {
+    setNote(text);
+    window.setTimeout(() => setNote(""), 3600);
+  };
+
+  const install = async (id: string) => {
+    setBusy(id);
+    try {
+      await postJSON("/api/plugins/" + id + "/install");
+      flash("装好了：" + id + "，刷新一下就有新来源");
+      setReload((n) => n + 1);
+    } catch (err) {
+      flash((err as Error).message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const remove = async (id: string) => {
+    setBusy(id);
+    try {
+      await deleteJSON("/api/plugins/" + id);
+      flash("已卸载：" + id);
+      setReload((n) => n + 1);
+    } catch (err) {
+      flash((err as Error).message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const entries: MarketEntry[] = data?.market.entries ?? [];
+
+  return (
+    <div className="pb-24 pt-6">
+      <div className="flex items-end gap-3">
+        <div>
+          <h1 className="text-[19px] font-semibold tracking-tight">插件市场</h1>
+          <p className="mt-1 text-[13px] text-muted">
+            宿主里没有任何平台代码。装一个插件，多一路来源；卸掉它，宿主还是这个宿主。
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            void load(true);
+            setReload((n) => n + 1);
+          }}
+          className="ml-auto flex h-9 items-center gap-1.5 rounded-full border border-line px-3.5 text-[13px] text-muted hover:border-ink/25 hover:text-ink"
+        >
+          <RefreshCw size={14} />
+          刷新目录
+        </button>
+      </div>
+
+      {data?.market.degraded ? (
+        <div className="mt-4 rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">
+          市场降级：{data.market.degraded}
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="mt-4 rounded-card border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">{error}</div>
+      ) : null}
+
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        {entries.map((entry) => (
+          <article key={entry.id} className="rounded-card border border-line p-5">
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[15px] font-semibold">{entry.name || entry.id}</h2>
+                  <span className="text-[11px] text-fade">v{entry.version}</span>
+                  {entry.update_available ? (
+                    <span className="rounded-full bg-ink px-1.5 py-0.5 text-[10px] text-white">可更新</span>
+                  ) : null}
+                  {entry.installed ? (
+                    <span className="flex items-center gap-0.5 rounded-full border border-line px-1.5 py-0.5 text-[10px] text-muted">
+                      <Check size={10} />
+                      已安装
+                    </span>
+                  ) : null}
+                </div>
+                <p className="clamp-2 mt-1.5 text-[12.5px] leading-relaxed text-muted">{entry.description}</p>
+              </div>
+              {entry.installed ? (
+                <button
+                  onClick={() => void remove(entry.id)}
+                  disabled={busy === entry.id}
+                  className="flex h-8 items-center gap-1 rounded-lg border border-line px-2.5 text-[12px] text-muted hover:border-red-200 hover:text-red-600 disabled:opacity-50"
+                >
+                  <Trash2 size={13} />
+                  卸载
+                </button>
+              ) : (
+                <button
+                  onClick={() => void install(entry.id)}
+                  disabled={busy === entry.id}
+                  className="flex h-8 items-center gap-1 rounded-lg bg-ink px-3 text-[12px] text-white disabled:opacity-50"
+                >
+                  <Download size={13} />
+                  {busy === entry.id ? "安装中" : "安装"}
+                </button>
+              )}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {entry.kinds.map((k) => (
+                <span key={k} className="rounded-full bg-wash px-2 py-0.5 text-[11px] text-muted">
+                  {KIND_LABEL[k] ?? k}
+                </span>
+              ))}
+              {entry.capabilities.map((c) => (
+                <span key={c} className="rounded-full border border-line px-2 py-0.5 text-[11px] text-fade">
+                  {c}
+                </span>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {!entries.length && !error ? (
+        <div className="mt-16 text-center text-[13px] text-muted">目录还没拉到，点右上角「刷新目录」。</div>
+      ) : null}
+
+      <p className="mt-8 text-[11.5px] leading-relaxed text-fade">
+        目录来源：{data?.market.url ?? "registry.json"}
+        {data?.market.from_cache ? "（本地缓存）" : ""}
+        。安装时会按目录里的 sha256 校验整包内容，对不上就拒绝。
+      </p>
+
+      {note ? (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-[13px] text-white shadow-pop">
+          {note}
+        </div>
+      ) : null}
+    </div>
+  );
+}

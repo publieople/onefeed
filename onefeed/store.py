@@ -72,8 +72,14 @@ STAT_COLUMNS = {"like": "like_count", "comment": "comment_count",
                 "share": "share_count", "view": "view_count"}
 JSON_COLUMNS = ("images", "tags", "extra")
 
-SORTS = {"freshness": "i.published_at DESC, i.id DESC",
-         "engagement": "(i.like_count + i.comment_count * 2 + i.share_count * 3) DESC, i.published_at DESC"}
+# 没有发布时间时（小红书首页流、知乎热榜就不给），排序按「采集时间 - 24h」估个位：
+# 真正新鲜的先上，无时间的也不会永远沉底；显示层仍然不写时间，不编造。
+FRESH_KEY = "COALESCE(NULLIF(i.published_at, 0), i.fetched_at - 86400)"
+ENGAGE_KEY = "(i.like_count + i.comment_count * 2 + i.share_count * 3)"
+
+SORTS = {"freshness": f"{FRESH_KEY} DESC, i.id DESC",
+         "engagement": f"{ENGAGE_KEY} DESC, {FRESH_KEY} DESC, i.id DESC"}
+SORT_KEYS = {"freshness": FRESH_KEY, "engagement": ENGAGE_KEY}
 
 
 def _state_root() -> Path:
@@ -89,8 +95,15 @@ def default_db_path() -> Path:
     return _state_root() / "onefeed.db"
 
 
-def encode_cursor(row: dict[str, Any]) -> str:
-    return f"{int(row.get('published_at') or 0)}|{row.get('id') or ''}"
+def sort_value(row: dict[str, Any], sort: str) -> int:
+    if sort == "engagement":
+        return (int(row.get("like_count") or 0) + int(row.get("comment_count") or 0) * 2
+                + int(row.get("share_count") or 0) * 3)
+    return int(row.get("published_at") or 0) or max(0, int(row.get("fetched_at") or 0) - 86400)
+
+
+def encode_cursor(row: dict[str, Any], sort: str = "freshness") -> str:
+    return f"{sort_value(row, sort)}|{row.get('id') or ''}"
 
 
 def decode_cursor(cursor: str | None) -> tuple[int, str] | None:
@@ -204,7 +217,8 @@ class Store:
 
     def page(self, platforms: Sequence[str] | None = None, kind: str | None = None,
              sort: str = "freshness", cursor: str | None = None,
-             limit: int = 30) -> tuple[list[dict[str, Any]], str | None]:
+             limit: int = 30, keyword: str | None = None,
+             since: int | None = None) -> tuple[list[dict[str, Any]], str | None]:
         """游标分页：返回 (rows, next_cursor)。next_cursor 为 None 表示到底了。"""
         limit = max(1, min(int(limit), 100))
         order = SORTS.get(sort, SORTS["freshness"])
@@ -216,10 +230,18 @@ class Store:
         if kind:
             where.append("i.kind = ?")
             params.append(kind)
+        if keyword:
+            kw = f"%{keyword.strip()}%"
+            where.append("(i.title LIKE ? OR i.text LIKE ? OR i.author LIKE ?)")
+            params.extend([kw, kw, kw])
+        if since:
+            where.append(f"{FRESH_KEY} >= ?")
+            params.append(int(since))
         decoded = decode_cursor(cursor)
         if decoded:
             ts, ident = decoded
-            where.append("(i.published_at < ? OR (i.published_at = ? AND i.id < ?))")
+            key = SORT_KEYS.get(sort, FRESH_KEY)
+            where.append(f"({key} < ? OR ({key} = ? AND i.id < ?))")
             params.extend([ts, ts, ident])
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         sql = f"SELECT i.* FROM items i {clause} ORDER BY {order} LIMIT ?"
@@ -229,7 +251,7 @@ class Store:
         rows = rows[:limit]
         for row in rows:
             self._decode_row(row)
-        next_cursor = encode_cursor(rows[-1]) if has_more and rows else None
+        next_cursor = encode_cursor(rows[-1], sort) if has_more and rows else None
         return rows, next_cursor
 
     @staticmethod
@@ -251,6 +273,36 @@ class Store:
         data = dict(row)
         self._decode_row(data)
         return data
+
+    def update_clusters(self, mapping: dict[str, str]) -> int:
+        """把 {item_id: cluster_id} 写回，用于 T45 的同题合并。"""
+        if not mapping:
+            return 0
+        with self._write_lock:
+            self.conn.executemany("UPDATE items SET cluster_id = ? WHERE id = ?",
+                                  [(cid, iid) for iid, cid in mapping.items()])
+            self.conn.commit()
+        return len(mapping)
+
+    def cluster_sizes(self, cluster_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
+        """给一批 cluster_id 查各自有几条、涉及哪些平台。"""
+        ids = [c for c in dict.fromkeys(cluster_ids) if c]
+        if not ids:
+            return {}
+        marks = ", ".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"SELECT cluster_id, COUNT(*) AS n, GROUP_CONCAT(platform) AS ps "
+            f"FROM items WHERE cluster_id IN ({marks}) GROUP BY cluster_id", ids).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            platforms = sorted(set(str(r["ps"] or "").split(","))) if r["ps"] else []
+            out[r["cluster_id"]] = {"size": int(r["n"]), "platforms": platforms}
+        return out
+
+    def all_titles(self) -> list[tuple[str, str, str]]:
+        """(id, platform, title)，供同题合并用。"""
+        rows = self.conn.execute("SELECT id, platform, title FROM items").fetchall()
+        return [(r["id"], r["platform"], r["title"] or "") for r in rows]
 
     def count(self, platform: str | None = None) -> int:
         if platform:

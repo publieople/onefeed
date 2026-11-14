@@ -119,7 +119,11 @@ def main() -> int:
         check(missing.json()["error"]["code"] == "item_not_found", "详情 404 错误码")
 
         # plugins / runs
-        check(len(client.get("/api/plugins").json()["installed"]) == 1, "插件列表")
+        installed = client.get("/api/plugins").json()["installed"]
+        ids = {p["id"] for p in installed}
+        # create_app 会把插件目录里真实存在的插件补进库（sync_installed），所以只断言种进去的那条还在
+        check("bilibili" in ids and next(p for p in installed if p["id"] == "bilibili")["version"] == "0.3.0",
+              "插件列表保留已存版本")
         r = client.get("/api/runs").json()["runs"]
         check(len(r) == 1 and r[0]["ok"] == 1, "轮次列表")
 

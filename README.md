@@ -61,22 +61,30 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 | v2ex | `http` | ✅ 免登录（部分网络需代理） |
 | zhihu-hot | `http` | ✅ 免登录热榜 |
 
-前端、Agent 编排、去重合并**尚未开始**，等 `specs/001-v1-core/spec.md` 的待定项定稿。
+宿主应用（`onefeed/`）已经能跑：`python -m onefeed` 起一个本地 Web 应用，六平台卡片混排、五种 kind 卡片、详情抽屉、一句话筛选、同题合并、插件市场（安装 + sha256 校验）、`--demo` 离线兜底。
+
+实测（2026-11-14，本机）：121 条 / 6 平台，首屏五种 kind（video / images / article / short / list），市场安装 `zhihu-hot` 校验通过（sha256 `1c6737d1…`），`--demo` 用 `fixtures/` 六个文件跑通。截图见 `design/app-feed.png`、`app-drawer.png`、`app-market.png`、`app-settings.png`、`app-filter.png`。
 
 ## 快速开始
 
 ```bash
 # 1) 运行时（Python 3.12）
 uv venv .venv
-uv pip install --python .venv\Scripts\python.exe quickjs playwright
+uv pip install --python .venv\Scripts\python.exe quickjs playwright fastapi uvicorn
 
 # 2) 插件工具（只装用得到的）
 uv tool install bili-agent   # B 站（xiaohongshu 插件不再需要 xhs-cli，走浏览器截接口）
 
-# 3) 拉一轮数据（插件目录指向插件仓库）
-.venv\Scripts\python.exe pull_all.py --plugins-dir ..\onefeed-plugins\plugins zhihu-hot juejin v2ex --limit 5
-.venv\Scripts\python.exe pull_all.py --plugins-dir ..\onefeed-plugins\plugins bilibili --limit 3
+# 3) 前端（改了 web/ 才需要）
+cd web && npm install && npm run build
+
+# 4) 起应用：只绑 127.0.0.1:8787，浏览器自动打开
+.venv\Scripts\python.exe -m onefeed            # 库空时自动拉一轮
+.venv\Scripts\python.exe -m onefeed --warmup   # 采集并导出 fixtures/<plugin>.json
+.venv\Scripts\python.exe -m onefeed --demo     # 断网演示：只读 fixtures，不碰网络
 ```
+
+插件目录默认取同级 `../onefeed-plugins/plugins`（可用 `ONEFEED_PLUGINS` 覆盖）；没装的插件可以去市场页一键装，下载优先 jsDelivr，GitHub API 限流也不影响。
 
 抖音插件用系统 Chrome 跑 headless 回放，首次会建持久档案；
 状态目录默认 `~/.onefeed`，不可写时自动退回仓库内 `.onefeed/`（已 gitignore），也可用 `ONEFEED_HOME` 指定。

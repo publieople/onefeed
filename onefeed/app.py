@@ -7,14 +7,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__
 from .api import router
+from .service import RefreshRunner, sync_installed
 from .store import Store
 
 WEB_DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
@@ -24,11 +25,25 @@ def create_app(store: Store | None = None) -> FastAPI:
     app = FastAPI(title="OneFeed", version=__version__, docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
     app.state.store = store or Store()
+    sync_installed(app.state.store)
+    app.state.refresher = RefreshRunner(app.state.store)
 
     app.include_router(router)
     _install_error_handlers(app)
     if WEB_DIST.is_dir():
-        app.mount("/", StaticFiles(directory=str(WEB_DIST), html=True), name="web")
+        assets = WEB_DIST / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
+
+        @app.get("/{full_path:path}")
+        def _spa(full_path: str) -> FileResponse:
+            """单页应用兜底：/market、/settings 这些前端路由都回 index.html。"""
+            if full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not Found")
+            candidate = (WEB_DIST / full_path).resolve()
+            if full_path and candidate.is_file() and WEB_DIST.resolve() in candidate.parents:
+                return FileResponse(candidate)
+            return FileResponse(WEB_DIST / "index.html")
     else:
         @app.get("/")
         def _no_web() -> dict:

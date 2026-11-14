@@ -62,7 +62,8 @@ def sample(n: int = 5) -> list[dict]:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory() as tmp:
+    # Windows 上 sqlite 句柄偶尔比 close_all 晚一步释放，清理失败不该让检查挂掉
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         db = Path(tmp) / "test.db"
         store = Store(db)
 
@@ -110,10 +111,13 @@ def main() -> int:
         none, _ = store.page(platforms=["nope"], limit=10)
         check(none == [], "不存在的平台返回空")
 
-        # published_at 缺失沉底
+        # published_at 缺失：排序退回采集时间，但字段本身仍是 0（显示层不编时间）
         store.upsert_items([{"id": "demo:noTime", "platform": "demo", "kind": "list", "title": "无时间"}])
-        tail, _ = store.page(limit=10)
-        check(tail[-1]["id"] == "demo:noTime", "缺 time 的条目排在最后")
+        page_all, _ = store.page(limit=10)
+        no_time = next(r for r in page_all if r["id"] == "demo:noTime")
+        check(no_time["published_at"] == 0, "缺 time 的条目 published_at 保持 0")
+        check(any(r["id"] == "demo:noTime" for r in page_all), "缺 time 的条目不会被丢")
+        check(page_all.index(no_time) > 0, "缺 time 的条目按采集时间估算排位、不抢最新")
 
         # runs
         run_id = store.start_run("demo")
@@ -141,7 +145,15 @@ def main() -> int:
         stats = {r["platform"]: r["count"] for r in store.platforms()}
         check(stats.get("demo") == 6, "平台统计条数")
 
-        store.close()
+        store.close_all()
+        # Windows 上偶尔还有句柄没释放，删不掉就重试几次（不影响检查结果）
+        for leftover in (db, Path(str(db) + "-wal"), Path(str(db) + "-shm")):
+            for _ in range(10):
+                try:
+                    leftover.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    time.sleep(0.2)
 
     print(f"T29 通过：{CHECKS} 项检查")
     return 0

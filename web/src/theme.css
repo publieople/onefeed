@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #14161a;
+  --muted: #6b7280;
+  --faint: #9aa1ab;
+  --line: #e9eaec;
+  --wash: #f7f8f9;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #fff;
+  color: var(--ink);
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+}
+
+.hairline {
+  border-color: var(--line);
+}
+
+.thumb {
+  position: relative;
+  overflow: hidden;
+  background: var(--wash);
+}
+
+.thumb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--ph, linear-gradient(135deg, #e9eaec, #f7f8f9));
+}
+
+.thumb > * {
+  position: relative;
+}
+
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #dcdde0;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

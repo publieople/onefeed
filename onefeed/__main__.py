@@ -61,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=int(os.environ.get("ONEFEED_PORT", DEFAULT_PORT)))
     parser.add_argument("--host", default=os.environ.get("ONEFEED_HOST", DEFAULT_HOST))
     parser.add_argument("--demo", action="store_true", help="零网络演示模式（读本地样例）")
+    parser.add_argument("--warmup", action="store_true", help="采集一轮并写入 fixtures/，供 --demo 使用")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     args = parser.parse_args(argv)
 
@@ -82,9 +83,17 @@ def main(argv: list[str] | None = None) -> int:
     from .app import create_app
 
     app = create_app()
+    store = app.state.store
+    refresher = app.state.refresher
+    if args.warmup:
+        ok, _state = refresher.trigger(warmup=True)
+        print(f"  预热采集{'已启动' if ok else '没启动（可能正在跑）'}：结果写进 fixtures/", flush=True)
+    elif store.count() == 0 or args.demo:
+        refresher.trigger()
+        print("  库里还没有内容，已在后台拉一轮（进度看页面上的刷新条）", flush=True)
     url = f"http://{args.host}:{args.port}"
     print(f"OneFeed {__version__}  →  {url}", flush=True)
-    print(f"  条目 {app.state.store.count()} 条 · 插件 {len(app.state.store.list_plugins())} 个"
+    print(f"  条目 {store.count()} 条 · 插件 {len(store.list_plugins())} 个"
           f"{' · DEMO 模式' if args.demo else ''}", flush=True)
     print("  Ctrl+C 退出", flush=True)
 
