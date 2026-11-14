@@ -42,6 +42,11 @@ OneFeed 把各平台的**个人信息流**拉到一个本地面板里：
 3. **责任边界清楚**：宿主是播放器，插件是内容源。
 
 插件规范见 [`specs/002-plugin-arch/spec.md`](specs/002-plugin-arch/spec.md)（完整版）与插件仓库的 `SPEC.md`（公开版）。
+插件市场清单（订阅地址）：
+
+```
+https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
+```
 
 ## 当前状态
 
