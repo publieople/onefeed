@@ -8,8 +8,8 @@
 
 - [x] **T29 SQLite 存储层**（P0）— `onefeed/store.py`：按 003 plan §3 建表，`PRAGMA user_version` 迁移，items upsert，分页查询（published_at + id 游标），runs / plugins 表读写。
   验收：`python tests/test_store.py --verbose`（24 项检查）+ `python tests/test_store_real.py`（真实插件数据落库往返）｜ 2026-11-14
-- [ ] **T30 只读 API**（P0，依赖 T29）— `onefeed/api.py` + `app.py`：GET /api/feed（platform/kind/sort/cursor/limit）、GET /api/item/{id}、GET /api/health；错误体统一 `{error:{code,message,hint}}`。
-  验收：`curl 127.0.0.1:8787/api/feed?limit=3` 返回 3 条；`/api/item/<不存在>` 返回 404 + hint。
+- [x] **T30 只读 API**（P0，依赖 T29）— `onefeed/api.py` + `app.py`：GET /api/feed（platform/kind/sort/cursor/limit）、GET /api/item/{id}、GET /api/health、/api/plugins、/api/runs；错误体统一 `{error:{code,message,hint}}`；dist 存在时 StaticFiles 挂 /。
+  验收：`python tests/test_api.py`（25 项检查，含 422 bad_sort、404 item_not_found、两页拼接不重不漏）｜ 2026-11-14
 - [ ] **T31 单命令入口**（P0，依赖 T30）— `onefeed/__main__.py`：`python -m onefeed`、`--demo`、`--no-browser`、`--port`；端口占用显式报错并给排查命令；启动后 800ms 再开浏览器。
   验收：连开两次，第二次报「8787 被占用（PID xxxx）」，不静默换端口。
 - [ ] **T32 前端脚手架**（P0，与 T31 并行）— `web/`：Vite + React + TS + Tailwind；`npm run build` 产物 dist/ 由 FastAPI StaticFiles 挂 /；开发态 `vite proxy` 到 8787。
