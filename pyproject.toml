@@ -1,0 +1,26 @@
+[project]
+name = "onefeed"
+version = "0.3.0.dev0"
+description = "本地优先的多平台信息流宿主：插件采集，统一卡片呈现"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "quickjs>=1.19",
+    "playwright>=1.45",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+]
+
+[tool.uv]
+# 仓库根目录就是工作目录，onefeed/ 与 plugin_runtime/ 直接可 import，
+# 不需要构建 wheel，所以按虚拟项目（virtual project）管理。
+package = false
+
+# 验收脚本自带 main()，用退出码判定；跑法：
+#   uv run python tests/run_all.py [--offline]

@@ -67,22 +67,29 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 
 ## 快速开始
 
+环境用 **uv** 管理：依赖写在 `pyproject.toml`（fastapi / uvicorn / quickjs / playwright，dev 组加 httpx），`uv.lock` 锁版本，`.python-version` 钉 3.12。
+
 ```bash
-# 1) 运行时（Python 3.12）
-uv venv .venv
-uv pip install --python .venv\Scripts\python.exe quickjs playwright fastapi uvicorn
+# 1) 建环境装依赖（Python 3.12，自动读 .python-version）
+uv sync
 
 # 2) 插件工具（只装用得到的）
 uv tool install bili-agent   # B 站（xiaohongshu 插件不再需要 xhs-cli，走浏览器截接口）
 
-# 3) 前端（改了 web/ 才需要）
-cd web && npm install && npm run build
+# 3) 前端（改了 web/ 才需要；dist 已入库，不改前端可跳过）
+cd web && npm install && npm run build && cd ..
 
 # 4) 起应用：只绑 127.0.0.1:8787，浏览器自动打开
-.venv\Scripts\python.exe -m onefeed            # 库空时自动拉一轮
-.venv\Scripts\python.exe -m onefeed --warmup   # 采集并导出 fixtures/<plugin>.json
-.venv\Scripts\python.exe -m onefeed --demo     # 断网演示：只读 fixtures，不碰网络
+uv run python -m onefeed            # 库空时自动拉一轮
+uv run python -m onefeed --warmup   # 采集并导出 fixtures/<plugin>.json
+uv run python -m onefeed --demo     # 断网演示：只读 fixtures，不碰网络
+
+# 5) 验收
+uv run python tests/run_all.py            # 五项全跑（含联网的 real / e2e）
+uv run python tests/run_all.py --offline  # 跳过联网用例
 ```
+
+新增依赖用 `uv add <pkg>`、只在测试用就 `uv add --dev <pkg>`，改完把 `uv.lock` 一起提交。
 
 插件目录默认取同级 `../onefeed-plugins/plugins`（可用 `ONEFEED_PLUGINS` 覆盖）；没装的插件可以去市场页一键装，下载优先 jsDelivr，GitHub API 限流也不影响。
 
@@ -110,6 +117,8 @@ onefeed/
 │   ├── 001-v1-core/       产品规格 / 技术方案 / 任务清单
 │   └── 002-plugin-arch/   插件架构提案（manifest / 生命周期 / 呈现规范 / 风险边界）
 ├── docs/                  调研记录（抖音 feed 机制、平台开放度普查）
+├── web/                   前端（Vite + React + TS，dist 已入库）
+├── tests/                 验收脚本，入口 run_all.py
 ├── probes/                一次性探针脚本，历史留档
 └── pull_all.py            多平台试跑入口
 ```
