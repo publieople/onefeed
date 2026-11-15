@@ -13,11 +13,12 @@ interface Props {
 
 export default function FeedPage({ ctx }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
-  const [sort, setSort] = useState("freshness");
+  const [sort, setSort] = useState("");
   const [q, setQ] = useState("");
   const [drawer, setDrawer] = useState<string | null>(null);
 
-  const query = useMemo(() => ({ platforms: selected, kind: "", sort, q }), [selected, sort, q]);
+  const activeSort = sort || ctx.settings?.settings.default_sort || "freshness";
+  const query = useMemo(() => ({ platforms: selected, kind: "", sort: activeSort, q }), [selected, activeSort, q]);
   const feed = useFeed(query, ctx.reloadKey);
   const active = selected.length > 0 || q.trim().length > 0;
 
@@ -58,7 +59,7 @@ export default function FeedPage({ ctx }: Props) {
               onClick={() => setSort(s.id)}
               className={
                 "rounded-full px-2.5 py-1 transition " +
-                (sort === s.id ? "bg-ink text-white" : "text-muted hover:text-ink")
+                (activeSort === s.id ? "bg-ink text-white" : "text-muted hover:text-ink")
               }
             >
               {s.label}
@@ -127,7 +128,7 @@ export default function FeedPage({ ctx }: Props) {
               : "点右上角刷新，或者先到插件市场装两个来源。"}
           </p>
           <button onClick={ctx.refresh} className="mt-4 rounded-lg bg-ink px-4 py-2 text-[13px] text-white">
-            刷新六个平台
+            现在刷新一轮
           </button>
         </div>
       ) : null}

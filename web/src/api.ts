@@ -75,9 +75,22 @@ export interface MarketEntry {
   update_available: boolean;
 }
 
+export interface InstalledPlugin {
+  id: string;
+  version: string;
+  enabled: number;
+  source: string;
+  name?: string;
+  description?: string;
+  capabilities?: string[];
+  features?: string[];
+}
+
 export interface PluginsResponse {
-  installed: { id: string; version: string; enabled: number; source: string }[];
+  installed: InstalledPlugin[];
   market: { entries: MarketEntry[]; degraded: string; from_cache: boolean; url: string };
+  plugins_dir?: string;
+  errors?: string[];
 }
 
 export interface AuthState {
@@ -85,6 +98,61 @@ export interface AuthState {
   state: "not_required" | "available" | "need_login" | "error";
   message?: string;
   hint?: string;
+  can_login?: boolean;
+  cli?: boolean;
+  label?: string;
+  login_url?: string;
+  impact?: string;
+  command?: string;
+  cookies?: number;
+}
+
+export interface LoginStatus {
+  plugin: string;
+  state: "idle" | "opened" | "waiting" | "ok" | "closed" | "error";
+  message?: string;
+  cookies?: number;
+  url?: string;
+  port?: number;
+  cookie?: string;
+}
+
+export interface SettingsValues {
+  plugins_dir: string;
+  registry_url: string;
+  per_plugin_limit: number;
+  comments_limit: number;
+  default_sort: string;
+  prune_days: number;
+}
+
+export interface SettingsResponse {
+  settings: SettingsValues;
+  resolved: { plugins_dir: string; registry_url: string; state_dir?: string };
+  defaults: SettingsValues;
+  sorts: string[];
+}
+
+export interface CommentItem {
+  id: string;
+  author: string;
+  author_id?: string;
+  text: string;
+  like_count?: number;
+  reply_count?: number;
+  created_at?: number;
+  replies?: CommentItem[];
+}
+
+export interface CommentsResponse {
+  supported: boolean;
+  items: CommentItem[];
+  count: number;
+  limit?: number;
+  reason?: string;
+  hint?: string;
+  error?: string;
+  from_cache?: boolean;
 }
 
 export interface Health {
@@ -132,6 +200,24 @@ export async function postJSON<T>(path: string, body: unknown = {}): Promise<T> 
     throw new ApiError(data?.detail?.message ?? `请求失败（${resp.status}）`);
   }
   return data as T;
+}
+
+export async function putJSON<T>(path: string, body: unknown = {}): Promise<T> {
+  const resp = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new ApiError(data?.detail?.message ?? body2message(data) ?? `请求失败（${resp.status}）`);
+  }
+  return data as T;
+}
+
+function body2message(data: unknown): string | undefined {
+  const d = data as { error?: { message?: string } } | undefined;
+  return d?.error?.message;
 }
 
 export async function deleteJSON<T>(path: string): Promise<T> {

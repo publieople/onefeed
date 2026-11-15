@@ -5,13 +5,16 @@ import ProgressBar from "./components/ProgressBar";
 import FeedPage from "./pages/FeedPage";
 import MarketPage from "./pages/MarketPage";
 import SettingsPage from "./pages/SettingsPage";
-import { getJSON, postJSON, type Health, type RunState, type Summary } from "./api";
+import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, type Summary } from "./api";
 
 export interface OutletCtx {
   progress: RunState | null;
   reloadKey: number;
   refresh: () => void;
   summary: Summary | null;
+  settings: SettingsResponse | null;
+  reloadSettings: () => Promise<void>;
+  bump: () => void;
 }
 
 const IDLE: RunState = {
@@ -29,8 +32,21 @@ export default function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [toast, setToast] = useState("");
   const wasRunning = useRef(false);
+
+  const reloadSettings = useCallback(async () => {
+    try {
+      setSettings(await getJSON<SettingsResponse>("/api/settings"));
+    } catch {
+      /* 设置读不到不阻塞信息流 */
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadSettings();
+  }, [reloadSettings]);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -82,7 +98,13 @@ export default function App() {
     window.setTimeout(() => setToast(""), 3200);
   }, []);
 
-  const ctx: OutletCtx = { progress, reloadKey, refresh, summary };
+  const bump = useCallback(() => {
+    setReloadKey((k) => k + 1);
+    void loadSummary();
+    void reloadSettings();
+  }, [loadSummary, reloadSettings]);
+
+  const ctx: OutletCtx = { progress, reloadKey, refresh, summary, settings, reloadSettings, bump };
 
   return (
     <div className="min-h-screen bg-paper">

@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ExternalLink, Heart, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Heart, MessageCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getJSON, type FeedItem } from "../api";
+import { getJSON, type CommentItem, type CommentsResponse, type FeedItem } from "../api";
 import { KIND_LABEL, platform } from "../platform";
 import { num, timeAgo } from "../format";
 
@@ -10,9 +10,60 @@ interface Detail {
   siblings: { id: string; platform: string; title: string; author: string; url: string; published_at: number }[];
 }
 
+const VIEW_LABEL: Record<string, string> = {
+  video: "播放",
+  article: "阅读",
+  images: "浏览",
+  short: "浏览",
+  list: "热度",
+};
+
+function CommentBody({ comment }: { comment: CommentItem }) {
+  const p = "#6b7280";
+  return (
+    <div className="flex gap-2.5">
+      <span
+        className="mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[10px] font-medium text-white"
+        style={{ background: p }}
+      >
+        {(comment.author || "?").slice(0, 1)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 text-[12px]">
+          <span className="truncate font-medium">{comment.author || "匿名"}</span>
+          {comment.created_at ? <span className="text-[11px] text-fade">{timeAgo(comment.created_at)}</span> : null}
+          {comment.like_count ? (
+            <span className="ml-auto flex items-center gap-1 text-[11px] text-fade">
+              <Heart size={10} />
+              {num(comment.like_count)}
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1 whitespace-pre-wrap text-[12.5px] leading-[1.75] text-muted">{comment.text}</p>
+        {comment.replies?.length ? (
+          <div className="mt-2 space-y-2 border-l border-line pl-3">
+            {comment.replies.slice(0, 3).map((r) => (
+              <div key={r.id}>
+                <div className="text-[11.5px] font-medium">
+                  {r.author || "匿名"}
+                  {r.created_at ? <span className="ml-2 font-normal text-fade">{timeAgo(r.created_at)}</span> : null}
+                </div>
+                <p className="mt-0.5 whitespace-pre-wrap text-[12px] leading-[1.7] text-muted">{r.text}</p>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function Drawer({ id, onClose }: { id: string | null; onClose: () => void }) {
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState("");
+  const [comments, setComments] = useState<CommentsResponse | null>(null);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -28,6 +79,30 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
   }, [id]);
 
   useEffect(() => {
+    if (!id) {
+      setComments(null);
+      return;
+    }
+    let alive = true;
+    setComments(null);
+    setCommentsLoading(true);
+    setCopied(false);
+    getJSON<CommentsResponse>("/api/item/" + encodeURIComponent(id) + "/comments?limit=20")
+      .then((d) => {
+        if (alive) setComments(d);
+      })
+      .catch((err: Error) => {
+        if (alive) setComments({ supported: true, items: [], count: 0, error: err.message });
+      })
+      .finally(() => {
+        if (alive) setCommentsLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -38,22 +113,33 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
   const item = data?.item;
   const stats = item
     ? [
-        { label: "播放", value: item.view_count },
+        { label: VIEW_LABEL[item.kind] ?? "浏览", value: item.view_count },
         { label: "点赞", value: item.like_count },
         { label: "评论", value: item.comment_count },
         { label: "分享", value: item.share_count },
       ].filter((s) => s.value > 0)
     : [];
 
+  const copyLink = async () => {
+    if (!item) return;
+    try {
+      await navigator.clipboard.writeText(item.url);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = item.url;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <AnimatePresence>
       {id ? (
-        <motion.div
-          className="fixed inset-0 z-40"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
+        <motion.div className="fixed inset-0 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <div className="absolute inset-0 bg-black/25" onClick={onClose} />
           <motion.aside
             className="absolute right-0 top-0 flex h-full w-full max-w-[480px] flex-col overflow-y-auto bg-white shadow-pop"
@@ -63,17 +149,13 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
             transition={{ type: "tween", duration: 0.22 }}
           >
             {!item ? (
-              <div className="flex h-full items-center justify-center text-[13px] text-fade">
-                {error ? "加载失败：" + error : "加载中…"}
-              </div>
+              <div className="flex h-full items-center justify-center text-[13px] text-fade">{error ? "加载失败：" + error : "加载中…"}</div>
             ) : (
               <div className="p-7">
                 <div className="flex items-center gap-2 text-[12px] text-muted">
                   <span className="h-[7px] w-[7px] rounded-full" style={{ background: platform(item.platform).tint }} />
-                  {platform(item.platform).label}
-                  <span className="rounded border border-line px-1.5 py-0.5 text-[11px] text-fade">
-                    {KIND_LABEL[item.kind] ?? item.kind}
-                  </span>
+                  <span style={{ color: platform(item.platform).tint }}>{platform(item.platform).label}</span>
+                  <span className="rounded border border-line px-1.5 py-0.5 text-[11px] text-fade">{KIND_LABEL[item.kind] ?? item.kind}</span>
                   <button onClick={onClose} className="ml-auto rounded-full p-1 text-fade hover:bg-wash hover:text-ink">
                     <X size={17} />
                   </button>
@@ -86,23 +168,10 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
                   <span className="text-fade">{timeAgo(item.published_at)}</span>
                 </div>
 
-                {item.cover ? (
-                  <img
-                    src={item.cover}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    className="mt-4 w-full rounded-lg object-cover"
-                  />
-                ) : null}
+                {item.cover ? <img src={item.cover} alt="" referrerPolicy="no-referrer" className="mt-4 w-full rounded-lg object-cover" /> : null}
 
                 {item.images.map((src) => (
-                  <img
-                    key={src}
-                    src={src}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    className="mt-2 w-full rounded-lg object-cover"
-                  />
+                  <img key={src} src={src} alt="" referrerPolicy="no-referrer" className="mt-2 w-full rounded-lg object-cover" />
                 ))}
 
                 {stats.length ? (
@@ -116,9 +185,7 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
                   </div>
                 ) : null}
 
-                {item.text ? (
-                  <p className="mt-4 whitespace-pre-wrap text-[13px] leading-[1.85] text-muted">{item.text}</p>
-                ) : null}
+                {item.text ? <p className="mt-4 whitespace-pre-wrap text-[13px] leading-[1.85] text-muted">{item.text}</p> : null}
 
                 {item.tags?.length ? (
                   <div className="mt-4 flex flex-wrap gap-1.5">
@@ -157,11 +224,57 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
                     去 {platform(item.platform).label} 看原帖
                     <ExternalLink size={13} />
                   </a>
-                  <button className="flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line px-4 text-[13px] text-muted hover:border-ink/25 hover:text-ink">
-                    <Heart size={14} />
-                    收藏
+                  <button
+                    onClick={() => void copyLink()}
+                    className="flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line px-4 text-[13px] text-muted hover:border-ink/25 hover:text-ink"
+                  >
+                    {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                    {copied ? "已复制" : "复制链接"}
                   </button>
                 </div>
+
+                <section className="mt-6 border-t border-line pt-4">
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5 text-[13px] font-semibold">
+                      <MessageCircle size={13} className="text-muted" />
+                      评论
+                    </span>
+                    {comments?.supported && comments.count > 0 ? (
+                      <span className="text-[11px] text-fade">{comments.count} 条</span>
+                    ) : null}
+                    {comments?.from_cache ? <span className="text-[10.5px] text-fade">缓存</span> : null}
+                  </div>
+
+                  {commentsLoading ? (
+                    <div className="mt-3 space-y-3">
+                      {[0, 1, 2].map((i) => (
+                        <div key={i} className="animate-pulse space-y-2">
+                          <div className="h-3 w-1/4 rounded bg-wash" />
+                          <div className="h-3 w-11/12 rounded bg-wash" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : !comments ? null : !comments.supported ? (
+                    <p className="mt-2 rounded-lg bg-wash px-3 py-2.5 text-[12px] leading-relaxed text-muted">
+                      {comments.reason || "这个平台的插件没有提供评论接口。"}
+                      {comments.hint ? <span className="mt-1 block text-[11px] text-fade">{comments.hint}</span> : null}
+                    </p>
+                  ) : comments.error ? (
+                    <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-700">
+                      评论没取到：{comments.error}
+                    </p>
+                  ) : comments.items.length === 0 ? (
+                    <p className="mt-2 text-[12px] text-fade">暂时没取到评论。</p>
+                  ) : (
+                    <ul className="mt-3 space-y-4">
+                      {comments.items.map((c) => (
+                        <li key={c.id}>
+                          <CommentBody comment={c} />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
               </div>
             )}
           </motion.aside>
