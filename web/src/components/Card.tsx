@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { Heart, MessageCircle, Play } from "lucide-react";
+import { FileText, Heart, Image as ImageIcon, MessageCircle, Play } from "lucide-react";
 import type { FeedItem } from "../api";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
@@ -32,25 +32,36 @@ function PlatformTag({ item }: { item: FeedItem }) {
   );
 }
 
+/** 没有封面 / 封面加载失败时的占位：一眼能看出「这里本来就没图」，不像坏图。 */
+function NoThumb({ item, className = "" }: { item: FeedItem; className?: string }) {
+  const p = platform(item.platform);
+  const Icon = item.kind === "video" ? Play : item.kind === "images" ? ImageIcon : FileText;
+  return (
+    <div
+      className={"flex h-full w-full flex-col items-center justify-center gap-1.5 border border-dashed border-line bg-wash " + className}
+    >
+      <Icon size={16} className="text-fade" />
+      <span className="text-[10.5px] tracking-wide text-fade">无封面 · {p.label}</span>
+    </div>
+  );
+}
+
 function Cover({ item, rounded = "rounded-lg" }: { item: FeedItem; rounded?: string }) {
   return (
-    <div className={"thumb relative w-full aspect-video overflow-hidden " + rounded} style={ph(platform(item.platform).tint)}>
+    <div className={"relative w-full aspect-video overflow-hidden " + rounded + " bg-wash"}>
+      <NoThumb item={item} />
       {item.cover ? (
         <img
           src={item.cover}
           alt=""
           loading="lazy"
           referrerPolicy="no-referrer"
-          className="h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover"
           onError={(e) => {
             (e.currentTarget as HTMLImageElement).style.display = "none";
           }}
         />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-[11px] tracking-wide text-white/75">
-          {platform(item.platform).label}
-        </div>
-      )}
+      ) : null}
       {item.kind === "video" ? (
         <span className="absolute inset-0 flex items-center justify-center">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/35 backdrop-blur-sm">
@@ -79,13 +90,14 @@ function ImageGrid({ item }: { item: FeedItem }) {
     <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-wash">
       <div className={"grid h-full w-full gap-1 " + cols}>
         {pics.map((src, i) => (
-          <div key={src + i} className="thumb relative h-full w-full overflow-hidden" style={ph(platform(item.platform).tint, 0.82 - i * 0.12)}>
+          <div key={src + i} className="relative h-full w-full overflow-hidden rounded-[4px] bg-wash">
+            <NoThumb item={item} />
             <img
               src={src}
               alt=""
               loading="lazy"
               referrerPolicy="no-referrer"
-              className="h-full w-full object-cover"
+              className="absolute inset-0 h-full w-full object-cover"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
@@ -123,11 +135,10 @@ function RankBand({ item }: { item: FeedItem }) {
 
 function Media({ item }: { item: FeedItem }) {
   if (item.kind === "list") return <RankBand item={item} />;
-  if (item.kind === "images" && item.images.length) return <ImageGrid item={item} />;
   if (item.kind === "short") return null;
-  if (item.kind === "article" && !item.cover) return null;
-  if (item.cover) return <Cover item={item} />;
   if (item.images.length) return <ImageGrid item={item} />;
+  if (item.kind === "video") return <Cover item={item} />; // 没封面也留位置，卡片高度才一致
+  if (item.cover) return <Cover item={item} />;
   return null;
 }
 

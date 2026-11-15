@@ -71,8 +71,10 @@ export interface MarketEntry {
   capabilities: string[];
   installed: boolean;
   installed_version: string;
+  latest_version?: string;
   enabled: boolean;
   update_available: boolean;
+  features?: string[];
 }
 
 export interface InstalledPlugin {
@@ -124,6 +126,7 @@ export interface SettingsValues {
   comments_limit: number;
   default_sort: string;
   prune_days: number;
+  auto_update: boolean;
 }
 
 export interface SettingsResponse {

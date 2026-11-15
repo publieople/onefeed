@@ -305,6 +305,21 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
               </label>
             </div>
 
+            <label className="flex items-start gap-2.5 rounded-lg border border-line px-3.5 py-3">
+              <input
+                type="checkbox"
+                checked={form.auto_update}
+                onChange={(e) => setForm({ ...form, auto_update: e.target.checked })}
+                className="mt-0.5 h-4 w-4 accent-black"
+              />
+              <span>
+                <span className="text-[12.5px] font-medium">每轮采集前自动更新插件</span>
+                <span className="mt-0.5 block text-[11px] leading-relaxed text-fade">
+                  开着就每轮先查一次市场，有新版直接换上（走 sha256 校验）。现场演示建议关掉，别让远端在你讲的时候改代码。
+                </span>
+              </span>
+            </label>
+
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={() => void saveSettings()}
