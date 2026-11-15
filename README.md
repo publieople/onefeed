@@ -61,11 +61,11 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 | v2ex | `http` | ✅ 免登录（部分网络需代理） |
 | zhihu-hot | `http` | ✅ 免登录热榜 |
 
-宿主应用（`onefeed/`）已经能跑：`python -m onefeed` 起一个本地 Web 应用，六平台卡片混排、五种 kind 卡片、详情抽屉（含插件评论区）、一句话筛选、同题合并、插件市场（安装 / 卸载 / sha256 校验）、设置页、登录窗口、`--demo` 离线兜底。
+宿主应用（`onefeed/`）已经能跑：`python -m onefeed` 起一个本地 Web 应用，六平台卡片混排、五种 kind 卡片、详情抽屉（含插件评论区）、一句话筛选、同题合并、插件市场（安装 / 卸载 / 更新 / 自动更新 / sha256 校验）、设置页、登录窗口、`--demo` 离线兜底。
 
-实测（2026-11-15，本机，端口 8788）：195 条 / 6 平台；卡片统一成「平台标签 + kind + 时间 / 媒体 / 标题 / 摘要 / 作者 + 互动」，短卡片不再留大片空白；B 站抽屉能拉到 20 条真实评论（楼中楼 3 层内）；设置页可改插件目录、registry、每轮条数、评论条数、默认排序、保留天数，保存即生效；`8787` 被别的程序占用时自动改用 `8788` 并在启动日志里说明。
+实测（2026-11-15 21:00，本机，端口 8791）：275 条 / 6 平台；卡片统一成「平台标签 + kind + 时间 / 媒体 / 标题 / 摘要 / 作者 + 互动」，缺封面走虚线占位块而不是假装加载失败；B 站抽屉能拉到 20 条真实评论（楼中楼 3 层内）；市场页能把 B 站 0.1.0 一键更新到 0.2.0；热度排序按平台内分位归一，六个平台都能上榜首；设置页可改插件目录、registry、每轮条数、评论条数、默认排序、保留天数与自动更新，保存即生效；`8787` 被别的程序占用时自动改用 `8788` 并在启动日志里说明。
 
-截图：`design/ui-feed.png`（信息流）、`design/ui-drawer.png`（详情 + 评论）、`design/ui-settings.png` / `design/ui-settings-full.png`（设置页）。
+截图：`design/ui-feed.png`（信息流）、`design/ui-drawer.png`（详情 + 评论）、`design/ui-settings.png` / `design/ui-settings-full.png`（设置页）、`design/ui-market.png` / `design/ui-market-after.png`（市场更新前后）。
 
 ## 快速开始
 
@@ -87,7 +87,7 @@ uv run python -m onefeed --warmup   # 采集并导出 fixtures/<plugin>.json
 uv run python -m onefeed --demo     # 断网演示：只读 fixtures，不碰网络
 
 # 5) 验收
-uv run python tests/run_all.py            # 七项全跑（含联网的 real / e2e）
+uv run python tests/run_all.py            # 八项全跑（含联网的 real / e2e）
 uv run python tests/run_all.py --offline  # 跳过联网用例
 ```
 
@@ -115,6 +115,12 @@ B 站不弹窗：它的登录态由本机 `bili` CLI 管，设置页只给你一
 并实现 `comments(item, opts)`，详情抽屉就会去拉评论；没声明的平台（掘金 / V2EX / 知乎 / 抖音）
 会明确写「这个平台的插件没有提供评论接口」，而不是转圈或报错。
 
+**插件市场能更新**：市场页把 registry 版本和已装版本比一下，新的才显示 `v0.1.0 → v0.2.0` 和「更新」；
+顶部「全部更新 (N)」一次升完，单个失败不影响其它。设置页的 `auto_update` 开着时，每轮采集前先查一遍市场
+（默认**关**：现场演示不让远端静默换插件）。下载缓存按「插件 + 期望 sha」分开存，registry 发了新版不会命中旧包。
+
+**热度怎么算**：跨平台比绝对点赞数没意义，所以每个条目按「同平台内的分位」归一成 0–1000（`engage_score`），
+「按热度」排序和抽屉里的「B 站同类里前 28%」都读这个值；平台内全是 0 就记 0，免得 0 值平台并列满分。
 ## 目录
 
 ```
@@ -129,7 +135,8 @@ onefeed/
 ├── specs/                 规格（唯一事实来源）
 │   ├── 000-constitution.md
 │   ├── 001-v1-core/       产品规格 / 技术方案 / 任务清单
-│   └── 002-plugin-arch/   插件架构提案（manifest / 生命周期 / 呈现规范 / 风险边界）
+│   ├── 002-plugin-arch/   插件架构提案（manifest / 生命周期 / 呈现规范 / 风险边界）
+│   └── 003-host-app/      宿主应用规格（API 契约 / 分层 / T29–T53 任务）
 ├── onefeed/               宿主应用本体
 │   ├── app.py             FastAPI 装配（静态前端 + 插件目录解析）
 │   ├── api.py             只读 API + 插件市场 + 登录 + 设置
@@ -140,7 +147,7 @@ onefeed/
 │   ├── market.py          registry 拉取 / 下载 / sha256 校验 / 安装
 │   ├── smart.py           同题聚类、一句话筛选、推荐理由
 │   └── demo.py            --demo 的离线 fixtures 装载
-├── docs/                  调研记录（抖音 feed 机制、平台开放度普查）
+├── docs/                  调研记录（抖音 feed 机制、平台开放度普查、STATUS-2026-11-15 现状盘点）
 ├── design/                视觉稿与实机截图
 ├── web/                   前端（Vite + React + TS，dist 已入库）
 ├── tests/                 验收脚本，入口 run_all.py
