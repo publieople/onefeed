@@ -110,6 +110,16 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // 抽屉打开时锁住背后的页面，不然滚轮会把下面的列表带着滚。
+  useEffect(() => {
+    if (!id) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [id]);
+
   const item = data?.item;
   const stats = item
     ? [
@@ -153,13 +163,32 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
             ) : (
               <div className="p-7">
                 <div className="flex items-center gap-2 text-[12px] text-muted">
-                  <span className="h-[7px] w-[7px] rounded-full" style={{ background: platform(item.platform).tint }} />
-                  <span style={{ color: platform(item.platform).tint }}>{platform(item.platform).label}</span>
+                  <span
+                    className="inline-flex h-[18px] items-center rounded-full px-1.5 text-[11px] font-medium leading-none text-white"
+                    style={{ background: platform(item.platform).tint }}
+                  >
+                    {platform(item.platform).label}
+                  </span>
                   <span className="rounded border border-line px-1.5 py-0.5 text-[11px] text-fade">{KIND_LABEL[item.kind] ?? item.kind}</span>
                   <button onClick={onClose} className="ml-auto rounded-full p-1 text-fade hover:bg-wash hover:text-ink">
                     <X size={17} />
                   </button>
                 </div>
+
+                {data?.item.reasons?.length || (data?.item.cluster_size ?? 0) > 1 ? (
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {(data?.item.reasons ?? []).slice(0, 3).map((r) => (
+                      <span key={r} className="rounded-full border border-line bg-wash px-2 py-0.5 text-[11px] text-muted">
+                        {r}
+                      </span>
+                    ))}
+                    {(data?.item.cluster_size ?? 0) > 1 ? (
+                      <span className="rounded-full bg-wash px-2 py-0.5 text-[11px] text-muted">
+                        {data?.item.cluster_size} 个平台同题
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <h2 className="mt-3 text-[21px] font-semibold leading-[1.4] tracking-tight">{item.title}</h2>
                 <div className="mt-2 flex items-center gap-2 text-[12px] text-muted">

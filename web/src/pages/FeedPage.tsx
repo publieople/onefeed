@@ -14,17 +14,32 @@ interface Props {
 export default function FeedPage({ ctx }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [sort, setSort] = useState("");
+  const [range, setRange] = useState<"all" | "today">("all");
   const [q, setQ] = useState("");
   const [drawer, setDrawer] = useState<string | null>(null);
 
   const activeSort = sort || ctx.settings?.settings.default_sort || "freshness";
-  const query = useMemo(() => ({ platforms: selected, kind: "", sort: activeSort, q }), [selected, activeSort, q]);
+  const since = useMemo(() => {
+    if (range !== "today") return null;
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return Math.floor(d.getTime() / 1000);
+  }, [range]);
+  const query = useMemo(
+    () => ({ platforms: selected, kind: "", sort: activeSort, q, since }),
+    [selected, activeSort, q, since],
+  );
   const feed = useFeed(query, ctx.reloadKey);
   const active = selected.length > 0 || q.trim().length > 0;
 
   useEffect(() => {
     document.title = ctx.summary?.total ? "OneFeed · " + ctx.summary.total + " 条" : "OneFeed";
   }, [ctx.summary?.total]);
+
+  // 换排序或换筛选等于换了一屏内容，停在原来的滚动位置会莫名其妙。
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [activeSort, selected.join(","), q, range]);
 
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -47,8 +62,22 @@ export default function FeedPage({ ctx }: Props) {
 
   return (
     <div className="pb-24">
-      <section className="flex items-center gap-3 pt-6">
-        <h1 className="text-[15px] font-medium">{active ? "筛选结果" : "全部时间"}</h1>
+      <section className="flex flex-wrap items-center gap-3 pt-6">
+        <h1 className="text-[15px] font-medium">{active ? "筛选结果" : range === "today" ? "今天" : "全部内容"}</h1>
+        <div className="flex items-center gap-1 rounded-full border border-line p-0.5 text-[12px]">
+          {[
+            { id: "all" as const, label: "全部" },
+            { id: "today" as const, label: "今天" },
+          ].map((r) => (
+            <button
+              key={r.id}
+              onClick={() => setRange(r.id)}
+              className={"rounded-full px-2.5 py-1 transition " + (range === r.id ? "bg-ink text-white" : "text-muted hover:text-ink")}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-1 rounded-full border border-line p-0.5 text-[12px]">
           {[
             { id: "freshness", label: "按新鲜度" },
@@ -101,19 +130,21 @@ export default function FeedPage({ ctx }: Props) {
         </div>
       ) : null}
 
-      <section className="mt-5 grid grid-cols-1 items-start gap-x-5 gap-y-8 md:grid-cols-2 xl:grid-cols-3">
+      <section className="mt-5 grid grid-cols-1 items-stretch gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
         {feed.items.map((item) => (
           <Card key={item.id} item={item} onOpen={setDrawer} />
         ))}
       </section>
 
       {feed.loading && feed.items.length === 0 ? (
-        <div className="mt-10 grid grid-cols-1 gap-x-5 gap-y-8 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-5 grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="animate-pulse">
-              <div className="aspect-video rounded-card bg-wash" />
+            <div key={i} className="animate-pulse rounded-card border border-line bg-white p-3">
+              <div className="h-5 w-24 rounded bg-wash" />
+              <div className="mt-2.5 aspect-video rounded-lg bg-wash" />
               <div className="mt-3 h-4 w-4/5 rounded bg-wash" />
-              <div className="mt-2 h-3 w-1/3 rounded bg-wash" />
+              <div className="mt-2 h-4 w-3/5 rounded bg-wash" />
+              <div className="mt-4 h-3 w-1/3 rounded bg-wash" />
             </div>
           ))}
         </div>

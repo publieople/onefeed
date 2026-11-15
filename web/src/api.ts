@@ -235,6 +235,7 @@ export interface FeedQuery {
   kind: string;
   sort: string;
   q: string;
+  since?: number | null;
 }
 
 export function useFeed(query: FeedQuery, reloadKey: number) {
@@ -253,11 +254,12 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
       if (query.kind) params.set("kind", query.kind);
       if (query.sort) params.set("sort", query.sort);
       if (query.q.trim()) params.set("q", query.q.trim());
+      if (query.since) params.set("since", String(query.since));
       if (cursor) params.set("cursor", cursor);
       params.set("limit", "30");
       return "/api/feed?" + params.toString();
     },
-    [query.platforms.join(","), query.kind, query.sort, query.q],
+    [query.platforms.join(","), query.kind, query.sort, query.q, query.since ?? 0],
   );
 
   const load = useCallback(

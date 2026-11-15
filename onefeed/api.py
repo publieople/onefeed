@@ -169,12 +169,25 @@ def item(request: Request, item_id: str) -> dict:
             "code": "item_not_found", "message": f"没有这条内容：{item_id}",
             "hint": "id 形如 <插件 id>:<平台原生 id>，可从 /api/feed 的返回里取"})
     siblings = []
+    cluster_size = 0
+    cluster_platforms: list[str] = []
     if row.get("cluster_id"):
         sib_rows = store.conn.execute(
             "SELECT id, platform, title, author, url, published_at FROM items "
             "WHERE cluster_id = ? AND id != ? ORDER BY platform", (row["cluster_id"], item_id)
         ).fetchall()
         siblings = [dict(r) for r in sib_rows]
+        if siblings:
+            cluster_size = len(siblings) + 1
+            cluster_platforms = sorted({row["platform"], *[s["platform"] for s in siblings]})
+    # 详情页也要给出「为什么推给你」，否则卡片上有、点开反而没有了
+    pct = _percentiles(store, [row])
+    row["cluster_size"] = cluster_size
+    row["cluster_platforms"] = cluster_platforms
+    row["reasons"] = smart.reason_for(row, {
+        "platforms": cluster_platforms,
+        "percentile": pct.get(row["platform"], {}).get(row["id"]),
+    })
     return {"item": row, "siblings": siblings}
 
 

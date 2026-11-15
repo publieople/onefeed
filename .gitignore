@@ -32,4 +32,4 @@ probes/*.png
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db
+Thumbs.db.git-commit-msg.tmp
