@@ -20,6 +20,8 @@ ORDER = [
     "test_store.py",
     "test_store_real.py",
     "test_api.py",
+    "test_settings.py",
+    "test_auth_flow.py",
     "test_entry.py",
     "test_e2e_feed.py",
 ]

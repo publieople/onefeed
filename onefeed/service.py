@@ -24,13 +24,13 @@ def demo_mode() -> bool:
     return os.environ.get("ONEFEED_DEMO") == "1"
 
 
-def sync_installed(store) -> int:
+def sync_installed(store, root: Path | None = None) -> int:
     """把插件目录里真实存在的插件登记进库：目录是事实，库只是索引。
 
     库里没有的补一条 source=local；库里多出来的（目录已被手工删掉）不主动删，
     交给卸载接口处理，免得误删历史记录。
     """
-    root = Path(default_plugins_dir())
+    root = Path(root or default_plugins_dir())
     if not root.is_dir():
         return 0
     known = {p["id"] for p in store.list_plugins()}
@@ -52,10 +52,12 @@ def sync_installed(store) -> int:
 
 
 class RefreshRunner:
-    def __init__(self, store, host: PluginHost | None = None, limit: int = 12) -> None:
+    def __init__(self, store, host: PluginHost | None = None, limit: int = 12,
+                 prune_days: int = 14) -> None:
         self.store = store
         self.host = host or PluginHost()
         self.limit = limit
+        self.prune_days = prune_days
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._state: dict[str, Any] = {
@@ -126,7 +128,7 @@ class RefreshRunner:
                     self._set(pid, status="failed", error=reason,
                               ms=int((time.time() - started) * 1000))
             try:
-                self.store.prune()
+                self.store.prune(keep_days=self.prune_days)
                 smart.cluster(self.store)
             except Exception:
                 pass

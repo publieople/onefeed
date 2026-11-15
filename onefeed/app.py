@@ -13,7 +13,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import __version__
+from plugin_runtime.host import PluginHost
+
+from . import __version__, settings as settings_mod
 from .api import router
 from .service import RefreshRunner, sync_installed
 from .store import Store
@@ -25,8 +27,16 @@ def create_app(store: Store | None = None) -> FastAPI:
     app = FastAPI(title="OneFeed", version=__version__, docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
     app.state.store = store or Store()
-    sync_installed(app.state.store)
-    app.state.refresher = RefreshRunner(app.state.store)
+    conf = settings_mod.load()
+    app.state.settings = conf
+    plugins_dir = settings_mod.resolve_plugins_dir(conf.get("plugins_dir", ""))
+    sync_installed(app.state.store, plugins_dir)
+    app.state.refresher = RefreshRunner(
+        app.state.store,
+        host=PluginHost(plugins_dir=plugins_dir),
+        limit=int(conf.get("per_plugin_limit") or 12),
+        prune_days=int(conf.get("prune_days") or 14),
+    )
 
     app.include_router(router)
     _install_error_handlers(app)

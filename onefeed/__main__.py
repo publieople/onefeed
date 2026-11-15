@@ -1,17 +1,19 @@
 """python -m onefeed（003 T31）。
 
 一个进程、一条命令：起 HTTP 服务 → 800ms 后开浏览器。
-端口被占用时明确报出占用进程，不静默换端口。
+默认端口被占用时：如果占用者是 OneFeed，直接把浏览器指过去；否则自动往后找一个空端口。
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 
 DEFAULT_PORT = 8787
@@ -43,17 +45,23 @@ def _already_running(host: str, port: int) -> bool:
         return sock.connect_ex((host, port)) == 0
 
 
-def _fail_port_in_use(host: str, port: int) -> int:
-    pid = _port_owner(port)
-    if pid:
-        print(f"端口 {port} 已被占用（PID {pid}）。", file=sys.stderr)
-        print(f"  · 如果那就是 OneFeed，直接打开 http://{host}:{port}", file=sys.stderr)
-        print(f"  · 想换端口：python -m onefeed --port {port + 1}", file=sys.stderr)
-        print(f"  · 想结束它：taskkill /PID {pid} /F", file=sys.stderr)
-    else:
-        print(f"端口 {port} 已被占用，但没查出是哪个进程。", file=sys.stderr)
-        print(f"  · 换一个：python -m onefeed --port {port + 1}", file=sys.stderr)
-    return 1
+def _is_onefeed(host: str, port: int) -> bool:
+    """占用者是不是已经跑着的 OneFeed（看 /api/health 的指纹，不去猜进程名）。"""
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=1.2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return bool(data.get("ok")) and "version" in data and "platforms" in data
+    except Exception:
+        return False
+
+
+def _free_port(host: str, start: int, tries: int = 10) -> int | None:
+    for port in range(start, start + tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.4)
+            if sock.connect_ex((host, port)) != 0:
+                return port
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -75,7 +83,21 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["ONEFEED_DEMO"] = "1"
 
     if _already_running(args.host, args.port):
-        return _fail_port_in_use(args.host, args.port)
+        if _is_onefeed(args.host, args.port):
+            url = f"http://{args.host}:{args.port}"
+            print(f"OneFeed 已经在 {url} 跑着，直接把浏览器指过去。", flush=True)
+            if not args.no_browser:
+                webbrowser.open(url)
+            return 0
+        pid = _port_owner(args.port)
+        new_port = _free_port(args.host, args.port + 1)
+        if new_port is None:
+            print(f"端口 {args.port} 被占用（{'PID ' + pid if pid else '进程未知'}），"
+                  f"后面 10 个端口也都被占了；用 --port 指定一个空闲端口。", file=sys.stderr)
+            return 1
+        print(f"端口 {args.port} 被占用（{'PID ' + pid if pid else '进程未知'}），"
+              f"自动改用 {new_port}。", flush=True)
+        args.port = new_port
 
     import uvicorn
 

@@ -15,6 +15,9 @@ SCHEMA_VERSION = 1
 HOST_VERSION = "0.2.0"
 CAPABILITIES = {"http", "browser", "cli"}
 KINDS = {"video", "images", "article", "short", "list"}
+# 能力（capabilities）说的是"插件能调什么"，feature 说的是"插件对外提供什么额外内容"。
+# 评论是可选能力：实现了 comments() 的插件才认领它，没实现的平台照常出卡片。
+FEATURES = {"comments"}
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -49,6 +52,7 @@ class Manifest:
     theme_color: str = ""
     cli_allow: list[list[str]] = field(default_factory=list)
     settings: list[dict[str, Any]] = field(default_factory=list)
+    features: set[str] = field(default_factory=set)
 
     # ---- 便捷属性 ----
     @property
@@ -66,7 +70,7 @@ class Manifest:
         return {s["key"]: s.get("default") for s in self.settings if s.get("key")}
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
-        return f"<Manifest {self.id} v{self.version} caps={sorted(self.capabilities)}>"
+        return f"<Manifest {self.id} v{self.version} caps={sorted(self.capabilities)} features={sorted(self.features)}>"
 
 
 # ---------------------------------------------------------------- semver
@@ -161,6 +165,14 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
                 errors.append(f"feeds.id 重复：{f['id']}")
             ids.add(f["id"])
 
+    features = data.get("features", [])
+    if not isinstance(features, list):
+        errors.append("features 必须是数组（当前只有 comments 一项可选）")
+    else:
+        bad = [f for f in features if f not in FEATURES]
+        if bad:
+            errors.append(f"未知 feature：{bad}（可选 {sorted(FEATURES)}）")
+
     settings = data.get("settings", [])
     if not isinstance(settings, list):
         errors.append("settings 必须是数组")
@@ -207,4 +219,5 @@ def load_manifest(plugin_dir: Path | str, host_version: str = HOST_VERSION) -> M
         theme_color=data.get("themeColor", ""),
         cli_allow=cli_allow,
         settings=list(data.get("settings") or []),
+        features=set(data.get("features") or []),
     )

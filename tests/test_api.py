@@ -121,9 +121,18 @@ def main() -> int:
         # plugins / runs
         installed = client.get("/api/plugins").json()["installed"]
         ids = {p["id"] for p in installed}
-        # create_app 会把插件目录里真实存在的插件补进库（sync_installed），所以只断言种进去的那条还在
-        check("bilibili" in ids and next(p for p in installed if p["id"] == "bilibili")["version"] == "0.3.0",
-              "插件列表保留已存版本")
+        # create_app 会把插件目录里真实存在的插件补进库（sync_installed），所以只断言种进去的那条还在；
+        # 版本以磁盘上的 plugin.json 为准（库里的可能是旧的，升级插件后不该显示老版本号）
+        row = next(p for p in installed if p["id"] == "bilibili")
+        expect = "0.3.0"
+        try:
+            from onefeed import settings as settings_mod
+            from plugin_runtime.manifest import load_manifest
+
+            expect = load_manifest(settings_mod.resolve_plugins_dir(None) / "bilibili").version
+        except Exception:
+            pass
+        check("bilibili" in ids and row["version"] == expect, "插件列表用磁盘上的 manifest 版本")
         r = client.get("/api/runs").json()["runs"]
         check(len(r) == 1 and r[0]["ok"] == 1, "轮次列表")
 

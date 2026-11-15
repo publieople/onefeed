@@ -189,8 +189,17 @@ class PluginHost:
         result.sort(key=lambda x: x.published_at, reverse=True)
         return result[:limit]
 
-    def comments(self, plugin_id: str, item: Item, limit: int = 20) -> list[dict[str, Any]]:
-        out = self.run(plugin_id, "comments", {"item": item.to_dict(), "limit": limit})
+    def supports(self, plugin_id: str, feature: str) -> bool:
+        """插件是否认领了某个 feature（如 comments）。清单读不到就算不支持。"""
+        try:
+            return feature in self.get(plugin_id).features
+        except (KeyError, ManifestError):
+            return False
+
+    def comments(self, plugin_id: str, item: Item | dict[str, Any],
+                 limit: int = 20) -> list[dict[str, Any]]:
+        raw = item if isinstance(item, dict) else item.to_dict()
+        out = self.run(plugin_id, "comments", {"item": raw, "limit": limit})
         if not out["ok"]:
             raise RuntimeError(f"[{plugin_id}] {out['error']}")
         value = out["value"] or {}

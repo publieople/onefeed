@@ -18,17 +18,32 @@ from typing import Any
 from plugin_runtime.host import default_plugins_dir
 from plugin_runtime.paths import state_root
 
-REGISTRY_URL = os.environ.get(
-    "ONEFEED_REGISTRY",
-    "https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json")
+FALLBACK_REGISTRY = "https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json"
+# 老的常量名保留：外部脚本 / 测试还在 import 它
+REGISTRY_URL = os.environ.get("ONEFEED_REGISTRY", FALLBACK_REGISTRY)
 CACHE_TTL = 3600
 UA = "OneFeed/0.3 (+local demo)"
+
+
+def registry_url() -> str:
+    """设置页可以随时改地址；环境变量优先，其次 settings.json，最后内置默认。"""
+    try:
+        from . import settings as settings_mod
+        return settings_mod.registry_url()
+    except Exception:
+        return os.environ.get("ONEFEED_REGISTRY") or FALLBACK_REGISTRY
 
 
 def _cache_dir() -> Path:
     path = state_root() / "market"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _cache_file(url: str) -> Path:
+    """缓存按地址分开存：换了 registry 就不会读到上一个源的旧目录。"""
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+    return _cache_dir() / f"registry-{digest}.json"
 
 
 def _http_bytes(url: str, timeout: float = 15.0) -> bytes:
@@ -38,7 +53,8 @@ def _http_bytes(url: str, timeout: float = 15.0) -> bytes:
 
 
 def registry(force: bool = False) -> dict[str, Any]:
-    cache = _cache_dir() / "registry.json"
+    url = registry_url()
+    cache = _cache_file(url)
     if not force and cache.exists():
         age = time.time() - cache.stat().st_mtime
         if age < CACHE_TTL:
@@ -49,7 +65,7 @@ def registry(force: bool = False) -> dict[str, Any]:
             except json.JSONDecodeError:
                 pass
     try:
-        data = json.loads(_http_bytes(REGISTRY_URL).decode("utf-8"))
+        data = json.loads(_http_bytes(url).decode("utf-8"))
         cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         data["from_cache"] = False
         return data
@@ -64,6 +80,7 @@ def registry(force: bool = False) -> dict[str, Any]:
 
 
 def merged(store, force: bool = False) -> dict[str, Any]:
+    url = registry_url()
     data = registry(force)
     installed = {p["id"]: p for p in store.list_plugins()}
     entries = []
@@ -84,7 +101,7 @@ def merged(store, force: bool = False) -> dict[str, Any]:
                         "enabled": bool(row.get("enabled", 1)), "update_available": False,
                         "capabilities": [], "kinds": [], "feeds": []})
     return {"entries": entries, "degraded": data.get("degraded", ""),
-            "from_cache": data.get("from_cache", False), "url": REGISTRY_URL}
+            "from_cache": data.get("from_cache", False), "url": url}
 
 
 # ---------------------------------------------------------------- 安装
@@ -148,11 +165,20 @@ def _remote_files(plugin_id: str) -> list[tuple[str, str]]:
     return files
 
 
+def plugins_root() -> Path:
+    """安装目标目录跟随设置；设置里留空就用宿主默认查找顺序。"""
+    try:
+        from . import settings as settings_mod
+        return settings_mod.resolve_plugins_dir(str(settings_mod.load().get("plugins_dir") or ""))
+    except Exception:
+        return Path(default_plugins_dir())
+
+
 def install(store, plugin_id: str) -> dict[str, Any]:
     entry = next((e for e in merged(store)["entries"] if e.get("id") == plugin_id), None)
     if entry is None:
         raise RuntimeError(f"registry 里没有 {plugin_id}")
-    target_root = Path(default_plugins_dir())
+    target_root = plugins_root()
     target = target_root / plugin_id
     expected = str(entry.get("sha256") or "")
 
@@ -188,7 +214,7 @@ def install(store, plugin_id: str) -> dict[str, Any]:
 
 
 def uninstall(store, plugin_id: str) -> dict[str, Any]:
-    target = Path(default_plugins_dir()) / plugin_id
+    target = plugins_root() / plugin_id
     if not target.exists():
         raise RuntimeError(f"{plugin_id} 没有安装")
     shutil.rmtree(target)
