@@ -23,7 +23,7 @@ function CommentBody({ comment }: { comment: CommentItem }) {
   return (
     <div className="flex gap-2.5">
       <span
-        className="mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[10px] font-medium text-white"
+        className="mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-medium text-white"
         style={{ background: p }}
       >
         {(comment.author || "?").slice(0, 1)}
@@ -39,12 +39,12 @@ function CommentBody({ comment }: { comment: CommentItem }) {
             </span>
           ) : null}
         </div>
-        <p className="mt-1 whitespace-pre-wrap text-[12.5px] leading-[1.75] text-muted">{comment.text}</p>
+        <p className="mt-1 whitespace-pre-wrap text-[13px] leading-[1.75] text-muted">{comment.text}</p>
         {comment.replies?.length ? (
           <div className="mt-2 space-y-2 border-l border-line pl-3">
             {comment.replies.slice(0, 3).map((r) => (
               <div key={r.id}>
-                <div className="text-[11.5px] font-medium">
+                <div className="text-[12px] font-medium">
                   {r.author || "匿名"}
                   {r.created_at ? <span className="ml-2 font-normal text-fade">{timeAgo(r.created_at)}</span> : null}
                 </div>
@@ -242,7 +242,7 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
                     {comments?.supported && comments.count > 0 ? (
                       <span className="text-[11px] text-fade">{comments.count} 条</span>
                     ) : null}
-                    {comments?.from_cache ? <span className="text-[10.5px] text-fade">缓存</span> : null}
+                    {comments?.from_cache ? <span className="text-[11px] text-fade">缓存</span> : null}
                   </div>
 
                   {commentsLoading ? (

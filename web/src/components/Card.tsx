@@ -22,7 +22,7 @@ function PlatformTag({ item }: { item: FeedItem }) {
   const p = platform(item.platform);
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full border px-1.5 py-[2px] text-[10.5px] font-medium leading-none"
+      className="inline-flex items-center gap-1 rounded-full border px-1.5 py-[2px] text-[11px] font-medium leading-none"
       style={{ color: p.tint, borderColor: hexAlpha(p.tint, 0.28), background: hexAlpha(p.tint, 0.07) }}
       title={"来自 " + p.label}
     >
@@ -41,7 +41,7 @@ function NoThumb({ item, className = "" }: { item: FeedItem; className?: string 
       className={"flex h-full w-full flex-col items-center justify-center gap-1.5 border border-dashed border-line bg-wash " + className}
     >
       <Icon size={16} className="text-fade" />
-      <span className="text-[10.5px] tracking-wide text-fade">无封面 · {p.label}</span>
+      <span className="text-[11px] tracking-wide text-fade">无封面 · {p.label}</span>
     </div>
   );
 }
@@ -90,7 +90,7 @@ function ImageGrid({ item }: { item: FeedItem }) {
     <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-wash">
       <div className={"grid h-full w-full gap-1 " + cols}>
         {pics.map((src, i) => (
-          <div key={src + i} className="relative h-full w-full overflow-hidden rounded-[4px] bg-wash">
+          <div key={src + i} className="relative h-full w-full overflow-hidden rounded bg-wash">
             <NoThumb item={item} />
             <img
               src={src}
@@ -193,12 +193,12 @@ export default function Card({ item, onOpen }: Props) {
       ) : null}
 
       {body ? (
-        <p className={"clamp-2 mt-1.5 text-[12.5px] leading-[1.65] text-muted " + (item.kind === "short" ? "border-l-2 border-line pl-2.5" : "")}>
+        <p className={"clamp-2 mt-1.5 text-[13px] leading-[1.65] text-muted " + (item.kind === "short" ? "border-l-2 border-line pl-2.5" : "")}>
           {body}
         </p>
       ) : null}
 
-      <footer className="mt-auto flex items-center gap-1.5 pt-3 text-[11.5px] text-muted">
+      <footer className="mt-auto flex items-center gap-1.5 pt-3 text-[12px] text-muted">
         {item.author_avatar ? (
           <img
             src={item.author_avatar}

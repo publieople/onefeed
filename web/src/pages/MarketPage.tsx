@@ -138,7 +138,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
       </div>
 
       {data?.market.degraded ? (
-        <div className="mt-4 rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">
+        <div className="mt-4 rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
           市场降级：{data.market.degraded}
         </div>
       ) : null}
@@ -160,16 +160,16 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
                       : "v" + entry.version}
                   </span>
                   {entry.update_available ? (
-                    <span className="rounded-full bg-ink px-1.5 py-0.5 text-[10px] text-white">可更新</span>
+                    <span className="rounded-full bg-ink px-1.5 py-0.5 text-[11px] text-white">可更新</span>
                   ) : null}
                   {entry.installed ? (
-                    <span className="flex items-center gap-0.5 rounded-full border border-line px-1.5 py-0.5 text-[10px] text-muted">
+                    <span className="flex items-center gap-0.5 rounded-full border border-line px-1.5 py-0.5 text-[11px] text-muted">
                       <Check size={10} />
                       已安装{entry.enabled ? "" : " · 已停用"}
                     </span>
                   ) : null}
                 </div>
-                <p className="clamp-2 mt-1.5 text-[12.5px] leading-relaxed text-muted">{entry.description}</p>
+                <p className="clamp-2 mt-1.5 text-[13px] leading-relaxed text-muted">{entry.description}</p>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1.5">
                 {entry.installed && entry.update_available ? (
@@ -226,7 +226,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
         <div className="mt-16 text-center text-[13px] text-muted">目录还没拉到，点右上角「刷新目录」。</div>
       ) : null}
 
-      <p className="mt-8 text-[11.5px] leading-relaxed text-fade">
+      <p className="mt-8 text-[12px] leading-relaxed text-fade">
         目录来源：{data?.market.url ?? "registry.json"}
         {data?.market.from_cache ? "（本地缓存）" : ""}
         。安装和更新都按目录里的 sha256 校验整包内容，对不上就拒绝；更新只换插件文件，不动你的 cookie 与已装开关。

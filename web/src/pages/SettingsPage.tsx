@@ -197,8 +197,8 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
       <p className="mt-1 text-[13px] text-muted">本机运行，只监听 127.0.0.1。数据、cookie、插件都在你自己的盘上。</p>
 
       <section className="mt-6 rounded-card border border-line p-5">
-        <h2 className="text-[14px] font-semibold">运行状态</h2>
-        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-[12.5px]">
+        <h2 className="text-[15px] font-semibold">运行状态</h2>
+        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-[13px]">
           <div className="flex justify-between">
             <dt className="text-fade">版本</dt>
             <dd>{health?.version ?? "—"}</dd>
@@ -216,25 +216,25 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             <dd>{health?.demo ? "离线演示（fixtures）" : "联网采集"}</dd>
           </div>
         </dl>
-        <p className="mt-3 break-all rounded-lg bg-wash px-3 py-2 font-mono text-[11.5px] text-muted">{health?.db ?? "数据库路径未知"}</p>
+        <p className="mt-3 break-all rounded-lg bg-wash px-3 py-2 font-mono text-[12px] text-muted">{health?.db ?? "数据库路径未知"}</p>
         <div className="mt-3 flex gap-2">
-          <button onClick={ctx.refresh} className="flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3.5 text-[12.5px] text-white">
+          <button onClick={ctx.refresh} className="flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3.5 text-[13px] text-white">
             <RefreshCw size={13} />
             现在刷新一轮
           </button>
-          <button onClick={() => void load()} className="flex h-9 items-center gap-1.5 rounded-lg border border-line px-3.5 text-[12.5px] text-muted hover:text-ink">
+          <button onClick={() => void load()} className="flex h-9 items-center gap-1.5 rounded-lg border border-line px-3.5 text-[13px] text-muted hover:text-ink">
             重新检查
           </button>
         </div>
       </section>
 
       <section className="mt-5 rounded-card border border-line p-5">
-        <h2 className="text-[14px] font-semibold">采集与排序</h2>
+        <h2 className="text-[15px] font-semibold">采集与排序</h2>
         <p className="mt-1 text-[12px] text-fade">保存后立即生效；插件目录与 registry 改动会在下一次采集时用上。</p>
         {form ? (
           <div className="mt-4 space-y-4">
             <label className="block">
-              <span className="text-[12.5px] font-medium">插件目录</span>
+              <span className="text-[13px] font-medium">插件目录</span>
               <input
                 value={form.plugins_dir}
                 onChange={(e) => setForm({ ...form, plugins_dir: e.target.value })}
@@ -245,7 +245,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             </label>
 
             <label className="block">
-              <span className="text-[12.5px] font-medium">插件市场 registry 地址</span>
+              <span className="text-[13px] font-medium">插件市场 registry 地址</span>
               <input
                 value={form.registry_url}
                 onChange={(e) => setForm({ ...form, registry_url: e.target.value })}
@@ -257,33 +257,33 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
 
             <div className="grid grid-cols-2 gap-4">
               <label className="block">
-                <span className="text-[12.5px] font-medium">每平台每轮条数</span>
+                <span className="text-[13px] font-medium">每平台每轮条数</span>
                 <input
                   type="number"
                   min={1}
                   max={50}
                   value={form.per_plugin_limit}
                   onChange={(e) => setForm({ ...form, per_plugin_limit: Number(e.target.value) })}
-                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[12.5px] outline-none focus:border-ink/40"
+                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[13px] outline-none focus:border-ink/40"
                 />
               </label>
               <label className="block">
-                <span className="text-[12.5px] font-medium">详情页评论条数</span>
+                <span className="text-[13px] font-medium">详情页评论条数</span>
                 <input
                   type="number"
                   min={1}
                   max={50}
                   value={form.comments_limit}
                   onChange={(e) => setForm({ ...form, comments_limit: Number(e.target.value) })}
-                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[12.5px] outline-none focus:border-ink/40"
+                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[13px] outline-none focus:border-ink/40"
                 />
               </label>
               <label className="block">
-                <span className="text-[12.5px] font-medium">默认排序</span>
+                <span className="text-[13px] font-medium">默认排序</span>
                 <select
                   value={form.default_sort}
                   onChange={(e) => setForm({ ...form, default_sort: e.target.value })}
-                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-2.5 text-[12.5px] outline-none focus:border-ink/40"
+                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-2.5 text-[13px] outline-none focus:border-ink/40"
                 >
                   {(ctx.settings?.sorts ?? ["freshness", "engagement"]).map((s) => (
                     <option key={s} value={s}>
@@ -293,14 +293,14 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 </select>
               </label>
               <label className="block">
-                <span className="text-[12.5px] font-medium">本地保留天数</span>
+                <span className="text-[13px] font-medium">本地保留天数</span>
                 <input
                   type="number"
                   min={1}
                   max={365}
                   value={form.prune_days}
                   onChange={(e) => setForm({ ...form, prune_days: Number(e.target.value) })}
-                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[12.5px] outline-none focus:border-ink/40"
+                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[13px] outline-none focus:border-ink/40"
                 />
               </label>
             </div>
@@ -313,7 +313,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 className="mt-0.5 h-4 w-4 accent-black"
               />
               <span>
-                <span className="text-[12.5px] font-medium">每轮采集前自动更新插件</span>
+                <span className="text-[13px] font-medium">每轮采集前自动更新插件</span>
                 <span className="mt-0.5 block text-[11px] leading-relaxed text-fade">
                   开着就每轮先查一次市场，有新版直接换上（走 sha256 校验）。现场演示建议关掉，别让远端在你讲的时候改代码。
                 </span>
@@ -324,14 +324,14 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
               <button
                 onClick={() => void saveSettings()}
                 disabled={saving}
-                className="flex h-9 items-center gap-1.5 rounded-lg bg-ink px-4 text-[12.5px] text-white disabled:opacity-60"
+                className="flex h-9 items-center gap-1.5 rounded-lg bg-ink px-4 text-[13px] text-white disabled:opacity-60"
               >
                 <Save size={13} />
                 {saving ? "保存中…" : "保存设置"}
               </button>
               <button
                 onClick={() => defaults && setForm({ ...defaults })}
-                className="h-9 rounded-lg border border-line px-3.5 text-[12.5px] text-muted hover:text-ink"
+                className="h-9 rounded-lg border border-line px-3.5 text-[13px] text-muted hover:text-ink"
               >
                 恢复默认值
               </button>
@@ -339,12 +339,12 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             </div>
           </div>
         ) : (
-          <p className="mt-3 text-[12.5px] text-fade">读取中…</p>
+          <p className="mt-3 text-[13px] text-fade">读取中…</p>
         )}
       </section>
 
       <section className="mt-5 rounded-card border border-line p-5">
-        <h2 className="text-[14px] font-semibold">登录态</h2>
+        <h2 className="text-[15px] font-semibold">登录态</h2>
         <p className="mt-1 text-[12px] text-fade">插件拿不到你的明文 cookie，只由宿主在发请求时注入。登录窗口是独立的 Chrome，登录完会自动关掉。</p>
         <ul className="mt-3 space-y-2">
           {ALL_AUTH_ROWS.map((id) => {
@@ -357,13 +357,13 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="h-[7px] w-[7px] rounded-full" style={{ background: platform(id).tint }} />
                   <span className="text-[13px] font-medium">{platform(id).label}</span>
-                  <span className={"rounded-full border px-1.5 py-0.5 text-[10px] " + meta.tone}>{meta.label}</span>
+                  <span className={"rounded-full border px-1.5 py-0.5 text-[11px] " + meta.tone}>{meta.label}</span>
                   {state?.cookies ? <span className="text-[11px] text-fade">{state.cookies} 个 cookie</span> : null}
                   <span className="ml-auto flex items-center gap-1.5">
                     {isCli ? (
                       <button
                         onClick={() => void copy(state?.command || "bili login", "命令")}
-                        className="flex h-7 items-center gap-1 rounded-md border border-line px-2 text-[11.5px] text-muted hover:text-ink"
+                        className="flex h-7 items-center gap-1 rounded-md border border-line px-2 text-[12px] text-muted hover:text-ink"
                       >
                         <Copy size={11} />
                         复制 bili login
@@ -373,14 +373,14 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                       <>
                         <button
                           onClick={() => void startLogin(id)}
-                          className="flex h-7 items-center gap-1 rounded-md bg-ink px-2.5 text-[11.5px] text-white"
+                          className="flex h-7 items-center gap-1 rounded-md bg-ink px-2.5 text-[12px] text-white"
                         >
                           <LogIn size={11} />
                           打开登录窗口
                         </button>
                         <button
                           onClick={() => void checkLogin(id)}
-                          className="flex h-7 items-center gap-1 rounded-md border border-line px-2 text-[11.5px] text-muted hover:text-ink"
+                          className="flex h-7 items-center gap-1 rounded-md border border-line px-2 text-[12px] text-muted hover:text-ink"
                         >
                           <RefreshCw size={11} className={pending ? "animate-spin" : ""} />
                           我已完成登录
@@ -388,7 +388,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                         {state?.state === "available" ? (
                           <button
                             onClick={() => void logout(id)}
-                            className="flex h-7 items-center gap-1 rounded-md border border-line px-2 text-[11.5px] text-muted hover:text-red-600"
+                            className="flex h-7 items-center gap-1 rounded-md border border-line px-2 text-[12px] text-muted hover:text-red-600"
                           >
                             <LogOut size={11} />
                             退出
@@ -401,9 +401,9 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
                   {login[id] ? LOGIN_TEXT[login[id].state] + (login[id].message ? " · " + login[id].message : "") : state?.message || "还没检查"}
                 </p>
-                {state?.hint && !login[id] ? <p className="mt-1 text-[11.5px] text-fade">{state.hint}</p> : null}
+                {state?.hint && !login[id] ? <p className="mt-1 text-[12px] text-fade">{state.hint}</p> : null}
                 {isCli && state?.command ? (
-                  <p className="mt-1 font-mono text-[11.5px] text-fade">
+                  <p className="mt-1 font-mono text-[12px] text-fade">
                     $ {state.command}
                     {state.login_url ? (
                       <a href={state.login_url} target="_blank" rel="noreferrer" className="ml-2 inline-flex items-center gap-0.5 text-muted hover:underline">
@@ -419,7 +419,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
       </section>
 
       <section className="mt-5 rounded-card border border-line p-5">
-        <h2 className="text-[14px] font-semibold">已装插件</h2>
+        <h2 className="text-[15px] font-semibold">已装插件</h2>
         <ul className="mt-3 divide-y divide-line">
           {(plugins?.installed ?? []).map((p) => (
             <li key={p.id} className="flex items-center gap-2.5 py-2.5">
@@ -427,9 +427,9 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
               <span className="text-[13px]">{p.name || platform(p.id).label}</span>
               <span className="text-[11px] text-fade">v{p.version}</span>
               {p.features?.includes("comments") ? (
-                <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">评论区</span>
+                <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">评论区</span>
               ) : (
-                <span className="rounded-full bg-wash px-1.5 py-0.5 text-[10px] text-fade">无评论</span>
+                <span className="rounded-full bg-wash px-1.5 py-0.5 text-[11px] text-fade">无评论</span>
               )}
               <span className="text-[11px] text-fade">{p.source === "registry" ? "市场安装" : "本地"}</span>
               <button
@@ -441,19 +441,19 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
               </button>
             </li>
           ))}
-          {!(plugins?.installed ?? []).length ? <li className="py-3 text-[12.5px] text-muted">还没装插件，去市场挑两个。</li> : null}
+          {!(plugins?.installed ?? []).length ? <li className="py-3 text-[13px] text-muted">还没装插件，去市场挑两个。</li> : null}
         </ul>
         {plugins?.errors?.length ? (
-          <p className="mt-2 text-[11.5px] text-amber-600">有插件加载失败：{plugins.errors.join("；")}</p>
+          <p className="mt-2 text-[12px] text-amber-600">有插件加载失败：{plugins.errors.join("；")}</p>
         ) : null}
       </section>
 
       <section className="mt-5 rounded-card border border-line p-5">
-        <h2 className="flex items-center gap-1.5 text-[14px] font-semibold">
+        <h2 className="flex items-center gap-1.5 text-[15px] font-semibold">
           <ShieldCheck size={15} className="text-muted" />
           风险边界
         </h2>
-        <ul className="mt-2 space-y-1.5 text-[12.5px] leading-relaxed text-muted">
+        <ul className="mt-2 space-y-1.5 text-[13px] leading-relaxed text-muted">
           <li>只读：不下载、不转发、不代发内容，只把公开页面上看得到的东西排好给你。</li>
           <li>插件跑在 QuickJS 子进程里，每个插件独立进程，超时直接强杀。</li>
           <li>不内置任何密钥；登录态只存在本机，插件只能通过宿主能力发请求。</li>

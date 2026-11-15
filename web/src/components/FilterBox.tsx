@@ -19,7 +19,7 @@ export default function FilterBox({ value, parsed, onSubmit }: Props) {
           e.preventDefault();
           onSubmit(text);
         }}
-        className="flex h-11 items-center gap-2 rounded-xl border border-line bg-white px-3.5 transition focus-within:border-ink/25"
+        className="flex h-11 items-center gap-2 rounded-card border border-line bg-white px-3.5 transition focus-within:border-ink/25"
       >
         <Search size={15} className="text-fade" />
         <input

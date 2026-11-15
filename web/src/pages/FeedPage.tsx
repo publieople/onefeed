@@ -88,7 +88,7 @@ export default function FeedPage({ ctx }: Props) {
       <FilterBox value={q} parsed={feed.parsed} onSubmit={setQ} />
 
       {!feed.loading ? (
-        <p className="mt-4 text-[12.5px] leading-relaxed text-muted">
+        <p className="mt-4 text-[13px] leading-relaxed text-muted">
           {active
             ? `筛选出 ${feed.items.length} 条，共 ${feed.count} 条命中`
             : ctx.summary?.text ?? ""}
