@@ -18,6 +18,7 @@ fixtures/raw/
 *.storage_state.json
 .onefeed/
 .dy/
+onefeed-state-*/
 *.db
 *.sqlite
 *.sqlite3
