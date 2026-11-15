@@ -34,9 +34,6 @@ with sync_playwright() as p:
     # 用 API 收尾（等同点「退出」，但窗口还没登录也照样能关）
     page.evaluate("fetch('/api/auth/douyin/logout', {method: 'POST'}).then(r => r.json())")
     page.wait_for_timeout(1200)
-    page.evaluate("window.scrollTo(0, 0)")
-    page.wait_for_timeout(400)
-    page.screenshot(path=os.path.join(OUT, "ui-login-after.png"), full_page=True)
     ctx.close()
     browser.close()
 print("done")
