@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -92,7 +93,10 @@ def merged(store, force: bool = False) -> dict[str, Any]:
             "installed": bool(current),
             "installed_version": (current or {}).get("version", ""),
             "enabled": bool((current or {}).get("enabled", 1)) if current else False,
-            "update_available": bool(current) and current.get("version") != entry.get("version"),
+            "latest_version": str(entry.get("version") or ""),
+            # 只有真的比已装版本新才算可更新：registry 回退版本时不该提示"更新"
+            "update_available": bool(current) and cmp_version(
+                (current or {}).get("version", ""), entry.get("version", "")) < 0,
         })
     for pid, row in installed.items():  # 本地装的、registry 里没有的
         entries.append({"id": pid, "name": pid, "version": row.get("version", ""),
@@ -181,8 +185,15 @@ def install(store, plugin_id: str) -> dict[str, Any]:
     target_root = plugins_root()
     target = target_root / plugin_id
     expected = str(entry.get("sha256") or "")
+    # 更新不能把用户关掉的插件又打开：先记住现有 enabled，写库时带回去
+    previous = next((p for p in store.list_plugins() if p["id"] == plugin_id), None)
+    keep_enabled = bool((previous or {}).get("enabled", 1))
 
-    cached = _cache_dir() / "plugins" / plugin_id
+    # 下载缓存按「插件 + 期望 sha」分开存：只按 id 存的话，
+    # registry 一升级就会命中上一版的旧包，sha 永远对不上、更新永久失败。
+    cache_root = _cache_dir() / "plugins"
+    cache_key = f"{plugin_id}-{(expected or 'nohash')[:12]}"
+    cached = cache_root / cache_key
     tmp = Path(tempfile.mkdtemp(prefix=f"of-{plugin_id}-", dir=str(target_root.parent)))
     try:
         if (cached / "plugin.json").exists():
@@ -201,16 +212,78 @@ def install(store, plugin_id: str) -> dict[str, Any]:
         if target.exists():
             shutil.rmtree(target)
         pkg.rename(target)
-        cached.parent.mkdir(parents=True, exist_ok=True)
+        cache_root.mkdir(parents=True, exist_ok=True)
+        for old in cache_root.glob(f"{plugin_id}-*"):  # 旧版本的缓存没用了
+            if old != cached:
+                shutil.rmtree(old, ignore_errors=True)
         if cached.exists():
             shutil.rmtree(cached)
         shutil.copytree(target, cached)
         manifest = json.loads((target / "plugin.json").read_text(encoding="utf-8"))
         store.upsert_plugin(plugin_id, str(manifest.get("version", entry.get("version", ""))),
-                            actual, source="registry")
+                            actual, source="registry", enabled=keep_enabled)
         return {"ok": True, "id": plugin_id, "version": manifest.get("version"), "sha256": actual}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------- 版本与更新
+
+def version_key(value: str) -> tuple[int, ...]:
+    nums = re.findall(r"\d+", str(value or ""))
+    return tuple(int(n) for n in nums) or (0,)
+
+
+def cmp_version(a: str, b: str) -> int:
+    """语义化版本比较：a<b 返回 -1，相等 0，a>b 返回 1。缺失段按 0 补齐。"""
+    ka, kb = version_key(a), version_key(b)
+    width = max(len(ka), len(kb))
+    ka += (0,) * (width - len(ka))
+    kb += (0,) * (width - len(kb))
+    return (ka > kb) - (ka < kb)
+
+
+def update(store, plugin_id: str) -> dict[str, Any]:
+    """把一个已装插件升到 registry 上的版本。返回 from / to，方便前端说清升了什么。"""
+    previous = next((p for p in store.list_plugins() if p["id"] == plugin_id), None)
+    if previous is None:
+        raise RuntimeError(f"{plugin_id} 还没装，先安装再更新")
+    entry = next((e for e in merged(store)["entries"] if e.get("id") == plugin_id), None)
+    if entry is None:
+        raise RuntimeError(f"registry 里没有 {plugin_id}")
+    latest = str(entry.get("version") or "")
+    if cmp_version(previous.get("version", ""), latest) >= 0:
+        return {"ok": True, "id": plugin_id, "changed": False,
+                "from": previous.get("version", ""), "to": previous.get("version", "")}
+    install(store, plugin_id)
+    after = next((p for p in store.list_plugins() if p["id"] == plugin_id), None)
+    return {"ok": True, "id": plugin_id, "changed": True,
+            "from": previous.get("version", ""), "to": (after or {}).get("version", latest)}
+
+
+def update_all(store) -> dict[str, Any]:
+    """把所有「可更新」的插件升一轮。单个失败不影响其它，失败原因原样带回。"""
+    data = merged(store)
+    todo = [e for e in data.get("entries", [])
+            if e.get("installed") and e.get("update_available")]
+    updated: list[dict[str, Any]] = []
+    failed: list[dict[str, str]] = []
+    for entry in todo:
+        pid = str(entry.get("id") or "")
+        try:
+            updated.append(update(store, pid))
+        except Exception as exc:
+            failed.append({"id": pid, "error": f"{type(exc).__name__}: {exc}"[:200]})
+    return {"ok": not failed, "checked": len(data.get("entries", [])),
+            "pending": len(todo), "updated": updated, "failed": failed}
+
+
+def pending_updates(store) -> list[dict[str, Any]]:
+    """给设置页 / 状态接口用：只回可更新的那几条，不碰网络（用缓存）。"""
+    return [{"id": e.get("id"), "from": e.get("installed_version", ""),
+             "to": e.get("version", "")}
+            for e in merged(store).get("entries", [])
+            if e.get("installed") and e.get("update_available")]
 
 
 def uninstall(store, plugin_id: str) -> dict[str, Any]:

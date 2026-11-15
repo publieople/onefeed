@@ -32,7 +32,8 @@ def _runner(request: Request) -> RefreshRunner:
     return request.app.state.refresher
 
 
-def _apply_settings(request: Request, conf: dict[str, Any]) -> list[str]:
+def _apply_settings(request: Request, conf: dict[str, Any],
+                    touched: set[str] | None = None) -> list[str]:
     """把设置落到活着的对象上，返回"这次真正生效了什么"给前端显示。"""
     runner = _runner(request)
     applied: list[str] = []
@@ -47,6 +48,11 @@ def _apply_settings(request: Request, conf: dict[str, Any]) -> list[str]:
         runner.prune_days = days
         applied.append(f"保留天数 → {days}")
 
+    auto_update = bool(conf.get("auto_update"))
+    if runner.auto_update != auto_update:
+        runner.auto_update = auto_update
+        applied.append("自动更新插件 → " + ("开" if auto_update else "关"))
+
     target = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
     current_dir = Path(str(getattr(runner.host, "plugins_dir", "") or ".")).resolve()
     if current_dir != target.resolve():
@@ -54,27 +60,25 @@ def _apply_settings(request: Request, conf: dict[str, Any]) -> list[str]:
         sync_installed(_store(request), target)
         applied.append(f"插件目录 → {target}")
 
-    applied.append(f"registry → {settings_mod.registry_url()}")
+    if touched and "registry_url" in touched:
+        applied.append(f"registry → {settings_mod.registry_url()}（下一轮采集起用新源）")
     return applied
 
 
 def _percentiles(store: Store, rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    """每条内容在本平台内的热度分位（前 xx%）。跨平台不能直比热度，只能比名次。"""
+    """每条内容在本平台内的热度分位（前 xx%）。跨平台不能直比热度，只能比名次。
+
+    engage_score 是刷新时算好的平台内分位（0–1000），这里直接换算成百分比，
+    不再按点赞数另算一遍 —— 否则「热榜第 1」和「播放 5 千」会被拿来同样对待。
+    """
     out: dict[str, dict[str, int]] = {}
-    for platform in {r["platform"] for r in rows}:
-        values = [int(v) for (v,) in store.conn.execute(
-            "SELECT like_count FROM items WHERE platform = ?", (platform,)).fetchall()]
-        total = len(values) or 1
-        for row in rows:
-            if row["platform"] != platform:
-                continue
-            value = int(row.get("like_count") or 0)
-            if value <= 0:
-                continue  # 没有互动数据就别编名次
-            better = sum(1 for v in values if v > value)
-            pct = max(1, round((better + 1) * 100 / total))
-            if pct <= 50:  # 只有真的靠前才值得说
-                out.setdefault(platform, {})[row["id"]] = pct
+    for row in rows:
+        score = int(row.get("engage_score") or 0)
+        if score <= 0:
+            continue  # 没有互动数据就别编名次
+        pct = max(1, round(101 - score / 10))
+        if pct <= 50:  # 只有真的靠前才值得说
+            out.setdefault(row["platform"], {})[row["id"]] = pct
     return out
 
 
@@ -111,7 +115,7 @@ def put_settings(request: Request, payload: dict[str, Any] = Body(default={})) -
         raise HTTPException(status_code=400, detail={
             "code": "bad_settings", "message": str(exc),
             "hint": "看 /api/settings 里的 defaults 与允许范围"})
-    applied = _apply_settings(request, conf)
+    applied = _apply_settings(request, conf, set(payload or {}))
     return {"ok": True, "settings": conf, "applied": applied,
             "resolved": {"plugins_dir": str(settings_mod.resolve_plugins_dir(
                 str(conf.get("plugins_dir") or ""))),
@@ -273,6 +277,45 @@ def install_plugin(request: Request, plugin_id: str) -> dict:
     _runner(request).host = PluginHost(plugins_dir=target)  # 重新发现插件目录
     sync_installed(store, target)
     return {"ok": True, "result": result}
+
+
+def _reload_plugins(request: Request) -> None:
+    """装/更新/卸载之后重新发现插件目录：目录是事实，库只是索引。"""
+    store = _store(request)
+    conf = settings_mod.load()
+    target = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
+    _runner(request).host = PluginHost(plugins_dir=target)
+    sync_installed(store, target)
+
+
+@router.post("/plugins/{plugin_id}/update")
+def update_plugin(request: Request, plugin_id: str) -> dict:
+    store = _store(request)
+    try:
+        result = market.update(store, plugin_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail={
+            "code": "update_failed", "message": f"{type(exc).__name__}: {exc}"[:300],
+            "hint": "先看市场页的版本与 sha256；更新走的是和安装同一条下载校验链路"})
+    _reload_plugins(request)
+    return {"ok": True, "result": result}
+
+
+@router.post("/market/update-all")
+def update_all_plugins(request: Request) -> dict:
+    store = _store(request)
+    result = market.update_all(store)
+    if result.get("updated"):
+        _reload_plugins(request)
+    return {"ok": True, "result": result}
+
+
+@router.get("/market/updates")
+def market_updates(request: Request) -> dict:
+    """只报「可更新」，不下载。市场页与设置页共用一个口径。"""
+    store = _store(request)
+    items = market.pending_updates(store)
+    return {"count": len(items), "items": items}
 
 
 @router.delete("/plugins/{plugin_id}")

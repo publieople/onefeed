@@ -36,6 +36,7 @@ def create_app(store: Store | None = None) -> FastAPI:
         host=PluginHost(plugins_dir=plugins_dir),
         limit=int(conf.get("per_plugin_limit") or 12),
         prune_days=int(conf.get("prune_days") or 14),
+        auto_update=bool(conf.get("auto_update")),
     )
 
     app.include_router(router)

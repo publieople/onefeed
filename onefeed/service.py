@@ -9,12 +9,13 @@ import json
 import os
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Iterable
 
 from plugin_runtime.host import PluginHost, default_plugins_dir
 
-from . import smart
+from . import market, smart
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = ROOT / "fixtures"
@@ -53,11 +54,12 @@ def sync_installed(store, root: Path | None = None) -> int:
 
 class RefreshRunner:
     def __init__(self, store, host: PluginHost | None = None, limit: int = 12,
-                 prune_days: int = 14) -> None:
+                 prune_days: int = 14, auto_update: bool = False) -> None:
         self.store = store
         self.host = host or PluginHost()
         self.limit = limit
         self.prune_days = prune_days
+        self.auto_update = auto_update
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._state: dict[str, Any] = {
@@ -90,6 +92,7 @@ class RefreshRunner:
             self._state = {
                 "running": True, "started_at": int(time.time()), "finished_at": 0,
                 "done": 0, "total": len(ids), "error": "", "warmup": warmup,
+                "market": {"checked": 0, "updated": [], "failed": []},
                 "plugins": {pid: {"status": "queued", "count": 0, "error": "", "ms": 0}
                             for pid in ids},
             }
@@ -110,6 +113,24 @@ class RefreshRunner:
 
     def _run(self, ids: list[str], warmup: bool) -> None:
         try:
+            if self.auto_update and not demo_mode():
+                # 采集前先问一次 registry（走 1h 缓存，不会每轮都打网络）。
+                # 装了新版要重新发现插件，否则这一轮还是旧 manifest。
+                try:
+                    result = market.update_all(self.store)
+                    with self._lock:
+                        self._state["market"] = {
+                            "checked": result.get("checked", 0),
+                            "updated": result.get("updated", []),
+                            "failed": result.get("failed", []),
+                        }
+                    if result.get("updated"):
+                        self.host.discover()
+                except Exception as exc:  # 更新失败不该拖垮采集
+                    with self._lock:
+                        self._state["market"] = {"checked": 0, "updated": [],
+                                                 "failed": [{"id": "registry",
+                                                             "error": f"{type(exc).__name__}: {exc}"[:160]}]}
             for pid in ids:
                 started = time.time()
                 self._set(pid, status="running")
@@ -123,7 +144,9 @@ class RefreshRunner:
                     self._set(pid, status="ok", count=count,
                               ms=int((time.time() - started) * 1000))
                 except Exception as exc:  # 单个插件失败不影响其它平台
-                    reason = f"{type(exc).__name__}: {exc}"[:300]
+                    tb = traceback.format_exc().strip().splitlines()
+                    tail = " | ".join(tb[-3:]) if tb else ""
+                    reason = f"{type(exc).__name__}: {exc} | {tail}"[:600]
                     self.store.finish_run(run_id, False, 0, reason)
                     self._set(pid, status="failed", error=reason,
                               ms=int((time.time() - started) * 1000))

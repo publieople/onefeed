@@ -69,7 +69,7 @@ def main() -> int:
 
         # 建表与迁移
         check(db.is_file(), "数据库文件已创建")
-        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 1, "user_version = 1")
+        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 2, "user_version = 2")
 
         # upsert 幂等
         rows = sample(5)
@@ -101,9 +101,27 @@ def main() -> int:
         check([r["id"] for r in third] == ["demo:item4"], "最后一页只有 1 条")
         check(cur3 is None, "到底时 next_cursor 为 None")
 
-        # engagement 排序
+        # engagement 排序：同平台内按分位归一，不拿别人的百万点赞压死小平台
         eng, _ = store.page(sort="engagement", limit=5)
         check(len(eng) == 5, "engagement 排序可执行")
+        check(eng[0]["id"] == "demo:item4", "互动最高的排第一（item4）")
+        check(eng[0]["engage_score"] == 1000, "本平台第一名记满分 1000")
+        check(eng[0]["engage_score"] > store.get_item("demo:item0")["engage_score"], "同平台内高处分数更高")
+
+        # 跨平台：另一个平台只有个位数互动，它的头名也应当是 1000，而不是被 demo 压成 0
+        store.upsert_items([
+            {"id": "tiny:a", "platform": "tiny", "kind": "short", "title": "小平台第一",
+             "like": 9, "published_at": 1000},
+            {"id": "tiny:b", "platform": "tiny", "kind": "short", "title": "小平台第二",
+             "like": 1, "published_at": 999},
+        ])
+        check(store.get_item("tiny:a")["engage_score"] == 1000, "小平台头名同样是 1000")
+        check(store.get_item("tiny:b")["engage_score"] == 0, "小平台末名是 0")
+        mix, _ = store.page(sort="engagement", limit=2)
+        check({r["platform"] for r in mix} == {"demo", "tiny"}, "跨平台热度不再被大计数平台垄断")
+        # 没有互动字段的平台整体记 0，不许并列满分
+        store.upsert_items([{"id": "flat:a", "platform": "flat", "kind": "short", "title": "无互动"}])
+        check(store.get_item("flat:a")["engage_score"] == 0, "整平台无互动时记 0")
 
         # 过滤
         vids, _ = store.page(kind="video", limit=10)

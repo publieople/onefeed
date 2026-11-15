@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -41,10 +41,12 @@ CREATE TABLE IF NOT EXISTS items (
     tags          TEXT NOT NULL DEFAULT '[]',
     extra         TEXT NOT NULL DEFAULT '{}',
     cluster_id    TEXT NOT NULL DEFAULT '',
-    fetched_at    INTEGER NOT NULL DEFAULT 0
+    fetched_at    INTEGER NOT NULL DEFAULT 0,
+    engage_score  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_items_pub ON items(published_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_items_platform ON items(platform, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_items_engage ON items(engage_score DESC, published_at DESC);
 
 CREATE TABLE IF NOT EXISTS runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +77,10 @@ JSON_COLUMNS = ("images", "tags", "extra")
 # 没有发布时间时（小红书首页流、知乎热榜就不给），排序按「采集时间 - 24h」估个位：
 # 真正新鲜的先上，无时间的也不会永远沉底；显示层仍然不写时间，不编造。
 FRESH_KEY = "COALESCE(NULLIF(i.published_at, 0), i.fetched_at - 86400)"
-ENGAGE_KEY = "(i.like_count + i.comment_count * 2 + i.share_count * 3)"
+# 跨平台不能直接比计数（B 站 5 千播放和知乎 400 万热度不是一个量级），
+# 所以热度统一用「本平台内分位」：刷新后重算 engage_score（0–1000），排序只比这个分。
+ENGAGE_RAW = "(like_count + comment_count * 2 + share_count * 3 + view_count * 0.05)"
+ENGAGE_KEY = "i.engage_score"
 
 SORTS = {"freshness": f"{FRESH_KEY} DESC, i.id DESC",
          "engagement": f"{ENGAGE_KEY} DESC, {FRESH_KEY} DESC, i.id DESC"}
@@ -97,8 +102,7 @@ def default_db_path() -> Path:
 
 def sort_value(row: dict[str, Any], sort: str) -> int:
     if sort == "engagement":
-        return (int(row.get("like_count") or 0) + int(row.get("comment_count") or 0) * 2
-                + int(row.get("share_count") or 0) * 3)
+        return int(row.get("engage_score") or 0)
     return int(row.get("published_at") or 0) or max(0, int(row.get("fetched_at") or 0) - 86400)
 
 
@@ -136,6 +140,10 @@ class Store:
             conn = sqlite3.connect(str(self.path), timeout=10.0, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
+            # 窗口函数（热度分位）要临时空间；本机用户 Temp 目录不可写时
+            # SQLite 会直接报 "unable to open database file"，所以固定走内存。
+            # 条目量级（万级以内）内存完全够，不必落盘换页。
+            conn.execute("PRAGMA temp_store=MEMORY")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.conn = conn
@@ -167,9 +175,39 @@ class Store:
             version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             if version >= SCHEMA_VERSION:
                 return
-            conn.executescript(SCHEMA)
+            if version < 1:
+                conn.executescript(SCHEMA)
+            if version < 2:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(items)")}
+                if "engage_score" not in columns:
+                    conn.execute("ALTER TABLE items ADD COLUMN engage_score INTEGER NOT NULL DEFAULT 0")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_engage "
+                             "ON items(engage_score DESC, published_at DESC)")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
+        self.recompute_engage()
+
+    def recompute_engage(self) -> None:
+        """按平台内分位重算热度分（0–1000）：跨平台比计数没有意义，比名次才有。
+
+        同一平台内数据全为 0（比如没有互动字段的论坛帖）就记 0，
+        免得所有条目并列满分、把别的平台挤下去。
+        """
+        sql = f"""
+        UPDATE items SET engage_score = COALESCE((
+            SELECT CASE WHEN mx.mx <= 0 THEN 0
+                        ELSE CAST(1000.0 * (1.0 - r.pr) AS INTEGER) END
+            FROM (SELECT id, PERCENT_RANK() OVER (
+                      PARTITION BY platform ORDER BY {ENGAGE_RAW} DESC) AS pr
+                  FROM items) AS r
+            JOIN (SELECT platform, MAX({ENGAGE_RAW}) AS mx FROM items GROUP BY platform) AS mx
+              ON mx.platform = items.platform
+            WHERE r.id = items.id
+        ), 0)
+        """
+        with self._write_lock:
+            self.conn.execute(sql)
+            self.conn.commit()
 
     # ------------------------------------------------------------ items
     def upsert_items(self, items: Iterable[Any]) -> int:
@@ -186,6 +224,7 @@ class Store:
         with self._write_lock:
             cur = self.conn.executemany(sql, values)
             self.conn.commit()
+        self.recompute_engage()
         return cur.rowcount if cur.rowcount >= 0 else len(rows)
 
     @staticmethod

@@ -110,6 +110,18 @@ def _cookie_names(plugin_id: str) -> list[str]:
     return []
 
 
+def _launch_hint(error: str) -> str:
+    """把 Playwright 的原始报错翻成能照着做的一句话。"""
+    low = error.lower()
+    if "executable doesn't exist" in low or "channel" in low and "not found" in low:
+        return ("本机没找到 Chrome：登录窗口用的是系统装的 Chrome，不是 Playwright 自带的 Chromium。"
+                "装一个 Chrome 再点一次「打开登录窗口」。" + "（" + error[:160] + "）")
+    if "eperm" in low or "mkdtemp" in low:
+        return ("临时目录写不进去，Playwright 起不来。把 TMP/TEMP 指到可写目录后重启 OneFeed。"
+                + "（" + error[:160] + "）")
+    return "浏览器没起来：" + error
+
+
 class _Session:
     """一个登录窗口 = 一个后台线程 + 一个 Playwright 持久上下文。"""
 
@@ -149,7 +161,7 @@ class _Session:
                 except Exception as exc:              # 浏览器没起来
                     self.state = "error"
                     self.error = f"{type(exc).__name__}: {exc}"[:300]
-                    self.message = "浏览器没起来：" + self.error
+                    self.message = _launch_hint(self.error)
                     self.ready.set()
                     return
 

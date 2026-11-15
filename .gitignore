@@ -19,6 +19,7 @@ fixtures/raw/
 .onefeed/
 .dy/
 onefeed-state-*/
+onefeed-market-*/
 *.db
 *.sqlite
 *.sqlite3

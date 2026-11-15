@@ -1,7 +1,7 @@
 """运行时设置（一份 JSON，改完立即生效）。
 
 设置分两类，前端要如实标出来：
-- 立即生效：每轮条数、评论每页条数、registry 地址、插件目录（会重新发现插件）
+- 立即生效：每轮条数、评论每页条数、registry 地址、插件目录（会重新发现插件）、自动更新
 - 只影响下一次启动 / 只影响前端默认值：默认排序（前端读一次）、保留天数（每轮采集后 prune）
 
 优先级：环境变量（ONEFEED_REGISTRY / ONEFEED_PLUGINS_DIR）> settings.json > 默认值。
@@ -25,6 +25,9 @@ DEFAULTS: dict[str, Any] = {
     "comments_limit": 20,
     "default_sort": "freshness",
     "prune_days": 14,
+    # 自动更新：每轮采集前问一次 registry，有新版就静默升级。
+    # 默认关：现场演示时远端悄悄改插件不是好事；要开就是一键。
+    "auto_update": False,
 }
 
 ENV_KEYS = {"registry_url": "ONEFEED_REGISTRY", "plugins_dir": "ONEFEED_PLUGINS_DIR"}
@@ -100,6 +103,12 @@ def validate(patch: dict[str, Any]) -> dict[str, Any]:
         if not (low <= value <= high):
             raise ValueError(f"{key} 必须在 {low}–{high} 之间")
         out[key] = value
+
+    if "auto_update" in patch:
+        value = patch["auto_update"]
+        if not isinstance(value, bool):
+            raise ValueError("auto_update 必须是 true / false")
+        out["auto_update"] = value
 
     if "default_sort" in patch:
         value = str(patch["default_sort"] or "")

@@ -97,6 +97,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"端口 {args.port} 被占用（{'PID ' + pid if pid else '进程未知'}），"
               f"自动改用 {new_port}。", flush=True)
+        if pid:
+            kill = (f"taskkill /PID {pid} /T /F" if os.name == "nt" else f"kill -9 {pid}")
+            print(f"  如果那是上次没关掉的 OneFeed：{kill}", flush=True)
+        print(f"  想固定端口就加 --port {new_port}", flush=True)
         args.port = new_port
 
     import uvicorn
