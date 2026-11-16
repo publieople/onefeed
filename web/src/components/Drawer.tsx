@@ -18,7 +18,7 @@ const VIEW_LABEL: Record<string, string> = {
   list: "热度",
 };
 
-function CommentBody({ comment }: { comment: CommentItem }) {
+export function CommentBody({ comment }: { comment: CommentItem }) {
   const p = "#6b7280";
   return (
     <div className="flex gap-2.5">

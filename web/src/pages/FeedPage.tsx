@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { OutletCtx } from "../App";
 import { useFeed } from "../api";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
-import Drawer from "../components/Drawer";
 import FilterBox from "../components/FilterBox";
 import { platform } from "../platform";
 
@@ -16,7 +16,8 @@ export default function FeedPage({ ctx }: Props) {
   const [sort, setSort] = useState("");
   const [range, setRange] = useState<"all" | "today">("all");
   const [q, setQ] = useState("");
-  const [drawer, setDrawer] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const openItem = (id: string) => navigate("/item/" + encodeURIComponent(id));
 
   const activeSort = sort || ctx.settings?.settings.default_sort || "freshness";
   const since = useMemo(() => {
@@ -132,7 +133,7 @@ export default function FeedPage({ ctx }: Props) {
 
       <section className="mt-5 grid grid-cols-1 items-stretch gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
         {feed.items.map((item) => (
-          <Card key={item.id} item={item} onOpen={setDrawer} />
+          <Card key={item.id} item={item} onOpen={openItem} />
         ))}
       </section>
 
@@ -181,8 +182,6 @@ export default function FeedPage({ ctx }: Props) {
           正在看 {platform(selected[0]).label}，再点一个平台可以并排比较
         </div>
       ) : null}
-
-      <Drawer id={drawer} onClose={() => setDrawer(null)} />
     </div>
   );
 }

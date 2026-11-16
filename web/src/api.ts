@@ -158,6 +158,43 @@ export interface CommentsResponse {
   from_cache?: boolean;
 }
 
+export interface DetailBody {
+  kind: "html" | "markdown" | "text";
+  value: string;
+}
+
+export interface DetailMedia {
+  type: "embed" | "file";
+  embedUrl?: string;
+  url?: string;
+  poster?: string;
+  referer?: string;
+  duration?: number;
+  expiresAt?: number;
+}
+
+export interface DetailPayload {
+  body?: DetailBody;
+  media?: DetailMedia;
+  images?: string[];
+  stats?: Record<string, number>;
+  note?: string;
+}
+
+export interface DetailResponse {
+  supported: boolean;
+  detail: DetailPayload | null;
+  from_cache?: boolean;
+  fetched_at?: number;
+  reason?: string;
+  error?: string;
+}
+
+export function getDetail(id: string, refresh = false, signal?: AbortSignal): Promise<DetailResponse> {
+  const qs = refresh ? "?refresh=1" : "";
+  return getJSON<DetailResponse>("/api/item/" + encodeURIComponent(id) + "/detail" + qs, signal);
+}
+
 export interface Health {
   ok: boolean;
   version: string;

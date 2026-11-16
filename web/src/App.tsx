@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import TopBar from "./components/TopBar";
 import ProgressBar from "./components/ProgressBar";
 import FeedPage from "./pages/FeedPage";
+import ItemPage from "./pages/ItemPage";
 import MarketPage from "./pages/MarketPage";
 import SettingsPage from "./pages/SettingsPage";
 import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, type Summary } from "./api";
@@ -113,6 +114,7 @@ export default function App() {
       <main className="mx-auto w-full max-w-[1180px] px-6">
         <Routes>
           <Route path="/" element={<FeedPage ctx={ctx} />} />
+          <Route path="/item/:id" element={<ItemPage />} />
           <Route path="/market" element={<MarketPage ctx={ctx} />} />
           <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
         </Routes>
