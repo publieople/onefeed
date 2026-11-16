@@ -69,7 +69,7 @@ def main() -> int:
 
         # 建表与迁移
         check(db.is_file(), "数据库文件已创建")
-        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 2, "user_version = 2")
+        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 3, "user_version = 3")
 
         # upsert 幂等
         rows = sample(5)
@@ -153,6 +153,16 @@ def main() -> int:
         check(row["enabled"] == 0 and row["version"] == "0.1.0", "插件禁用状态可写可读")
         store.delete_plugin("demo")
         check(store.list_plugins() == [], "插件可删除")
+
+        # details：详情页缓存按 item_id 存，过期视为没有
+        store.save_detail("demo:item0", {"body": {"kind": "text", "value": "正文"}})
+        cached = store.get_detail("demo:item0", max_age=3600)
+        check(cached is not None and cached["payload"]["body"]["value"] == "正文", "详情可写可读")
+        store.conn.execute("UPDATE details SET fetched_at = fetched_at - 7200 WHERE item_id = ?", ("demo:item0",))
+        check(store.get_detail("demo:item0", max_age=3600) is None, "过期详情视为没有")
+        check(store.get_detail("demo:item0", max_age=0) is not None, "不设 TTL 时能读到旧缓存")
+        store.drop_detail("demo:item0")
+        check(store.get_detail("demo:item0", max_age=0) is None, "详情可删除")
 
         # 游标编解码
         check(decode_cursor(encode_cursor({"published_at": 123, "id": "a:b"})) == (123, "a:b"),

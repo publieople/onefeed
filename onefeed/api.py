@@ -9,11 +9,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+import urllib.parse
+
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from plugin_runtime.host import PluginHost
 from plugin_runtime.paths import state_root
 
-from . import __version__, auth as auth_mod, market, smart, settings as settings_mod
+from . import __version__, auth as auth_mod, market, media as media_mod, smart, settings as settings_mod
 from .service import RefreshRunner, demo_mode, sync_installed
 from .store import SORTS, Store
 
@@ -22,6 +25,9 @@ router = APIRouter(prefix="/api")
 # 评论不像信息流那样每分钟在变，缓存十分钟，省掉反复起子进程的开销。
 _COMMENT_CACHE: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
 COMMENT_TTL = 600
+
+# 详情比评论变得还慢；6 小时足够，刷新按钮会显式 refresh=1 绕过。
+DETAIL_TTL = 6 * 3600
 
 
 def _store(request: Request) -> Store:
@@ -226,6 +232,112 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
     payload = {"supported": True, "items": items, "count": len(items), "limit": limit}
     _COMMENT_CACHE[key] = (now, payload)
     return payload
+
+
+@router.get("/item/{item_id}/detail")
+def item_detail(request: Request, item_id: str, refresh: bool = Query(False)) -> dict:
+    """详情是插件的可选能力：没实现的插件照常出卡片，只是点开没有正文。"""
+    store = _store(request)
+    row = store.get_item(item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "item_not_found", "message": f"没有这条内容：{item_id}",
+            "hint": "从 /api/feed 的返回里取 id"})
+    plugin_id = row["platform"]
+    host = _runner(request).host
+    if not host.supports(plugin_id, "detail"):
+        return {"supported": False, "detail": None,
+                "reason": f"{plugin_id} 的插件没有提供详情接口"}
+
+    if not refresh:
+        cached = store.get_detail(item_id, max_age=DETAIL_TTL)
+        if cached:
+            return {"supported": True, "detail": cached["payload"], "from_cache": True,
+                    "fetched_at": cached["fetched_at"]}
+
+    try:
+        detail = host.detail(plugin_id, row)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "插件未实现" in message:
+            return {"supported": False, "detail": None,
+                    "reason": f"{plugin_id} 的插件没有提供详情接口"}
+        return {"supported": True, "detail": None, "error": message[:300]}
+
+    store.save_detail(item_id, detail)
+    return {"supported": True, "detail": detail, "from_cache": False,
+            "fetched_at": int(time.time())}
+
+
+@router.get("/media/{item_id}/{slot}")
+def media(request: Request, item_id: str, slot: str,
+          range_header: str | None = Header(None, alias="Range")):
+    """媒体边车：只回 details 表里存过的地址，前端给不了 URL。
+
+    存在的理由只有一个——抖音直链要 Referer。别的平台能直连就别走这里。
+    """
+    if not media_mod.SLOT_RE.match(slot):
+        raise HTTPException(status_code=404, detail={
+            "code": "bad_slot", "message": f"不认识的媒体位：{slot}",
+            "hint": "只有 video / poster / img-0 … img-11"})
+
+    store = _store(request)
+    row = store.get_item(item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "item_not_found", "message": f"没有这条内容：{item_id}", "hint": ""})
+    cached = store.get_detail(item_id, max_age=0)
+    if not cached:
+        raise HTTPException(status_code=404, detail={
+            "code": "detail_not_ready", "message": "还没有这条内容的详情缓存，媒体地址没地方取",
+            "hint": "先打开一次详情，再播放"})
+    target = media_mod.resolve_slot(cached["payload"], slot)
+    if target is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "media_missing", "message": f"这条内容没有 {slot} 这个媒体位", "hint": ""})
+
+    plugin_id = row["platform"]
+    try:
+        manifest = _runner(request).host.get(plugin_id)
+        hosts = list(manifest.media_hosts)
+    except Exception:
+        hosts = []
+    url_host = (urllib.parse.urlparse(target["url"]).hostname or "").lower()
+    cookie = media_mod.cookie_header(plugin_id) if media_mod._host_allowed(url_host, hosts) else ""
+
+    if not media_mod.SEMAPHORE.acquire(timeout=20):
+        raise HTTPException(status_code=503, detail={
+            "code": "busy", "message": "同时在拉的视频太多了", "hint": "等一会儿再试"})
+    try:
+        status, headers, resp = media_mod.open_stream(
+            target["url"], referer=target["referer"], cookie=cookie, range_header=range_header)
+    except Exception as exc:  # 网络层失败：别把半截流当成功
+        media_mod.SEMAPHORE.release()
+        raise HTTPException(status_code=502, detail={
+            "code": "media_failed", "message": f"取媒体失败：{exc}"[:300], "hint": "点原帖试试"})
+
+    if status >= 400:
+        try:
+            resp.close()
+        finally:
+            media_mod.SEMAPHORE.release()
+        raise HTTPException(status_code=502, detail={
+            "code": "media_failed", "message": f"平台拒绝了这次取流（HTTP {status}）",
+            "hint": "直链可能过期了，刷新详情再试"})
+
+    out = {k: headers[k] for k in
+           ("content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified")
+           if k in headers}
+    out["cache-control"] = "private, max-age=0"
+
+    def _body():
+        try:
+            yield from media_mod.iter_body(resp)
+        finally:
+            media_mod.SEMAPHORE.release()
+
+    return StreamingResponse(_body(), status_code=status, headers=out,
+                             media_type=headers.get("content-type", "application/octet-stream"))
 
 
 @router.post("/refresh", status_code=202)

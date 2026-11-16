@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,6 +20,12 @@ from .manifest import HOST_VERSION, Manifest, ManifestError, load_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TIMEOUTS = {"pull": 92.0, "comments": 92.0, "detail": 92.0, "auth": 60.0, "init": 30.0}
+
+# 只认这两家官方播放器；插件自己拼的 iframe 一律不收（那是绕过风险边界）。
+EMBED_HOSTS = {"player.bilibili.com": "bilibili", "open.douyin.com": "douyin"}
+DETAIL_BODY_MAX = 200_000
+DETAIL_NOTE_MAX = 400
+DETAIL_IMAGES_MAX = 12
 
 
 def default_plugins_dir() -> Path:
@@ -204,6 +211,79 @@ class PluginHost:
             raise RuntimeError(f"[{plugin_id}] {out['error']}")
         value = out["value"] or {}
         return list((value.get("items") if isinstance(value, dict) else []) or [])
+
+    def detail(self, plugin_id: str, item: Item | dict[str, Any]) -> dict[str, Any]:
+        """取一条内容的详情。插件只交字段，能渲染成什么样由宿主决定。"""
+        manifest = self.get(plugin_id)
+        if "detail" not in manifest.features:
+            raise RuntimeError(f"[{plugin_id}] 插件未实现 detail")
+        raw = item if isinstance(item, dict) else item.to_dict()
+        out = self.run(plugin_id, "detail", {"item": raw})
+        if not out["ok"]:
+            raise RuntimeError(f"[{plugin_id}] {out['error']}")
+        value = out["value"]
+        if not isinstance(value, dict):
+            raise RuntimeError(f"[{plugin_id}] detail 必须返回对象")
+        return self._normalize_detail(manifest, value)
+
+    def _normalize_detail(self, manifest: Manifest, value: dict[str, Any]) -> dict[str, Any]:
+        """白名单 + 边界检查：正文长度、图片数量、iframe 只认官方播放器。"""
+        out: dict[str, Any] = {}
+
+        body = value.get("body")
+        if isinstance(body, dict):
+            kind = str(body.get("kind") or "text")
+            if kind not in ("html", "markdown", "text"):
+                kind = "text"
+            text = body.get("value")
+            if isinstance(text, str) and text.strip():
+                out["body"] = {"kind": kind, "value": text[:DETAIL_BODY_MAX]}
+
+        media = self._normalize_media(manifest, value.get("media"))
+        if media:
+            out["media"] = media
+
+        images = value.get("images")
+        if isinstance(images, list):
+            urls = [str(u) for u in images if isinstance(u, str) and u.startswith(("http://", "https://"))]
+            if urls:
+                out["images"] = urls[:DETAIL_IMAGES_MAX]
+
+        stats = value.get("stats")
+        if isinstance(stats, dict):
+            clean = {str(k): clamp(v) for k, v in stats.items() if isinstance(v, (int, float, str))}
+            if clean:
+                out["stats"] = clean
+
+        note = value.get("note")
+        if isinstance(note, str) and note.strip():
+            out["note"] = note.strip()[:DETAIL_NOTE_MAX]
+        return out
+
+    def _normalize_media(self, manifest: Manifest, media: Any) -> dict[str, Any] | None:
+        if not isinstance(media, dict):
+            return None
+        kind = str(media.get("type") or "")
+        if kind == "embed":
+            url = str(media.get("embedUrl") or "")
+            host = (urllib.parse.urlparse(url).hostname or "").lower()
+            provider = EMBED_HOSTS.get(host)
+            if provider is None or provider not in manifest.embeds:
+                print(f"[{manifest.id}] 丢弃未声明的嵌入源: {url[:120]}", file=sys.stderr)
+                return None
+            return {"type": "embed", "embedUrl": url,
+                    "poster": str(media.get("poster") or ""),
+                    "duration": clamp(media.get("duration"))}
+        if kind == "file":
+            url = str(media.get("url") or "")
+            if not url.startswith(("http://", "https://")):
+                return None
+            return {"type": "file", "url": url,
+                    "poster": str(media.get("poster") or ""),
+                    "referer": str(media.get("referer") or ""),
+                    "duration": clamp(media.get("duration")),
+                    "expiresAt": clamp(media.get("expiresAt"))}
+        return None
 
     def auth(self, plugin_id: str) -> dict[str, Any]:
         manifest = self.get(plugin_id)

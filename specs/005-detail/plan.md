@@ -107,3 +107,27 @@
 - 11-17：P1 三个插件 + 详情页骨架，跑通 B 站/V2EX。
 - 11-18：P2，掘金正文和图文画廊。
 - 11-20 前：P3 小红书/抖音，能通则演示时多两个平台，不能通则按 AC-D7 降级，不阻塞主链路。
+
+## 7. 交付状态（2026-11-16）
+
+P1 已落地并实测，T43 的小红书与 T44 的抖音按等价方案提前做了（不需要 capture）：
+
+- [x] T31 details 表：`SCHEMA_VERSION = 3`，`get_detail(item_id, max_age)` / `save_detail` / `drop_detail`；`tests/test_store.py` 37 项（含过期与删除）。
+- [x] T32 `PluginHost.detail()`：复用子进程，超时 `DEFAULT_TIMEOUTS["detail"]=92.0`，结果只留 `body/media/images/stats/note`；manifest 新增 `features`（comments/detail/media）与 `mediaHosts`。
+- [x] T33 `GET /api/item/{item_id}/detail`：未声明 → `{supported:false, reason:"<plugin> 的插件没有提供详情接口"}`；缓存 6h；`refresh=1` 强制重取；异常只回 `error`，不带 hint。
+- [x] T34 `GET /api/media/{item_id}/{slot}`（`onefeed/media.py`）：slot 白名单 `video|poster|img-\d+`，URL 只从 details 表取；Range 透传；命中 `mediaHosts` 才注 Cookie；实测 `206 video/mp4` / `206 image/webp` / 不存在 404。
+- [x] T35 bilibili 0.3.0：`bili video info <bv> --raw` + `player.bilibili.com/player.html?bvid=` embed；`mediaHosts ["*.hdslb.com","*.bilibili.com"]`。
+- [x] T36 v2ex 0.2.0：`/api/topics/show.json?id=` 的 `content_rendered` 作 html body。
+- [x] T37 掘金 0.2.0：抓 `juejin.cn/post/<id>` 截 `<article>`，去掉复制过来的 `<meta>`、`<h1>` 标题与作者块（页面上已经显示过）。
+- [x] T43 小红书 0.3.0（替代 capture 方案）：`ctx.browser.extract({name:"xhs.note"})` 读页内 `__INITIAL_STATE__`（`undefined` / `new Map([])` 字面量没法当 JSON 解析，只能在浏览器里 evaluate）；`media.referer` 让直链走边车（浏览器带本地 Referer 会被 xhscdn 403）；`mediaHosts ["*.xhscdn.com"]`。
+- [x] T44 抖音 0.2.0（替代 capture 方案）：`open.douyin.com/player/video?vid=<aweme_id>` 官方播放器 embed，不抓详情、不碰签名。
+- [x] T38 `web/src/pages/ItemPage.tsx` + `App.tsx` 的 `/item/:id`；`FeedPage` 卡片改为 `navigate`。
+- [x] T39 DOMPurify 净化 html 正文；图片走 `/api/media/<id>/img-N`；单图居中大图、多图网格 + 灯箱；视频笔记不重复铺封面。
+
+未做（P2/P3 余项）：T40 抖音 `pull` 保留 `play_addr`、T41 知乎热榜详情卡、T42 抽 `Comments`/`Siblings` 组件、T45 抽屉下线、T46 `expiresAt` 自动刷新。
+
+验收证据（`design/`）：`detail-feed-entry.png`、`detail-bilibili-top.png`、`detail-bilibili-comments.png`、`detail-douyin-player.png`、`detail-xhs-video.png`、`detail-xhs-body.png`、`detail-xhs-images.png`、`detail-juejin.png`、`detail-v2ex.png`、`detail-zhihu-fallback.png`。
+
+测试：`uv run python tests/run_all.py --offline`（store 37 / api 24 / settings 31 / auth 5 / market 44 / entry 7 全过）、`cd web && npm run build` 通过、`scripts/validate.py` 6/6。
+
+实际耗时：T31–T39 约 5 小时（含小红书 403 排查与掘金去头），比 P1 预算 6–8h 略快；剩下的 P2/P3 里只有 T45（抽屉下线）会影响演示观感，建议在彩排前处理。

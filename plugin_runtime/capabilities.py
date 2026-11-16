@@ -36,6 +36,107 @@ SAFE_ENV_KEYS = ("PATH", "PATHEXT", "SystemRoot", "windir", "COMSPEC", "USERPROF
                  "PROCESSOR_ARCHITECTURE", "PYTHONUTF8", "PYTHONIOENCODING")
 PROXY_CANDIDATES = ("", "http://127.0.0.1:7890", "http://127.0.0.1:10809")
 
+# 具名提取器：宿主写死，插件只能点名调用，不能塞自己的 JS。
+# 页面里的 __INITIAL_STATE__ 带 undefined / new Map([]) 这类字面量，服务端拿 HTML 解析不了，
+# 必须在浏览器里 evaluate 出来再当 JSON 交回去。
+EXTRACTORS: dict[str, dict[str, Any]] = {
+    "xhs.note": {
+        "hosts": ("xiaohongshu.com",),
+        "settleMs": 3500,
+        "js": r"""() => {
+  try {
+    const st = window.__INITIAL_STATE__ || {};
+    const note = st.note || {};
+    const map = note.noteDetailMap || note.note_detail_map || {};
+    const keys = Object.keys(map);
+    if (!keys.length) return { ok: false, reason: 'no_note_map', href: location.href };
+    const first = map[keys[0]] || {};
+    const card = first.note || first.noteCard || {};
+    const video = card.video || {};
+    const media = video.media || {};
+    const stream = media.stream || {};
+    const streams = [];
+    Object.keys(stream).forEach(function (codec) {
+      const list = stream[codec];
+      if (!Array.isArray(list)) return;
+      list.forEach(function (s) {
+        if (s && s.masterUrl) streams.push({ codec: codec, url: String(s.masterUrl), quality: String(s.qualityType || ''), format: String(s.format || '') });
+      });
+    });
+    const images = [];
+    (card.imageList || []).forEach(function (img) {
+      if (!img) return;
+      const info = (img.infoList || []).filter(function (i) { return i && i.imageScene === 'WB_DFT'; })[0] || {};
+      const url = String(info.url || img.urlDefault || img.urlPre || img.url || '');
+      if (url) images.push(url);
+    });
+    const user = card.user || {};
+    const interact = card.interactInfo || {};
+    const capa = video.capa || {};
+    return {
+      ok: true,
+      id: String(first.noteId || card.noteId || ''),
+      title: String(card.title || ''),
+      desc: String(card.desc || ''),
+      type: String(card.type || ''),
+      ipLocation: String(card.ipLocation || ''),
+      time: Number(card.time || 0),
+      user: { name: String(user.nickname || ''), id: String(user.userId || ''), avatar: String(user.avatar || '') },
+      interact: { like: String(interact.likedCount || ''), comment: String(interact.commentCount || ''), collect: String(interact.collectedCount || ''), share: String(interact.shareCount || '') },
+      images: images,
+      duration: Number(capa.duration || 0),
+      streams: streams,
+      tags: (card.tagList || []).map(function (t) { return String(t && t.name || ''); }).filter(Boolean)
+    };
+  } catch (e) { return { ok: false, reason: String(e).slice(0, 300) }; }
+}""",
+    },
+    "zhihu.question": {
+        "hosts": ("zhihu.com",),
+        "settleMs": 4000,
+        "js": r"""() => {
+  try {
+    const el = document.getElementById('js-initialData');
+    if (!el) return { ok: false, reason: 'no_initial_data', href: location.href };
+    const data = JSON.parse(el.textContent || '{}');
+    const state = data.initialState || {};
+    const ents = state.entities || {};
+    const questions = ents.questions || {};
+    const qKeys = Object.keys(questions);
+    const q = qKeys.length ? questions[qKeys[0]] : {};
+    const answers = ents.answers || {};
+    const rows = [];
+    Object.keys(answers).forEach(function (key) {
+      const a = answers[key] || {};
+      const author = a.author || {};
+      rows.push({
+        id: String(a.id || key),
+        author: String(author.name || ''),
+        authorUrl: String(author.urlToken || ''),
+        voteup: Number(a.voteupCount || 0),
+        comment: Number(a.commentCount || 0),
+        createdTime: Number(a.createdTime || 0),
+        content: String(a.content || '').slice(0, 60000)
+      });
+    });
+    rows.sort(function (x, y) { return y.voteup - x.voteup; });
+    return {
+      ok: true,
+      question: {
+        id: String(q.id || ''),
+        title: String(q.title || ''),
+        detail: String(q.detail || '').slice(0, 20000),
+        answerCount: Number(q.answerCount || 0),
+        followerCount: Number(q.followerCount || 0),
+        commentCount: Number(q.commentCount || 0)
+      },
+      answers: rows.slice(0, 5)
+    };
+  } catch (e) { return { ok: false, reason: String(e).slice(0, 300) }; }
+}""",
+    },
+}
+
 
 def clean_env() -> dict[str, str]:
     """子进程用的环境：白名单 + 强制 UTF-8，不带任何代理变量。"""
@@ -122,6 +223,7 @@ class Capabilities:
                 "http": self._http,
                 "cli": self._cli,
                 "browser": self._browser,
+                "extract": self._extract,
                 "storage": self._storage,
                 "cache": self._cache,
                 "settings": self._settings,
@@ -133,6 +235,8 @@ class Capabilities:
             if cap == "cli" and "cli" not in self.manifest.capabilities:
                 raise PermissionError("插件未声明 cli 能力")
             if cap == "browser" and "browser" not in self.manifest.capabilities:
+                raise PermissionError("插件未声明 browser 能力")
+            if cap == "extract" and "browser" not in self.manifest.capabilities:
                 raise PermissionError("插件未声明 browser 能力")
             return json.dumps({"ok": True, "data": handler(req)}, ensure_ascii=False)
         except Exception as exc:  # 能力层异常一律转成 JS 侧可读错误
@@ -330,6 +434,62 @@ class Capabilities:
             if want_html:
                 out["html"] = page.content()[:MAX_HTML_CHARS]
             return out
+        finally:
+            try:
+                if ctx is not None:
+                    ctx.close()
+            finally:
+                pw.stop()
+
+    # ------------------------------------------------------------ extract
+    def _new_context(self, pw, profile: str, headless: bool):
+        return pw.chromium.launch_persistent_context(
+            user_data_dir=str(profile),
+            executable_path=_find_chrome(),
+            headless=headless,
+            locale="zh-CN",
+            viewport={"width": 1440, "height": 900},
+            user_agent=UA,
+            args=["--disable-blink-features=AutomationControlled", "--window-size=1440,900"],
+        )
+
+    def _extract(self, req: dict[str, Any]) -> dict[str, Any]:
+        """按名字跑一个宿主内置的页内提取器（插件不能自带 JS）。
+
+        为什么不在服务端解析 HTML：小红书把 undefined / new Map([]) 写进了
+        __INITIAL_STATE__，知乎的内容在 js-initialData 里，都得让页面自己算。
+        """
+        from playwright.sync_api import sync_playwright
+
+        name = str(req.get("name") or "")
+        spec = EXTRACTORS.get(name)
+        if spec is None:
+            raise PermissionError("未知提取器：" + name + "（可用：" + ", ".join(EXTRACTORS) + "）")
+
+        url = str(req.get("url") or "")
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("extract 需要 http(s) url")
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+        if not any(host == h or host.endswith("." + h) for h in spec["hosts"]):
+            raise PermissionError("提取器 " + name + " 只认 " + "/".join(spec["hosts"]) + " 的页面")
+
+        timeout_ms = min(int(req.get("timeoutMs") or 45000), 90000)
+        settle_ms = min(int(req.get("settleMs") or spec.get("settleMs") or 3000), 15000)
+        profile = self.settings.get("browserProfile") or str(browser_profile(self.manifest.id))
+        Path(profile).mkdir(parents=True, exist_ok=True)
+
+        ensure_temp_env()
+        self.log("info", "extract " + name + " " + url[:120])
+        pw = sync_playwright().start()
+        ctx = None
+        try:
+            ctx = self._new_context(pw, profile, bool(req.get("headless", True)))
+            self._inject_browser_cookies(ctx)
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            page.wait_for_timeout(settle_ms)
+            value = page.evaluate(spec["js"])
+            return {"url": page.url, "name": name, "value": value}
         finally:
             try:
                 if ctx is not None:

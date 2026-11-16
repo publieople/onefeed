@@ -16,10 +16,14 @@ HOST_VERSION = "0.2.0"
 CAPABILITIES = {"http", "browser", "cli"}
 KINDS = {"video", "images", "article", "short", "list"}
 # 能力（capabilities）说的是"插件能调什么"，feature 说的是"插件对外提供什么额外内容"。
-# 评论是可选能力：实现了 comments() 的插件才认领它，没实现的平台照常出卡片。
-FEATURES = {"comments"}
+# 评论/详情/媒体都是可选能力：认领了才调，没认领的平台照常出卡片。
+FEATURES = {"comments", "detail", "media"}
+# 宿主能渲染的整站嵌入只有这两家：B 站官方播放器、抖音官方播放器。
+# 其它平台（小红书/知乎/快手…）一律走插件自渲染正文，别拿 iframe 硬套。
+EMBED_PROVIDERS = {"bilibili", "douyin"}
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+HOST_RE = re.compile(r"^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 
 
 class ManifestError(ValueError):
@@ -53,6 +57,8 @@ class Manifest:
     cli_allow: list[list[str]] = field(default_factory=list)
     settings: list[dict[str, Any]] = field(default_factory=list)
     features: set[str] = field(default_factory=set)
+    embeds: list[str] = field(default_factory=list)        # 允许嵌的播放器：bilibili / douyin
+    media_hosts: list[str] = field(default_factory=list)   # 边车可注 Cookie 的域（*.xhscdn.com）
 
     # ---- 便捷属性 ----
     @property
@@ -167,11 +173,29 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
 
     features = data.get("features", [])
     if not isinstance(features, list):
-        errors.append("features 必须是数组（当前只有 comments 一项可选）")
+        errors.append(f"features 必须是数组（可选 {sorted(FEATURES)}）")
     else:
         bad = [f for f in features if f not in FEATURES]
         if bad:
             errors.append(f"未知 feature：{bad}（可选 {sorted(FEATURES)}）")
+        if "media" in features and "detail" not in features:
+            errors.append("声明了 media 就要同时声明 detail：媒体地址只能从详情里来")
+
+    embeds = data.get("embeds", [])
+    if not isinstance(embeds, list) or not all(isinstance(e, str) for e in embeds):
+        errors.append("embeds 必须是字符串数组，例如 [\"bilibili\"]")
+    else:
+        bad = [e for e in embeds if e not in EMBED_PROVIDERS]
+        if bad:
+            errors.append(f"未知 embed 提供方：{bad}（宿主只渲染 {sorted(EMBED_PROVIDERS)}）")
+
+    media_hosts = data.get("mediaHosts", [])
+    if not isinstance(media_hosts, list) or not all(isinstance(h, str) for h in media_hosts):
+        errors.append("mediaHosts 必须是字符串数组，例如 [\"*.xhscdn.com\"]")
+    else:
+        bad = [h for h in media_hosts if not HOST_RE.match(h)]
+        if bad:
+            errors.append(f"mediaHosts 每项必须是不带协议的域名（可带 *. 前缀）：{bad}")
 
     settings = data.get("settings", [])
     if not isinstance(settings, list):
@@ -220,4 +244,6 @@ def load_manifest(plugin_dir: Path | str, host_version: str = HOST_VERSION) -> M
         cli_allow=cli_allow,
         settings=list(data.get("settings") or []),
         features=set(data.get("features") or []),
+        embeds=list(data.get("embeds") or []),
+        media_hosts=list(data.get("mediaHosts") or []),
     )

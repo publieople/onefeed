@@ -50,7 +50,9 @@ globalThis.__ctx__ = {
     run: function (opts) { return Promise.resolve().then(function () { return __call("cli", opts); }); }
   },
   browser: {
-    capture: function (opts) { return Promise.resolve().then(function () { return __call("browser", opts); }); }
+    capture: function (opts) { return Promise.resolve().then(function () { return __call("browser", opts); }); },
+    // 只能点名宿主内置的提取器（xhs.note / zhihu.question），插件塞不进自己的 JS
+    extract: function (opts) { return Promise.resolve().then(function () { return __call("extract", opts); }); }
   },
   storage: {
     get: function (k) { return __call("storage", { op: "get", key: k }).value; },
