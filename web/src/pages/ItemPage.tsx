@@ -321,7 +321,10 @@ export default function ItemPage() {
       ) : null}
 
       {detailLoading ? (
-        <div className="mt-5 aspect-video animate-pulse rounded-xl bg-wash" />
+        <div className="mt-5">
+          <div className="aspect-video animate-pulse rounded-xl bg-wash" />
+          <p className="mt-2 text-[12px] text-fade">正在取详情…（小红书要开浏览器取一次，通常十几秒）</p>
+        </div>
       ) : (
         <Media item={item} media={payload?.media} />
       )}
