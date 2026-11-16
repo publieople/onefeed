@@ -39,6 +39,13 @@ SPECS: dict[str, dict[str, Any]] = {
         "cookies": ("sessionid", "sessionid_ss"),
         "impact": "抖音未登录也能采到网页推荐流；登录后是更贴近你自己的那一条。",
     },
+    "zhihu": {
+        "label": "知乎",
+        "url": "https://www.zhihu.com/",
+        "domain": ".zhihu.com",
+        "cookies": ("z_c0",),
+        "impact": "知乎首页 2026 年起对游客直接跳登录页，推荐流和关注流都要求登录态。",
+    },
 }
 
 # 登录态由外部 CLI 管理的平台，宿主不开窗口，只负责说清楚怎么弄。
