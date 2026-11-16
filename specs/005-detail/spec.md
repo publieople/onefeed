@@ -224,3 +224,16 @@ TTL：默认 6 小时；插件给了 `media.expiresAt` 时取两者较小值。�
 1. `media.type="embed"` 只留给 B 站。小红书、抖音、知乎的详情正文由插件给出 `{body}`，媒体走 `type="file"` 直链或只显示封面 + 「去原帖」，别在 iframe 里赌能不能出内容。
 2. 知乎要接进来，先加 `auth.py:SPECS` 一条登录窗口（`url=https://www.zhihu.com/`、`domain=.zhihu.com`、判据 cookie `z_c0`），用宿主登录窗口拿到 `z_c0` 再回放 question 页；登录态下才谈得上 `ctx.http` 读页面或 `ctx.browser` 截取。推荐流另有 `x-zse-96` 签名门槛，纯 http 那条路走不通。
 
+## 10. 补充：不靠 iframe 的四条嵌入路线（2026-11-16 实测）
+
+§9 只证明了「原站网页塞进 iframe」不通，不等于详情页做不出来。完整路线、别人项目里的先例、每条的实测数据写在 [`embedding-routes.md`](./embedding-routes.md)，这里只记对 spec 有改动的三条：
+
+1. **抖音有官方可嵌播放器**：`https://open.douyin.com/player/video?vid=<aweme_id>`，响应 200、无 XFO/CSP；第三方页面里点播放实测 `currentTime=7.73s`、`readyState=4`。所以 §9 的「抖音只能显示封面 + 去原帖」作废，`media.type="embed"` 对抖音同样适用（`vid` 必须是数字 aweme_id，传 `play_addr.uri` 会显示"加载失败"）。
+2. **小红书不需要边车**：回放 `window.__INITIAL_STATE__.note.noteDetailMap` 能拿到标题、正文、图集、`media.stream` 视频流；媒体直链（`xhscdn.com`，带 `sign`+`t`）**无 Referer 也返回 206**，前端可直接 `<video>/<img>`。
+3. **知乎按内容判定，不看状态码**：回放 question 页时 HTTP 是 403，但 `js-initialData.initialState.entities` 完整（question 带 `answerCount=241`、3 条 answer 含作者/赞数/正文）。判定条件写成「有 `js-initialData` 就算成功」。
+
+抖音直链（`douyinvod.com`）仍是唯一需要 `/api/media` 注入 `Referer: https://www.douyin.com/` 的：无 Referer 403，带 Referer 206 `video/mp4`。边车因此保留，作为「官方播放器拿不到 aweme_id」时的兜底。
+
+新增能力（P2）：`ctx.browser.evaluate` 只接受宿主内置的**具名提取器**（`xhs.note` / `zhihu.question`），不接受插件传任意 JS。
+
+
