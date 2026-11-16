@@ -206,3 +206,21 @@ TTL：默认 6 小时；插件给了 `media.expiresAt` 时取两者较小值。�
 - 003 定义卡片与抽屉；005 把「看内容」从抽屉升级成页面，抽屉逻辑回收。
 - 004 定义插件市场与评论能力；005 复用同一套 `features` 声明式能力，不引入新的插件生命周期。
 - 插件版本号：加了 detail 的插件 minor +1（bilibili 0.2.0 → 0.3.0 等），宿主 `HOST_VERSION` 升到 0.3.0，`minHostVersion` 同步。
+## 9. 嵌入可行性实测（2026-11-16）
+
+详情页最终能不能「把原站网页塞进 iframe」，2026-11-16 在真实 Chrome（1280×800，非 headless）与 Playwright 两套环境里各测了一遍。结论是只有 B 站能嵌，其余三家都不行，所以详情页必须自己渲染，不能指望 iframe。
+
+| 平台 | 服务端头 | 浏览器里实际表现 | 结论 |
+| --- | --- | --- | --- |
+| B 站 | `player.bilibili.com/player.html` 200，无 XFO、无 CSP | 播放器正常渲染，可播 | 唯一可嵌，官方播放器 |
+| 抖音 | `www.douyin.com/video/<id>` 200 但 CSP `frame-ancestors` 只放行 `*.douyin.com` 等字节域名；`iesdouyin.com/share`、`m.douyin.com/share` 均 302 回 `www.douyin.com`，带 `X-Frame-Options: SAMEORIGIN` | iframe 内是灰色空块 + 破图标，控制台报 `Framing ... violates the following Content Security Policy directive: "frame-ancestors ..."` | 任何登录态都嵌不了 |
+| 小红书 | `/explore/<id>` 无 XFO、无 CSP（裸请求 302 到 /login） | 真实 Chrome 里被风控拦成「安全限制 当前网络存在风险，请切换可靠网络后重试 300012」；Playwright 注入 cookie 后能渲染笔记但登录态为空、盖登录弹窗 | 不可靠，且跨站 iframe 带不上 Lax cookie，等于永远匿名 |
+| 知乎 | question 页无 XFO、无 CSP | 顶层与 iframe 都返回 WAF 的 `{"code":40362,"message":"您当前请求存在异常..."}` | 匿名直接封；登录后能否读需在宿主登录窗口里实测 |
+
+截图留档：`design/embed-real-xhs-300012.png`、`design/embed-real-douyin-blocked.png`、`design/embed-real-zhihu-bili.png`（知乎 40362 + B 站播放器同屏）、`design/embed-real-zhihu-top-waf.png`、`design/detail-bili-embed.png`。复现脚本 `probes/probe_embed_matrix.py`、`probes/probe_frame_headers.py`、静态对照页 `probes/embed_probe.html`。
+
+对设计的两个硬约束：
+
+1. `media.type="embed"` 只留给 B 站。小红书、抖音、知乎的详情正文由插件给出 `{body}`，媒体走 `type="file"` 直链或只显示封面 + 「去原帖」，别在 iframe 里赌能不能出内容。
+2. 知乎要接进来，先加 `auth.py:SPECS` 一条登录窗口（`url=https://www.zhihu.com/`、`domain=.zhihu.com`、判据 cookie `z_c0`），用宿主登录窗口拿到 `z_c0` 再回放 question 页；登录态下才谈得上 `ctx.http` 读页面或 `ctx.browser` 截取。推荐流另有 `x-zse-96` 签名门槛，纯 http 那条路走不通。
+
