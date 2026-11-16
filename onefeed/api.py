@@ -205,8 +205,7 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
     host = _runner(request).host
     if not host.supports(plugin_id, "comments"):
         return {"supported": False, "items": [], "count": 0,
-                "reason": f"{plugin_id} 的插件没有提供评论接口",
-                "hint": "评论要看平台接口好不好拿；拿不到的插件就不做，卡片和详情照常看"}
+                "reason": f"{plugin_id} 的插件没有提供评论接口"}
 
     key = (item_id, limit)
     now = time.time()
@@ -222,8 +221,7 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
             return {"supported": False, "items": [], "count": 0,
                     "reason": f"{plugin_id} 的插件没有提供评论接口"}
         return {"supported": True, "items": [], "count": 0,
-                "error": message[:300],
-                "hint": "评论接口失败不影响看内容；多半是没登录或平台限流"}
+                "error": message[:300]}
 
     payload = {"supported": True, "items": items, "count": len(items), "limit": limit}
     _COMMENT_CACHE[key] = (now, payload)

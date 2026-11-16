@@ -285,8 +285,7 @@ export default function Drawer({ id, onClose }: { id: string | null; onClose: ()
                     </div>
                   ) : !comments ? null : !comments.supported ? (
                     <p className="mt-2 rounded-lg bg-wash px-3 py-2.5 text-[12px] leading-relaxed text-muted">
-                      {comments.reason || "这个平台的插件没有提供评论接口。"}
-                      {comments.hint ? <span className="mt-1 block text-[11px] text-fade">{comments.hint}</span> : null}
+                      {comments.reason || "这个平台的插件没有提供评论接口"}
                     </p>
                   ) : comments.error ? (
                     <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-700">

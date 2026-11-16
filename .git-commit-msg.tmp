@@ -1,0 +1,7 @@
+详情页方案 005 + 评论提示清理
+
+- api: 评论接口不再返回解释性 hint，只给 reason 或 error
+- web: 抽屉只显示「v2ex 的插件没有提供评论接口」这类必要提示，去掉多余说明
+- specs/005-detail: 视频/图文本地详情页方案（manifest 能力、边车代理、六平台实测、分三批实施）
+- probes: 掘金 / V2EX / 小红书详情接口与掘金 SSR 页实测脚本
+- design/comments-hint.png: 清理后的抽屉截图
