@@ -14,6 +14,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -35,6 +36,60 @@ SAFE_ENV_KEYS = ("PATH", "PATHEXT", "SystemRoot", "windir", "COMSPEC", "USERPROF
                  "TEMP", "TMP", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
                  "PROCESSOR_ARCHITECTURE", "PYTHONUTF8", "PYTHONIOENCODING")
 PROXY_CANDIDATES = ("", "http://127.0.0.1:7890", "http://127.0.0.1:10809")
+
+# Chrome 的 user-data-dir 一个进程独占：详情和评论并发时会互相把对方顶掉，
+# 所以这个进程里的浏览器操作排队执行。
+BROWSER_LOCK = threading.Lock()
+
+if os.name == "nt":
+    import msvcrt
+else:  # pragma: no cover - 本机只有 Windows
+    msvcrt = None
+
+
+class _ProfileGuard:
+    """跨进程排队：同一个 Chrome user-data-dir 只让一个会话开。
+
+    插件各自跑在 worker 子进程里，进程内的锁拦不住它们，所以用 profile 目录
+    里的一把文件锁——拿到锁的开浏览器，另一个在门口等。
+    """
+
+    def __init__(self, profile: str | Path):
+        self.profile = Path(profile)
+        self.fh: Any = None
+
+    def acquire(self, wait_s: float = 120.0) -> None:
+        self.profile.mkdir(parents=True, exist_ok=True)
+        self.fh = open(self.profile / ".browser.lock", "a+b")
+        deadline = time.time() + wait_s
+        while True:
+            try:
+                if msvcrt is not None:
+                    msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except OSError:
+                if time.time() > deadline:
+                    raise TimeoutError("另一个浏览器会话占着 profile，等它超时了")
+                time.sleep(0.4)
+
+    def release(self) -> None:
+        if self.fh is None:
+            return
+        try:
+            self.fh.seek(0)
+            if msvcrt is not None:
+                msvcrt.locking(self.fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        finally:
+            self.fh.close()
+            self.fh = None
 
 # 具名提取器：宿主写死，插件只能点名调用，不能塞自己的 JS。
 # 页面里的 __INITIAL_STATE__ 带 undefined / new Map([]) 这类字面量，服务端拿 HTML 解析不了，
@@ -384,6 +439,12 @@ class Capabilities:
 
     # ------------------------------------------------------------ browser
     def _browser(self, req: dict[str, Any]) -> dict[str, Any]:
+        # 详情与评论会被前端同时请求，两边都要开 Chrome 用同一个 user-data-dir，
+        # 第二个进程会直接把第一个顶掉（TargetClosedError）。串行执行最稳。
+        with BROWSER_LOCK:
+            return self._browser_locked(req)
+
+    def _browser_locked(self, req: dict[str, Any]) -> dict[str, Any]:
         """粗粒度抓取：打开一个页面、等指定响应、滚几屏、把 JSON body 交回去。
 
         不给插件长生命周期 page 句柄——用完即销毁，避免插件持有会话。
@@ -427,9 +488,11 @@ class Capabilities:
         ensure_temp_env()
 
         self.log("info", f"browser {url[:120]}")
+        guard = _ProfileGuard(profile)
         pw = sync_playwright().start()
         ctx = None
         try:
+            guard.acquire()
             ctx = pw.chromium.launch_persistent_context(
                 user_data_dir=str(profile),
                 executable_path=_find_chrome(),
@@ -446,13 +509,44 @@ class Capabilities:
 
             deadline = time.time() + timeout_ms / 1000.0
             page.wait_for_timeout(settle_ms)
-            for _ in range(scroll_times):
-                if bodies and req.get("stopWhenMatched", True):
-                    break
-                if time.time() > deadline:
-                    break
-                page.mouse.wheel(0, dy)
-                page.wait_for_timeout(interval)
+
+            # 评论弹层自己吞滚轮，滚之前得先把鼠标挪进弹层里，否则滚的是背后的页面。
+            point = req.get("scrollPoint") or {}
+            px = int(point.get("x") or 0)
+            py = int(point.get("y") or 0)
+
+            def _scroll(times: int, force: bool = False) -> None:
+                for _ in range(times):
+                    if not force and bodies and req.get("stopWhenMatched", True):
+                        return
+                    if time.time() > deadline:
+                        return
+                    if px and py:
+                        page.mouse.move(px, py)
+                    page.mouse.wheel(0, dy)
+                    page.wait_for_timeout(interval)
+
+            _scroll(scroll_times)
+
+            # 有些平台的评论是点按钮才发请求的（知乎「N 条评论」），
+            # 所以允许插件给几个选择器，滚完屏之后依次点一下。
+            # 点开之后评论区才存在，得再滚一轮才会继续翻页。
+            clicks = req.get("click") or []
+            if isinstance(clicks, str):
+                clicks = [clicks]
+            clicked = False
+            for selector in [str(s) for s in clicks][:4]:
+                try:
+                    node = page.query_selector(selector)
+                    if node is None:
+                        continue
+                    node.click(timeout=3000)
+                    clicked = True
+                    page.wait_for_timeout(min(max(interval * 2, 1200), 4000))
+                except Exception:
+                    continue
+            if clicked:
+                _scroll(scroll_times, force=True)
 
             remaining = max(0.0, deadline - time.time())
             while not bodies and remaining > 0:
@@ -469,6 +563,7 @@ class Capabilities:
                     ctx.close()
             finally:
                 pw.stop()
+                guard.release()
 
     # ------------------------------------------------------------ extract
     def _new_context(self, pw, profile: str, headless: bool):
@@ -483,6 +578,10 @@ class Capabilities:
         )
 
     def _extract(self, req: dict[str, Any]) -> dict[str, Any]:
+        with BROWSER_LOCK:
+            return self._extract_locked(req)
+
+    def _extract_locked(self, req: dict[str, Any]) -> dict[str, Any]:
         """按名字跑一个宿主内置的页内提取器（插件不能自带 JS）。
 
         为什么不在服务端解析 HTML：小红书把 undefined / new Map([]) 写进了
@@ -509,9 +608,11 @@ class Capabilities:
 
         ensure_temp_env()
         self.log("info", "extract " + name + " " + url[:120])
+        guard = _ProfileGuard(profile)
         pw = sync_playwright().start()
         ctx = None
         try:
+            guard.acquire()
             ctx = self._new_context(pw, profile, bool(req.get("headless", True)))
             self._inject_browser_cookies(ctx)
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -525,6 +626,7 @@ class Capabilities:
                     ctx.close()
             finally:
                 pw.stop()
+                guard.release()
 
     def _cookie_path(self) -> Path | None:
         """cookie 文件查找顺序：settings.cookieFile → 状态目录 cookies/<plugin_id>.json。

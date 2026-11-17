@@ -147,4 +147,14 @@ P1 已落地并实测，T43 的小红书与 T44 的抖音按等价方案提前�
 - 详情：`plugin_runtime/capabilities.py` 新增 `zhihu.article` 提取器（读 `initialState.entities.articles`），和既有 `zhihu.question` 配对；插件按 `extra.zhihu_type` 选一个，`ctx.browser.extract` 取 `js-initialData` 里的正文 HTML 交给 DOMPurify。实测回答页 7.5s / 3603 字，专栏页 7.7s / 4344 字。
 - 前端：`platform.ts` 注册 `zhihu` 与 `zhihu-hot`（原先两个都显示「知乎」）；`Card.tsx` 里无封面的 article/video 走摘要文字面板并提示「点开看全文」；`ItemPage` 对 html 正文隐藏知乎空段落（`p.ztext-empty-paragraph` / `p` 内只有 `br`），段距不再被撑开。
 - 证据：`design/zhihu-feed.png`（推荐流筛选视图）、`design/zhihu-detail.png`（专栏全文带图）。
-- 未做：关注流 `/api/v3/moments`（同一套回放机制，多一个 pattern 即可）；知乎评论区（要登录态 + 分页，暂缓）。
+- 未做：关注流 `/api/v3/moments`（同一套回放机制，多一个 pattern 即可）。
+
+## 10. 评论区：知乎 comment_v5 回放 + 跨进程 profile 锁（2026-11-17）
+
+- 接口不是纯 HTTP 能算的：`/api/v4/comment_v5/questions/{问题id}/root_comment` 与 `/api/v4/comment_v5/articles/{文章id}/root_comment`，签名由页面现算。回答页按**问题**聚合评论，不是 answer id。
+- 触发方式两种：专栏页滚屏就自己加载；回答页必须点「N 条评论」按钮才发请求。所以 `browser.capture` 新增 `click`（滚完屏依次点的选择器，最多 4 个）与 `scrollPoint`（评论弹层自己吞滚轮，滚之前得把鼠标挪进弹层）两个可选参数。
+- 响应字段：`counts.total_counts` 总数、`data[].id/content(HTML)/author/like_count`、`created_time`（**秒**，与前端 `timeAgo` 一致）、`child_comment_count`；`vote_count` 是 null 不能用。
+- 插件 `zhihu` 0.2.0 新增 `comments()`：按 `extra.zhihu_type` 决定点不点按钮，合并多个响应按 comment id 去重，空结果抛可读错误。
+- 修并发 bug：详情与评论会同时请求，两边都要用同一个 Chrome user-data-dir。插件跑在各自 worker 子进程里，进程内线程锁拦不住，改成 profile 目录下的文件锁 `_ProfileGuard`（Windows `msvcrt.locking`，非 Windows `fcntl.flock`）。
+- 实测：回答 18 条 / 23.5–24.9s；专栏 4 条 / 14.6–19.9s（同 URL 探针能拿 9 条，插件注入登录态后只给 4 条，差异未查明，接受）。并发请求串行后总计 28.3s。
+- 证据：`design/zhihu-comments.png`。
