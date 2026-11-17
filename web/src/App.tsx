@@ -7,6 +7,7 @@ import ItemPage from "./pages/ItemPage";
 import MarketPage from "./pages/MarketPage";
 import SettingsPage from "./pages/SettingsPage";
 import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, type Summary } from "./api";
+import { DUR, EASE, pageVariants } from "./motion";
 
 export interface OutletCtx {
   progress: RunState | null;
@@ -38,6 +39,15 @@ export default function App() {
   const wasRunning = useRef(false);
   const location = useLocation();
   const reduce = useReducedMotion();
+  // 从首页进详情/市场算「往里走」，回到首页算「往回走」，切页方向跟着走
+  const depth = (p: string) => (p === "/" ? 0 : 1);
+  const prevPath = useRef(location.pathname);
+  const dir: 1 | -1 = depth(location.pathname) >= depth(prevPath.current) ? 1 : -1;
+  useEffect(() => {
+    prevPath.current = location.pathname;
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [location.pathname]);
+  const page = pageVariants(dir);
 
   const reloadSettings = useCallback(async () => {
     try {
@@ -92,7 +102,7 @@ export default function App() {
   const refresh = useCallback(async () => {
     try {
       await postJSON("/api/refresh");
-      setToast("开始刷新，六路数据正在路上");
+      setToast("开始刷新");
       wasRunning.current = true;
       setProgress({ ...IDLE, running: true });
     } catch (err) {
@@ -118,10 +128,10 @@ export default function App() {
           <motion.div
             key={location.pathname}
             className="page-shell"
-            initial={reduce ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: reduce ? 0 : 0.16, ease: "easeOut" }}
+            initial={reduce ? false : page.initial}
+            animate={page.animate}
+            exit={reduce ? { opacity: 0 } : page.exit}
+            transition={{ duration: reduce ? 0 : DUR.page, ease: EASE }}
           >
             <Routes location={location}>
               <Route path="/" element={<FeedPage ctx={ctx} />} />
@@ -139,8 +149,8 @@ export default function App() {
             initial={{ opacity: 0, y: 12, scale: 0.97, x: "-50%" }}
             animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
             exit={{ opacity: 0, y: 12, scale: 0.97, x: "-50%" }}
-            transition={{ duration: reduce ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed bottom-6 left-1/2 z-50 rounded-full bg-ink px-5 py-2.5 text-[13px] text-white shadow-pop"
+            transition={{ duration: reduce ? 0 : DUR.base, ease: EASE }}
+            className="fixed bottom-6 left-1/2 z-50 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop"
           >
             {toast}
           </motion.div>

@@ -2,12 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 亮色 */
 :root {
-  --ink: #14161a;
-  --muted: #6b7280;
-  --faint: #9aa1ab;
-  --line: #e9eaec;
-  --wash: #f7f8f9;
+  --c-ink: 20 22 26;
+  --c-muted: 107 114 128;
+  --c-fade: 154 161 171;
+  --c-line: 233 234 236;
+  --c-paper: 255 255 255;
+  --c-wash: 247 248 249;
+  --c-solid: 20 22 26;
+  --c-solid-fg: 255 255 255;
+  --shadow-card: 0 1px 2px rgba(20, 22, 26, 0.04);
+  --shadow-pop: 0 12px 40px rgba(20, 22, 26, 0.1);
+  color-scheme: light;
+}
+
+/* 暗色：同一个语义，只换值；组件里不写死颜色 */
+html.dark {
+  --c-ink: 232 234 238;
+  --c-muted: 158 166 178;
+  --c-fade: 118 126 138;
+  --c-line: 44 48 56;
+  --c-paper: 15 17 21;
+  --c-wash: 24 27 32;
+  --c-solid: 238 240 243;
+  --c-solid-fg: 18 20 24;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 44px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
 }
 
 html,
@@ -18,10 +40,12 @@ body,
 
 body {
   margin: 0;
-  background: #fff;
-  color: var(--ink);
+  background: rgb(var(--c-paper));
+  color: rgb(var(--c-ink));
   font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* 换主题时整页颜色渐变过去，别硬切 */
+  transition: background-color 0.24s ease, color 0.24s ease;
 }
 
 a {
@@ -65,10 +89,27 @@ button:active:not(:disabled) {
   animation: fade-in 0.2s ease both;
 }
 
-/* 路由切换只淡入淡出：任何 transform / will-change:transform 都会让后代的
-   position: fixed（底部 AI 胶囊、toast）以整页为参照，跑到页面底部去。 */
+/* 骨架屏：一条光从左到右扫过去，比 animate-pulse 更能说明「在加载」 */
+@keyframes shimmer {
+  from { background-position: -160% 0; }
+  to { background-position: 260% 0; }
+}
+
+.skeleton {
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--c-wash)) 0%,
+    rgb(var(--c-line) / 0.7) 45%,
+    rgb(var(--c-wash)) 80%
+  );
+  background-size: 180% 100%;
+  animation: shimmer 1.35s linear infinite;
+}
+
+/* 路由切换只动透明度与位移；容器自身的 transform 会被动画结束后清掉，
+   底部的 fixed 元素（AI 胶囊、toast）已用 portal 挂到 body，不受影响。 */
 .page-shell {
-  will-change: opacity;
+  will-change: opacity, transform;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -86,20 +127,23 @@ button:active:not(:disabled) {
 }
 
 .hairline {
-  border-color: var(--line);
+  border-color: rgb(var(--c-line));
 }
 
 .thumb {
   position: relative;
   overflow: hidden;
-  background: var(--wash);
+  background: rgb(var(--c-wash));
 }
 
 .thumb::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--ph, linear-gradient(135deg, #e9eaec, #f7f8f9));
+  background: var(
+    --ph,
+    linear-gradient(135deg, rgb(var(--c-line)), rgb(var(--c-wash)))
+  );
 }
 
 .thumb > * {
@@ -140,7 +184,7 @@ button:active:not(:disabled) {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #dcdde0;
+  background: rgb(var(--c-line));
   border-radius: 6px;
 }
 
@@ -150,7 +194,6 @@ button:active:not(:disabled) {
 
 /* 设置页左侧导航的当前项：一条贴着实色的短竖线，不抢视线 */
 .nav-active {
-  color: var(--ink);
-  background: var(--wash);
+  color: rgb(var(--c-ink));
+  background: rgb(var(--c-wash));
 }
-

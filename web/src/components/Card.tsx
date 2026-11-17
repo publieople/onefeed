@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { motion } from "framer-motion";
 import { FileText, Heart, Image as ImageIcon, MessageCircle, Play, Quote } from "lucide-react";
 import type { FeedItem } from "../api";
 import { KIND_LABEL, platform } from "../platform";
@@ -124,12 +125,18 @@ function RankBand({ item }: { item: FeedItem }) {
   const rank = Number((item.extra?.rank as number) ?? 0);
   return (
     <Frame>
-      <div className="flex h-full w-full flex-col justify-between p-3.5" style={ph(p.tint)}>
+      {/* ui-lint-ignore color-token — 整块是平台色渐变底，白字是对的 */}
+      <div
+        className="flex h-full w-full flex-col justify-between p-3.5"
+        style={ph(p.tint)}
+      >
         <span className="text-[52px] font-semibold leading-none tabular-nums text-white/90">
           {rank ? String(rank).padStart(2, "0") : "·"}
         </span>
         <div className="flex items-end justify-between gap-2">
+          {/* ui-lint-ignore color-token */}
           <span className="text-[11px] tracking-wide text-white/70">热榜</span>
+          {/* ui-lint-ignore color-token */}
           {item.text ? <span className="clamp-1 text-[13px] tabular-nums text-white/85">{item.text}</span> : null}
         </div>
       </div>
@@ -205,7 +212,7 @@ export default function Card({ item, onOpen }: Props) {
   const kindLabel = KIND_LABEL[item.kind] ?? item.kind;
 
   return (
-    <article
+    <motion.article
       role="button"
       tabIndex={0}
       aria-label={p.label + " · " + kindLabel + " · " + item.title}
@@ -216,7 +223,10 @@ export default function Card({ item, onOpen }: Props) {
           onOpen(item.id);
         }
       }}
-      className="group flex h-full min-h-[16rem] cursor-pointer flex-col rounded-card border border-line bg-white p-3 text-left transition hover:-translate-y-px hover:border-ink/20 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+      whileHover={{ y: -2 }}
+      whileTap={{ scale: 0.985 }}
+      transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.7 }}
+      className="group flex h-full min-h-[16rem] cursor-pointer flex-col rounded-card border border-line bg-paper p-3 text-left transition-colors hover:border-ink/25 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
     >
       <header className="flex h-5 shrink-0 items-center gap-2 text-[11px]">
         <PlatformBadge item={item} />
@@ -265,6 +275,6 @@ export default function Card({ item, onOpen }: Props) {
           ) : null}
         </span>
       </footer>
-    </article>
+    </motion.article>
   );
 }

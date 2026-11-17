@@ -430,11 +430,11 @@ export default function ItemPage() {
         <div className="mt-5">
           {/* 只有真会有媒体（视频/图文/有封面）才占 16:9，文章类用小骨架，避免正文被推来推去 */}
           {item.kind === "video" || item.kind === "images" || item.cover ? (
-            <div className="aspect-video animate-pulse rounded-xl bg-wash" />
+            <div className="aspect-video skeleton rounded-xl" />
           ) : (
-            <div className="h-16 animate-pulse rounded-xl bg-wash/70" />
+            <div className="h-16 skeleton rounded-xl" />
           )}
-          <p className="mt-2 text-[12px] text-fade">正在取详情…（小红书要开浏览器取一次，通常十几秒）</p>
+          <p className="mt-2 text-[12px] text-fade">正在取详情…（可能要十几秒）</p>
         </div>
       ) : (
         <div className="fade-in">
@@ -444,16 +444,16 @@ export default function ItemPage() {
 
       {detail?.supported === false ? (
         <p className="mt-5 rounded-lg bg-wash px-3 py-2.5 text-[12px] leading-relaxed text-muted">
-          {detail.reason || "这个平台的插件没有提供详情接口"}
+          {detail.reason || "这个平台暂时只能在原站看。"}
         </p>
       ) : null}
 
       {detail?.error ? (
-        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-700">
+        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-700 dark:text-amber-300">
           <span>详情没取到：{detail.error}</span>
           <button
             onClick={() => void refreshDetail()}
-            className="inline-flex items-center gap-1 rounded-full border border-amber-300 px-2.5 py-1 text-[12px]"
+            className="inline-flex items-center gap-1 rounded-full border border-amber-300 dark:border-amber-500/35 px-2.5 py-1 text-[12px]"
           >
             <RefreshCw size={11} />
             再试一次
@@ -527,10 +527,10 @@ export default function ItemPage() {
           </div>
         ) : !comments ? null : !comments.supported ? (
           <p className="mt-2 rounded-lg bg-wash px-3 py-2.5 text-[12px] leading-relaxed text-muted">
-            {comments.reason || "这个平台的插件没有提供评论接口"}
+            {comments.reason || "这个平台暂时读不到评论。"}
           </p>
         ) : comments.error ? (
-          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-700">
+          <p className="mt-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-700 dark:text-amber-300">
             评论没取到：{comments.error}
           </p>
         ) : comments.items.length === 0 ? (
@@ -569,7 +569,7 @@ export default function ItemPage() {
                   </button>
                 ) : (
                   <p className="py-2 text-center text-[12px] leading-relaxed text-fade">
-                    插件能读到的评论就这些（已取 {comments.items.length} 条）。全部评论去{" "}
+                    就这些了（已取 {comments.items.length} 条）。更多评论去{" "}
                     <a href={item.url} target="_blank" rel="noreferrer" className="text-ink underline decoration-line underline-offset-2 hover:decoration-ink">
                       {p.label}看原帖
                     </a>
@@ -586,7 +586,7 @@ export default function ItemPage() {
           href={item.url}
           target="_blank"
           rel="noreferrer"
-          className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[13px] font-medium text-white"
+          className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-solid text-[13px] font-medium text-solid-fg"
         >
           去 {p.label} 看原帖
           <ExternalLink size={13} />
@@ -595,14 +595,14 @@ export default function ItemPage() {
           onClick={() => void copyLink()}
           className="flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line px-4 text-[13px] text-muted hover:border-ink/25 hover:text-ink"
         >
-          {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+          {copied ? <Check size={14} className="text-emerald-600 dark:text-emerald-400" /> : <Copy size={14} />}
           {copied ? "已复制" : "复制链接"}
         </button>
       </div>
 
       {lightbox !== null && images[lightbox] ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
-          <button className="absolute right-5 top-5 rounded-full bg-white/10 p-2 text-white" onClick={() => setLightbox(null)}>
+          <button className="absolute right-5 top-5 rounded-full bg-paper/10 p-2 text-white" onClick={() => setLightbox(null)}>
             <X size={18} />
           </button>
           <img src={images[lightbox]} alt="" referrerPolicy="no-referrer" className="max-h-full max-w-full object-contain" />

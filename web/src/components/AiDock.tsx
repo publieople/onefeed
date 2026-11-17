@@ -1,8 +1,9 @@
 import { ArrowUp, Loader2, Sparkles, Wand2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { AiResponse, FeedItem } from "../api";
-import { aiChat, aiStatus } from "../api";
+import { aiChat } from "../api";
 import { platform } from "../platform";
 import FilterBox from "./FilterBox";
 
@@ -25,14 +26,9 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const [manual, setManual] = useState(false);
-  const [engine, setEngine] = useState<"llm" | "rules">("rules");
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
-
-  useEffect(() => {
-    aiStatus().then((s) => setEngine(s.engine)).catch(() => void 0);
-  }, []);
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
@@ -54,7 +50,6 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
           plan: t.data?.plan,
         })),
       });
-      setEngine(data.engine);
       setTurns((prev) => [...prev, { role: "ai", text: data.reply, data }]);
     } catch (err) {
       setTurns((prev) => [...prev, { role: "ai", text: err instanceof Error ? err.message : "请求失败" }]);
@@ -86,12 +81,14 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: reduce ? 0 : 0.18 }}
-            className="fixed inset-0 z-30 bg-ink/10 md:bg-transparent"
+            className="fixed inset-0 z-30 bg-solid/10 md:bg-transparent"
             onClick={() => setOpen(false)}
           />
         ) : null}
       </AnimatePresence>
 
+      {/* 挂到 body：切页动画会给页面容器加 transform，fixed 元素留在里面会跟着跑 */}
+      {createPortal(
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4">
         <div className="pointer-events-auto w-full max-w-[760px]">
           <AnimatePresence initial={false}>
@@ -102,14 +99,11 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 10, scale: 0.99 }}
               transition={{ duration: reduce ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
-              className="mb-3 flex max-h-[62vh] flex-col overflow-hidden rounded-card border border-line bg-white shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
+              className="mb-3 flex max-h-[62vh] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
             >
               <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
                 <Sparkles size={14} className="text-ink" />
                 <span className="text-[13px] font-medium">找内容</span>
-                <span className="rounded-full border border-line px-1.5 py-0.5 text-[10px] text-fade">
-                  {engine === "llm" ? "模型理解" : "本地解析"}
-                </span>
                 <button
                   onClick={() => setOpen(false)}
                   className="ml-auto rounded p-1 text-fade transition hover:bg-wash hover:text-ink"
@@ -140,7 +134,7 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                 {turns.map((turn, index) =>
                   turn.role === "user" ? (
                     <div key={index} className="rise flex justify-end">
-                      <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-ink px-3.5 py-2 text-[13px] text-white">
+                      <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-solid px-3.5 py-2 text-[13px] text-solid-fg">
                         {turn.text}
                       </div>
                     </div>
@@ -156,7 +150,6 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-fade">
                               <span className="rounded-full border border-line px-2 py-0.5">{turn.data.understood}</span>
                               <span>{turn.data.count} 条</span>
-                              {turn.data.engine === "rules" ? <span>· 规则解析</span> : null}
                             </div>
                           ) : null}
                         </div>
@@ -174,7 +167,7 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                         <div className="flex flex-wrap items-center gap-2 pl-8">
                           <button
                             onClick={() => applyFilter(turn.data as AiResponse)}
-                            className="rounded-full bg-ink px-3 py-1.5 text-[12px] text-white"
+                            className="rounded-full bg-solid px-3 py-1.5 text-[12px] text-solid-fg"
                           >
                             用这个条件刷
                           </button>
@@ -202,7 +195,7 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                 {busy ? (
                   <div className="flex items-center gap-2 text-[12px] text-fade">
                     <Loader2 size={14} className="animate-spin" />
-                    在本地库里找…
+                    正在找…
                   </div>
                 ) : null}
               </div>
@@ -245,9 +238,9 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
               e.preventDefault();
               void ask(text);
             }}
-            className="flex h-12 items-center gap-2 rounded-full border border-line bg-white/95 px-3 shadow-[0_10px_30px_rgba(20,20,20,0.12)] backdrop-blur transition focus-within:border-ink/30"
+            className="flex h-12 items-center gap-2 rounded-full border border-line bg-paper/95 px-3 shadow-[0_10px_30px_rgba(20,20,20,0.12)] backdrop-blur transition focus-within:border-ink/30"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-white">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-solid text-solid-fg">
               <Wand2 size={14} />
             </span>
             <input
@@ -270,14 +263,16 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
             <button
               type="submit"
               disabled={busy || !text.trim()}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-white transition disabled:opacity-30"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-solid text-solid-fg transition disabled:opacity-30"
               aria-label="发送"
             >
               {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={15} />}
             </button>
           </form>
         </div>
-      </div>
+      </div>,
+      document.body,
+      )}
     </>
   );
 }

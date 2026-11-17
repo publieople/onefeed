@@ -1,6 +1,8 @@
-import { LayoutGrid, RefreshCw, Settings } from "lucide-react";
+import { useState } from "react";
+import { LayoutGrid, Moon, RefreshCw, Settings, Sun } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { Health, RunState } from "../api";
+import { applyTheme, currentTheme, type Theme } from "../theme";
 
 interface Props {
   health: Health | null;
@@ -14,11 +16,19 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
   const total = progress?.total ?? 0;
   const pct = running && total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
   const count = health?.items ?? 0;
+  const [theme, setTheme] = useState<Theme>(() => currentTheme());
+
+  const flipTheme = () => {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    applyTheme(next);
+  };
+
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-white/92 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-line bg-paper/92 backdrop-blur">
       <div className="relative mx-auto flex h-14 w-full max-w-[1180px] items-center gap-4 px-6">
         <NavLink to="/" className="flex items-baseline gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink text-[13px] font-semibold text-white">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-solid text-[13px] font-semibold text-solid-fg">
             O
           </span>
           <span className="text-[17px] font-semibold tracking-tight">OneFeed</span>
@@ -43,10 +53,19 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
           <button
             onClick={onRefresh}
             disabled={running}
-            title="刷新六个平台"
+            title="刷新全部平台"
+            aria-label="刷新全部平台"
             className="flex h-9 w-9 items-center justify-center rounded-full text-muted transition hover:bg-wash disabled:opacity-40"
           >
             <RefreshCw size={17} className={running ? "animate-spin" : ""} />
+          </button>
+          <button
+            onClick={flipTheme}
+            title={theme === "dark" ? "切换到亮色" : "切换到暗色"}
+            aria-label={theme === "dark" ? "切换到亮色" : "切换到暗色"}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-muted transition hover:bg-wash"
+          >
+            {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
           </button>
           <NavLink
             to="/market"
@@ -71,7 +90,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
         </div>
         {/* 进度条贴在页头下边缘：绝对定位，出现和消失都不推动页面 */}
         <span aria-hidden className="pointer-events-none absolute inset-x-0 -bottom-px h-[2px] bg-transparent">
-          <span className="block h-full bg-ink transition-[width] duration-500" style={{ width: pct + "%" }} />
+          <span className="block h-full bg-solid transition-[width] duration-500" style={{ width: pct + "%" }} />
         </span>
       </div>
     </header>

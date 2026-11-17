@@ -76,14 +76,14 @@ export default function AiProviders({ value, onChange, status }: Props) {
           <span className="text-muted">还没配，AI 只用本地规则解析</span>
         )}
         {status?.last && !status.last.ok && status.last.error ? (
-          <span className="text-amber-600">上次失败：{status.last.provider} · {status.last.error.slice(0, 60)}</span>
+          <span className="text-amber-600 dark:text-amber-300">上次失败：{status.last.provider} · {status.last.error.slice(0, 60)}</span>
         ) : null}
       </div>
 
       {value.map((row, index) => {
         const res = results[row.id];
         return (
-          <div key={row.id} className="rounded-xl border border-line bg-white p-3.5">
+          <div key={row.id} className="rounded-xl border border-line bg-paper p-3.5">
             <div className="flex items-center gap-2">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-wash text-[12px] tabular-nums text-muted">
                 {index + 1}
@@ -95,18 +95,18 @@ export default function AiProviders({ value, onChange, status }: Props) {
                 className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[14px] font-medium outline-none hover:border-line focus:border-ink/30"
               />
               {row.key_set || row.key ? (
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">
+                <span className="rounded-full border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-300">
                   key {row.key_hint || "已存"}
                 </span>
               ) : (
-                <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">缺 key</span>
+                <span className="rounded-full border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-300">缺 key</span>
               )}
               <button
                 onClick={() => update(row.id, { enabled: !row.enabled })}
-                className={"h-5 w-9 shrink-0 rounded-full p-0.5 transition " + (row.enabled ? "bg-ink" : "bg-line")}
+                className={"h-5 w-9 shrink-0 rounded-full p-0.5 transition " + (row.enabled ? "bg-solid" : "bg-line")}
                 title={row.enabled ? "点击停用（不上场）" : "点击启用"}
               >
-                <span className={"block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 " + (row.enabled ? "translate-x-4" : "translate-x-0")} />
+                <span className={"block h-4 w-4 rounded-full bg-paper shadow transition-transform duration-200 " + (row.enabled ? "translate-x-4" : "translate-x-0")} />
               </button>
               <button
                 onClick={() => move(index, -1)}
@@ -140,7 +140,7 @@ export default function AiProviders({ value, onChange, status }: Props) {
                   value={row.base_url}
                   onChange={(e) => update(row.id, { base_url: e.target.value })}
                   placeholder="https://api.deepseek.com/v1"
-                  className="mt-1 h-8 w-full rounded-lg border border-line bg-white px-2.5 font-mono text-[12px] outline-none focus:border-ink/40"
+                  className="mt-1 h-8 w-full rounded-lg border border-line bg-paper px-2.5 font-mono text-[12px] outline-none focus:border-ink/40"
                 />
               </label>
               <label className="block">
@@ -149,7 +149,7 @@ export default function AiProviders({ value, onChange, status }: Props) {
                   value={row.model}
                   onChange={(e) => update(row.id, { model: e.target.value })}
                   placeholder="deepseek-chat"
-                  className="mt-1 h-8 w-full rounded-lg border border-line bg-white px-2.5 font-mono text-[12px] outline-none focus:border-ink/40"
+                  className="mt-1 h-8 w-full rounded-lg border border-line bg-paper px-2.5 font-mono text-[12px] outline-none focus:border-ink/40"
                 />
               </label>
             </div>
@@ -161,7 +161,7 @@ export default function AiProviders({ value, onChange, status }: Props) {
                 onChange={(e) => update(row.id, { key: e.target.value })}
                 placeholder={row.key_set ? "已保存，留空不改" : "sk-…"}
                 autoComplete="off"
-                className="h-8 min-w-[220px] flex-1 rounded-lg border border-line bg-white px-2.5 font-mono text-[12px] outline-none focus:border-ink/40"
+                className="h-8 min-w-[220px] flex-1 rounded-lg border border-line bg-paper px-2.5 font-mono text-[12px] outline-none focus:border-ink/40"
               />
               <button
                 onClick={() => void test(row)}
@@ -172,7 +172,7 @@ export default function AiProviders({ value, onChange, status }: Props) {
                 测一下
               </button>
               {res ? (
-                <span className={"text-[12px] " + (res.ok ? "text-emerald-600" : "text-amber-600")}>
+                <span className={"text-[12px] " + (res.ok ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-300")}>
                   {res.ok ? "通 · " + (res.ms ?? 0) + " ms" : "不通 · " + (res.error ?? "未知错误").slice(0, 80)}
                 </span>
               ) : null}

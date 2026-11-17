@@ -145,7 +145,7 @@ export default function FeedPage({ ctx }: Props) {
       {feed.loading && feed.items.length === 0 ? (
         <div className="mt-5 grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="min-h-[340px] animate-pulse rounded-card border border-line bg-white p-3">
+            <div key={i} className="min-h-[340px] animate-pulse rounded-card border border-line bg-paper p-3">
               <div className="h-5 w-24 rounded bg-wash" />
               <div className="mt-2.5 aspect-video rounded-lg bg-wash" />
               <div className="mt-3 h-4 w-4/5 rounded bg-wash" />
@@ -164,7 +164,7 @@ export default function FeedPage({ ctx }: Props) {
               ? "当前筛选下没有匹配，换个条件试试。"
               : "点右上角刷新，或者先到插件市场装两个来源。"}
           </p>
-          <button onClick={ctx.refresh} className="mt-4 rounded-lg bg-ink px-4 py-2 text-[13px] text-white">
+          <button onClick={ctx.refresh} className="mt-4 rounded-lg bg-solid px-4 py-2 text-[13px] text-solid-fg">
             现在刷新一轮
           </button>
         </div>
@@ -213,12 +213,12 @@ function Seg<T extends string>({
           <button
             key={o.id}
             onClick={() => onChange(o.id)}
-            className={"relative rounded-full px-2.5 py-1 transition-colors " + (on ? "text-white" : "text-muted hover:text-ink")}
+            className={"relative rounded-full px-2.5 py-1 transition-colors " + (on ? "text-solid-fg" : "text-muted hover:text-ink")}
           >
             {on ? (
               <motion.span
                 layoutId={"seg-" + id}
-                className="absolute inset-0 rounded-full bg-ink"
+                className="absolute inset-0 rounded-full bg-solid"
                 transition={{ type: "spring", stiffness: 560, damping: 40 }}
               />
             ) : null}

@@ -3,9 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OneFeed · 一屏刷完六个平台</title>
-    <script type="module" crossorigin src="/assets/index-ltLiMlTD.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Dj1o0VpK.css">
+    <meta name="theme-color" content="#ffffff" />
+    <title>OneFeed · 一屏刷完七个平台</title>
+    <script>
+      // 先上色再渲染，避免刷新时先白一下再变暗
+      try {
+        var t = localStorage.getItem("onefeed.theme");
+        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        if (t === "dark") document.documentElement.classList.add("dark");
+      } catch (e) {}
+    </script>
+    <script type="module" crossorigin src="/assets/index-CUYpcRyj.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CxhHR18w.css">
   </head>
   <body>
     <div id="root"></div>

@@ -285,7 +285,7 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
     host = _runner(request).host
     if not host.supports(plugin_id, "comments"):
         return {"supported": False, "items": [], "count": 0,
-                "reason": f"{plugin_id} 的插件没有提供评论接口"}
+                "reason": "这个平台暂时读不到评论。"}
 
     key = (item_id, limit, cursor or "")
     now = time.time()
@@ -299,7 +299,7 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
         message = str(exc)
         if "插件未实现" in message:
             return {"supported": False, "items": [], "count": 0,
-                    "reason": f"{plugin_id} 的插件没有提供评论接口"}
+                    "reason": "这个平台暂时读不到评论。"}
         return {"supported": True, "items": [], "count": 0, "next": None,
                 "error": message[:300]}
 
@@ -323,7 +323,7 @@ def item_detail(request: Request, item_id: str, refresh: bool = Query(False)) ->
     host = _runner(request).host
     if not host.supports(plugin_id, "detail"):
         return {"supported": False, "detail": None,
-                "reason": f"{plugin_id} 的插件没有提供详情接口"}
+                "reason": "这个平台暂时只能在原站看。"}
 
     if not refresh:
         cached = store.get_detail(item_id, max_age=DETAIL_TTL)
@@ -337,7 +337,7 @@ def item_detail(request: Request, item_id: str, refresh: bool = Query(False)) ->
         message = str(exc)
         if "插件未实现" in message:
             return {"supported": False, "detail": None,
-                    "reason": f"{plugin_id} 的插件没有提供详情接口"}
+                    "reason": "这个平台暂时只能在原站看。"}
         return {"supported": True, "detail": None, "error": message[:300]}
 
     store.save_detail(item_id, detail)

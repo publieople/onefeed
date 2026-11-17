@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Copy, ExternalLink, LogIn, LogOut, RefreshCw, RotateCcw, Save, ShieldCheck } from "lucide-react";
+import { Copy, ExternalLink, LogIn, LogOut, RefreshCw, RotateCcw, Save } from "lucide-react";
 import type { OutletCtx } from "../App";
 import {
   getJSON,
@@ -26,12 +26,11 @@ const SECTIONS = [
   { id: "ai", label: "AI 助手" },
   { id: "auth", label: "登录态" },
   { id: "plugins", label: "已装插件" },
-  { id: "risk", label: "风险边界" },
 ];
 
 const STATE_TEXT: Record<string, { label: string; tone: string }> = {
-  available: { label: "已登录", tone: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  need_login: { label: "待登录", tone: "bg-amber-50 text-amber-700 border-amber-200" },
+  available: { label: "已登录", tone: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30" },
+  need_login: { label: "待登录", tone: "bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30" },
   error: { label: "读取失败", tone: "bg-red-50 text-red-700 border-red-200" },
   not_required: { label: "无需登录", tone: "bg-wash text-muted border-line" },
 };
@@ -257,7 +256,6 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   return (
     <div className="pb-28 pt-6">
       <h1 className="text-[19px] font-semibold tracking-tight">设置</h1>
-      <p className="mt-1 text-[13px] text-muted">本机运行，只监听 127.0.0.1。数据、cookie、插件都在你自己的盘上。</p>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[184px_minmax(0,1fr)]">
         <nav aria-label="设置分类" className="hidden lg:block">
@@ -274,7 +272,6 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 {s.label}
               </button>
             ))}
-            <p className="px-2.5 pt-3 text-[11px] leading-relaxed text-fade">改动会在左侧「保存」条出现后一次性提交。</p>
           </div>
         </nav>
 
@@ -289,12 +286,12 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 transition={{ duration: reduce ? 0 : 0.24, ease: EASE }}
                 className="fixed bottom-6 left-1/2 z-40"
               >
-                <div className="flex items-center gap-2 rounded-full border border-line bg-white px-2 py-1.5 pl-4 shadow-[0_12px_34px_rgba(20,20,20,0.16)]">
+                <div className="flex items-center gap-2 rounded-full border border-line bg-paper px-2 py-1.5 pl-4 shadow-[0_12px_34px_rgba(20,20,20,0.16)]">
                   <span className="text-[13px] text-ink">有未保存的改动</span>
                   <button
                     onClick={() => void saveSettings()}
                     disabled={saving}
-                    className="ml-auto flex h-8 items-center gap-1.5 rounded-lg bg-ink px-3 text-[13px] text-white disabled:opacity-60"
+                    className="ml-auto flex h-8 items-center gap-1.5 rounded-lg bg-solid px-3 text-[13px] text-solid-fg disabled:opacity-60"
                   >
                     <Save size={12} />
                     {saving ? "保存中…" : "保存"}
@@ -303,7 +300,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                     onClick={() => {
                       if (baseline) setForm(JSON.parse(baseline) as SettingsValues);
                     }}
-                    className="flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 text-[12px] text-muted hover:text-ink"
+                    className="flex h-8 items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 text-[12px] text-muted hover:text-ink"
                   >
                     <RotateCcw size={12} />
                     放弃
@@ -316,7 +313,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
           <SettingSection
             id="status"
             title="运行状态"
-            desc="版本、条目数、数据库位置"
+            desc="版本与条目数"
             summary={
               <>
                 <span>{health?.items ?? 0} 条</span>
@@ -344,12 +341,11 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
               </div>
               <div className="flex justify-between">
                 <dt className="text-fade">模式</dt>
-                <dd>{health?.demo ? "离线演示（fixtures）" : "联网采集"}</dd>
+                <dd>{health?.demo ? "离线演示" : "联网"}</dd>
               </div>
             </dl>
-            <p className="mt-3 break-all rounded-lg bg-wash px-3 py-2 font-mono text-[12px] text-muted">{health?.db ?? "数据库路径未知"}</p>
             <div className="mt-3 flex gap-2">
-              <button onClick={ctx.refresh} className="flex h-9 items-center gap-1.5 rounded-lg bg-ink px-3.5 text-[13px] text-white">
+              <button onClick={ctx.refresh} className="flex h-9 items-center gap-1.5 rounded-lg bg-solid px-3.5 text-[13px] text-solid-fg">
                 <RefreshCw size={13} />
                 现在刷新一轮
               </button>
@@ -362,7 +358,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
           <SettingSection
             id="collect"
             title="采集与排序"
-            desc="插件目录、每轮条数、保留天数"
+            desc="每轮条数、保留天数、自动更新"
             summary={
               <>
                 <span>{form?.per_plugin_limit ?? "—"} 条/平台</span>
@@ -375,7 +371,6 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             open={Boolean(open.collect)}
             onToggle={() => setOpen((prev) => ({ ...prev, collect: !prev.collect }))}
           >
-            <p className="text-[12px] text-fade">保存后立即生效；插件目录与 registry 改动会在下一次采集时用上。</p>
             {form ? (
               <div className="mt-4 space-y-4">
                 <label className="block">
@@ -384,9 +379,9 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                     value={form.plugins_dir}
                     onChange={(e) => setForm({ ...form, plugins_dir: e.target.value })}
                     placeholder={resolved?.plugins_dir ?? ""}
-                    className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 font-mono text-[12px] outline-none focus:border-ink/40"
+                    className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 font-mono text-[12px] outline-none focus:border-ink/40"
                   />
-                  <span className="mt-1 block text-[11px] text-fade">留空用默认目录：{resolved?.plugins_dir ?? "—"}</span>
+                  <span className="mt-1 block text-[11px] text-fade">留空用默认目录</span>
                 </label>
 
                 <label className="block">
@@ -395,9 +390,9 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                     value={form.registry_url}
                     onChange={(e) => setForm({ ...form, registry_url: e.target.value })}
                     placeholder={resolved?.registry_url ?? ""}
-                    className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 font-mono text-[12px] outline-none focus:border-ink/40"
+                    className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 font-mono text-[12px] outline-none focus:border-ink/40"
                   />
-                  <span className="mt-1 block text-[11px] text-fade">留空用默认订阅源；换源不会读旧缓存。</span>
+                  <span className="mt-1 block text-[11px] text-fade">留空用默认订阅源</span>
                 </label>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -409,7 +404,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                       max={50}
                       value={form.per_plugin_limit}
                       onChange={(e) => setForm({ ...form, per_plugin_limit: Number(e.target.value) })}
-                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[13px] outline-none focus:border-ink/40"
+                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 text-[13px] outline-none focus:border-ink/40"
                     />
                   </label>
                   <label className="block">
@@ -420,7 +415,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                       max={50}
                       value={form.comments_limit}
                       onChange={(e) => setForm({ ...form, comments_limit: Number(e.target.value) })}
-                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[13px] outline-none focus:border-ink/40"
+                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 text-[13px] outline-none focus:border-ink/40"
                     />
                   </label>
                   <label className="block">
@@ -428,7 +423,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                     <select
                       value={form.default_sort}
                       onChange={(e) => setForm({ ...form, default_sort: e.target.value })}
-                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-2.5 text-[13px] outline-none focus:border-ink/40"
+                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-2.5 text-[13px] outline-none focus:border-ink/40"
                     >
                       {(ctx.settings?.sorts ?? ["freshness", "engagement"]).map((s) => (
                         <option key={s} value={s}>
@@ -445,7 +440,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                       max={365}
                       value={form.prune_days}
                       onChange={(e) => setForm({ ...form, prune_days: Number(e.target.value) })}
-                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 text-[13px] outline-none focus:border-ink/40"
+                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 text-[13px] outline-none focus:border-ink/40"
                     />
                   </label>
                 </div>
@@ -460,7 +455,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   <span>
                     <span className="text-[13px] font-medium">每轮采集前自动更新插件</span>
                     <span className="mt-0.5 block text-[11px] leading-relaxed text-fade">
-                      开着就每轮先查一次市场，有新版直接换上（走 sha256 校验）。现场演示建议关掉，别让远端在你讲的时候改代码。
+                      每轮采集前先查一次市场，有新版自动更新。
                     </span>
                   </span>
                 </label>
@@ -469,7 +464,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   <button
                     onClick={() => void saveSettings()}
                     disabled={saving}
-                    className="flex h-9 items-center gap-1.5 rounded-lg bg-ink px-4 text-[13px] text-white disabled:opacity-60"
+                    className="flex h-9 items-center gap-1.5 rounded-lg bg-solid px-4 text-[13px] text-solid-fg disabled:opacity-60"
                   >
                     <Save size={13} />
                     {saving ? "保存中…" : "保存设置"}
@@ -499,7 +494,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             summary={
               <>
                 <span className="rounded-full border border-line px-1.5 py-0.5 text-[11px]">
-                  {ai?.engine === "llm" ? "模型在线" : "本地解析"}
+                  {ai?.engine === "llm" ? "模型在线" : "本地兜底"}
                 </span>
                 <span>{providerCount ? providerCount + " 个模型" : "还没配 key"}</span>
                 {ai?.active ? (
@@ -513,10 +508,6 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             open={Boolean(open.ai)}
             onToggle={() => setOpen((prev) => ({ ...prev, ai: !prev.ai }))}
           >
-            <p className="text-[12px] leading-relaxed text-fade">
-              模型只负责理解你的话和措辞，内容永远从本地库里取——断网也能用，只是「理解」会退回规则解析。
-              排在前面的先用，超时或报错自动换下一个；每个模型的 key 只写不读，插件看不到。
-            </p>
             {form ? (
               <div className="mt-4 space-y-4">
                 <AiProviders
@@ -525,7 +516,6 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   status={ai}
                 />
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-fade">存本机 settings.json，接口只写不读。</span>
                   <button onClick={() => void clearKeys()} className="ml-auto h-8 rounded-lg border border-line px-3 text-[12px] text-muted hover:text-ink">
                     清除所有 key
                   </button>
@@ -548,7 +538,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             open={Boolean(open.auth)}
             onToggle={() => setOpen((prev) => ({ ...prev, auth: !prev.auth }))}
           >
-            <p className="text-[12px] text-fade">插件拿不到你的明文 cookie，只由宿主在发请求时注入。登录窗口是独立的 Chrome，登录完会自动关掉。</p>
+            <p className="text-[12px] text-fade">登录窗口是独立的 Chrome，登录完会自动关掉。</p>
             <ul className="mt-3 space-y-2">
               {ALL_AUTH_ROWS.map((id) => {
                 const state = auth[id];
@@ -576,7 +566,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                           <>
                             <button
                               onClick={() => void startLogin(id)}
-                              className="flex h-7 items-center gap-1 rounded-md bg-ink px-2.5 text-[12px] text-white"
+                              className="flex h-7 items-center gap-1 rounded-md bg-solid px-2.5 text-[12px] text-solid-fg"
                             >
                               <LogIn size={11} />
                               打开登录窗口
@@ -642,42 +632,25 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   <span className="text-[13px]">{p.name || platform(p.id).label}</span>
                   <span className="text-[11px] text-fade">v{p.version}</span>
                   {p.features?.includes("comments") ? (
-                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">评论区</span>
+                    <span className="rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-300">评论区</span>
                   ) : (
                     <span className="rounded-full bg-wash px-1.5 py-0.5 text-[11px] text-fade">无评论</span>
                   )}
                   <span className="text-[11px] text-fade">{p.source === "registry" ? "市场安装" : "本地"}</span>
                   <button
                     onClick={() => void toggle(p.id, !p.enabled)}
-                    className={"ml-auto h-6 w-11 rounded-full p-0.5 transition " + (p.enabled ? "bg-ink" : "bg-line")}
+                    className={"ml-auto h-6 w-11 rounded-full p-0.5 transition " + (p.enabled ? "bg-solid" : "bg-line")}
                     title={p.enabled ? "点击停用" : "点击启用"}
                   >
-                    <span className={"block h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 " + (p.enabled ? "translate-x-5" : "translate-x-0")} />
+                    <span className={"block h-5 w-5 rounded-full bg-paper shadow transition-transform duration-200 " + (p.enabled ? "translate-x-5" : "translate-x-0")} />
                   </button>
                 </li>
               ))}
               {!installed.length ? <li className="py-3 text-[13px] text-muted">还没装插件，去市场挑两个。</li> : null}
             </ul>
-            {plugins?.errors?.length ? <p className="mt-2 text-[12px] text-amber-600">有插件加载失败：{plugins.errors.join("；")}</p> : null}
+            {plugins?.errors?.length ? <p className="mt-2 text-[12px] text-amber-600 dark:text-amber-300">有插件加载失败：{plugins.errors.join("；")}</p> : null}
           </SettingSection>
 
-          <SettingSection
-            id="risk"
-            title="风险边界"
-            desc="只读、沙箱、凭证不出宿主"
-            open={Boolean(open.risk)}
-            onToggle={() => setOpen((prev) => ({ ...prev, risk: !prev.risk }))}
-          >
-            <ul className="mt-1 space-y-1.5 text-[13px] leading-relaxed text-muted">
-              <li className="flex items-start gap-1.5">
-                <ShieldCheck size={14} className="mt-0.5 shrink-0 text-muted" />
-                只读：不下载、不转发、不代发内容，只把公开页面上看得到的东西排好给你。
-              </li>
-              <li>插件跑在 QuickJS 子进程里，每个插件独立进程，超时直接强杀。</li>
-              <li>不内置任何密钥；登录态只存在本机，插件只能通过宿主能力发请求。</li>
-              <li>装第三方插件前先看一眼它的 index.js —— 它能看到的东西和你浏览器里一样多。</li>
-            </ul>
-          </SettingSection>
         </div>
       </div>
 
@@ -689,7 +662,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
             exit={{ opacity: 0, y: 10, scale: 0.98, x: "-50%" }}
             transition={{ duration: reduce ? 0 : 0.2, ease: EASE }}
-            className="fixed bottom-6 left-1/2 z-50 rounded-full bg-ink px-5 py-2.5 text-[13px] text-white shadow-pop"
+            className="fixed bottom-6 left-1/2 z-50 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop"
           >
             {note}
           </motion.div>

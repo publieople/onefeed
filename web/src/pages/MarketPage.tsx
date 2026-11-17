@@ -109,16 +109,13 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
       <div className="flex items-end gap-3">
         <div>
           <h1 className="text-[19px] font-semibold tracking-tight">插件市场</h1>
-          <p className="mt-1 text-[13px] text-muted">
-            宿主里没有任何平台代码。装一个插件，多一路来源；卸掉它，宿主还是这个宿主。
-          </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {pending.length ? (
             <button
               onClick={() => void updateAll()}
               disabled={busy === "__all__"}
-              className="flex h-9 items-center gap-1.5 rounded-full bg-ink px-3.5 text-[13px] text-white disabled:opacity-50"
+              className="flex h-9 items-center gap-1.5 rounded-full bg-solid px-3.5 text-[13px] text-solid-fg disabled:opacity-50"
             >
               <ArrowUpCircle size={14} />
               {busy === "__all__" ? "更新中…" : "全部更新 (" + pending.length + ")"}
@@ -138,7 +135,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
       </div>
 
       {data?.market.degraded ? (
-        <div className="mt-4 rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
+        <div className="mt-4 rounded-card border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-[13px] text-amber-800 dark:text-amber-200">
           市场降级：{data.market.degraded}
         </div>
       ) : null}
@@ -150,7 +147,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
       {!data && !error ? (
         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-[148px] animate-pulse rounded-card border border-line bg-white" />
+            <div key={i} className="h-[148px] skeleton rounded-card border border-line" />
           ))}
         </div>
       ) : null}
@@ -172,7 +169,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
                       : "v" + entry.version}
                   </span>
                   {entry.update_available ? (
-                    <span className="rounded-full bg-ink px-1.5 py-0.5 text-[11px] text-white">可更新</span>
+                    <span className="rounded-full bg-solid px-1.5 py-0.5 text-[11px] text-solid-fg">可更新</span>
                   ) : null}
                   {entry.installed ? (
                     <span className="flex items-center gap-0.5 rounded-full border border-line px-1.5 py-0.5 text-[11px] text-muted">
@@ -188,7 +185,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
                   <button
                     onClick={() => void update(entry)}
                     disabled={busy === entry.id}
-                    className="flex h-8 items-center gap-1 rounded-lg bg-ink px-3 text-[12px] text-white disabled:opacity-50"
+                    className="flex h-8 items-center gap-1 rounded-lg bg-solid px-3 text-[12px] text-solid-fg disabled:opacity-50"
                   >
                     <ArrowUpCircle size={13} />
                     {busy === entry.id ? "更新中" : "更新"}
@@ -207,7 +204,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
                   <button
                     onClick={() => void install(entry.id)}
                     disabled={busy === entry.id}
-                    className="flex h-8 items-center gap-1 rounded-lg bg-ink px-3 text-[12px] text-white disabled:opacity-50"
+                    className="flex h-8 items-center gap-1 rounded-lg bg-solid px-3 text-[12px] text-solid-fg disabled:opacity-50"
                   >
                     <Download size={13} />
                     {busy === entry.id ? "安装中" : "安装"}
@@ -238,14 +235,13 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
         <div className="mt-16 text-center text-[13px] text-muted">目录是空的，点右上角「刷新目录」再试一次。</div>
       ) : null}
 
-      <p className="mt-8 text-[12px] leading-relaxed text-fade">
-        目录来源：{data?.market.url ?? "registry.json"}
+      <p className="mt-8 text-[12px] text-fade">
+        目录：{data?.market.url ?? "registry.json"}
         {data?.market.from_cache ? "（本地缓存）" : ""}
-        。安装和更新都按目录里的 sha256 校验整包内容，对不上就拒绝；更新只换插件文件，不动你的 cookie 与已装开关。
       </p>
 
       {note ? (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-[13px] text-white shadow-pop">
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop">
           {note}
         </div>
       ) : null}

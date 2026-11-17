@@ -23,7 +23,7 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 export default function SettingSection({ id, title, desc, summary, open, onToggle, children }: Props) {
   const reduce = useReducedMotion();
   return (
-    <section id={id} className="scroll-mt-24 overflow-hidden rounded-card border border-line bg-white">
+    <section id={id} className="scroll-mt-24 overflow-hidden rounded-card border border-line bg-paper">
       <button
         onClick={onToggle}
         aria-expanded={open}

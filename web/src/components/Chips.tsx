@@ -16,11 +16,11 @@ export default function Chips({ selected, counts, total, onToggle, onClear }: Pr
         onClick={onClear}
         className={
           "flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-[13px] transition " +
-          (all ? "border-ink bg-ink text-white" : "border-line bg-white text-ink hover:border-ink/30")
+          (all ? "border-ink bg-solid text-solid-fg" : "border-line bg-paper text-ink hover:border-ink/30")
         }
       >
         全部
-        <span className={all ? "text-white/60" : "text-fade"}>{total}</span>
+        <span className={all ? "text-solid-fg/60" : "text-fade"}>{total}</span>
       </button>
       {PLATFORMS.map((p) => {
         const on = selected.includes(p.id);
@@ -30,7 +30,7 @@ export default function Chips({ selected, counts, total, onToggle, onClear }: Pr
             onClick={() => onToggle(p.id)}
             className={
               "flex h-8 items-center gap-2 rounded-full border px-3 text-[13px] transition " +
-              (on ? "border-ink/25 bg-wash text-ink" : "border-line bg-white text-muted hover:border-ink/20")
+              (on ? "border-ink/25 bg-wash text-ink" : "border-line bg-paper text-muted hover:border-ink/20")
             }
           >
             <span className="h-[7px] w-[7px] rounded-full" style={{ background: p.tint }} />
