@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,27 @@ COMMENT_TTL = 600
 
 # 详情比评论变得还慢；6 小时足够，刷新按钮会显式 refresh=1 绕过。
 DETAIL_TTL = 6 * 3600
+
+# 直链过期的信号：小红书 CDN 的 t 签名过期回 403，抖音回 403/404。
+# 401 也算——登录态掉了重取详情能顺手带上新 cookie。
+_MEDIA_EXPIRED = frozenset({401, 403, 404, 410})
+# 同一条内容 60 秒内只重取一次详情：前端一次播放会发好几个 Range 请求，
+# 全放过等于同时起三个浏览器进程去抢同一个 profile。
+MEDIA_REFRESH_COOLDOWN = 60
+_MEDIA_REFRESH_AT: dict[str, float] = {}
+_MEDIA_REFRESH_LOCK = threading.Lock()
+
+
+def _claim_media_refresh(item_id: str) -> bool:
+    """抢到「这条内容归我重取详情」的资格才返回 True，否则让别的请求等着看结果。"""
+    now = time.time()
+    with _MEDIA_REFRESH_LOCK:
+        if now - _MEDIA_REFRESH_AT.get(item_id, 0.0) < MEDIA_REFRESH_COOLDOWN:
+            return False
+        _MEDIA_REFRESH_AT[item_id] = now
+        for key in [k for k, at in _MEDIA_REFRESH_AT.items() if now - at > 3600]:
+            _MEDIA_REFRESH_AT.pop(key, None)
+        return True
 
 
 def _store(request: Request) -> Store:
@@ -293,39 +315,66 @@ def media(request: Request, item_id: str, slot: str,
         raise HTTPException(status_code=404, detail={
             "code": "detail_not_ready", "message": "还没有这条内容的详情缓存，媒体地址没地方取",
             "hint": "先打开一次详情，再播放"})
-    target = media_mod.resolve_slot(cached["payload"], slot)
-    if target is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "media_missing", "message": f"这条内容没有 {slot} 这个媒体位", "hint": ""})
-
+    payload = cached["payload"]
     plugin_id = row["platform"]
     try:
         manifest = _runner(request).host.get(plugin_id)
         hosts = list(manifest.media_hosts)
     except Exception:
         hosts = []
-    url_host = (urllib.parse.urlparse(target["url"]).hostname or "").lower()
-    cookie = media_mod.cookie_header(plugin_id) if media_mod._host_allowed(url_host, hosts) else ""
 
-    if not media_mod.SEMAPHORE.acquire(timeout=20):
-        raise HTTPException(status_code=503, detail={
-            "code": "busy", "message": "同时在拉的视频太多了", "hint": "等一会儿再试"})
-    try:
-        status, headers, resp = media_mod.open_stream(
-            target["url"], referer=target["referer"], cookie=cookie, range_header=range_header)
-    except Exception as exc:  # 网络层失败：别把半截流当成功
-        media_mod.SEMAPHORE.release()
-        raise HTTPException(status_code=502, detail={
-            "code": "media_failed", "message": f"取媒体失败：{exc}"[:300], "hint": "点原帖试试"})
+    detail_refreshed = False
+    while True:
+        target = media_mod.resolve_slot(payload, slot)
+        if target is None:
+            raise HTTPException(status_code=404, detail={
+                "code": "media_missing", "message": f"这条内容没有 {slot} 这个媒体位", "hint": ""})
 
-    if status >= 400:
+        url_host = (urllib.parse.urlparse(target["url"]).hostname or "").lower()
+        cookie = (media_mod.cookie_header(plugin_id)
+                  if media_mod._host_allowed(url_host, hosts) else "")
+
+        if not media_mod.SEMAPHORE.acquire(timeout=20):
+            raise HTTPException(status_code=503, detail={
+                "code": "busy", "message": "同时在拉的视频太多了", "hint": "等一会儿再试"})
+        try:
+            status, headers, resp = media_mod.open_stream(
+                target["url"], referer=target["referer"], cookie=cookie, range_header=range_header)
+        except Exception as exc:  # 网络层失败：别把半截流当成功
+            media_mod.SEMAPHORE.release()
+            raise HTTPException(status_code=502, detail={
+                "code": "media_failed", "message": f"取媒体失败：{exc}"[:300],
+                "hint": "点原帖试试"})
+
+        if status < 400:
+            break
+
         try:
             resp.close()
         finally:
             media_mod.SEMAPHORE.release()
+
+        # T46：签名直链过期是常态（小红书 t / 抖音 play_addr），重取一次详情换地址再试一次。
+        # 只重试一次，且同一个 item 60 秒内只让一个请求去重取，避免播放器的多段 Range 同时开浏览器。
+        if status in _MEDIA_EXPIRED and not detail_refreshed and _claim_media_refresh(item_id):
+            detail_refreshed = True
+            try:
+                fresh = _runner(request).host.detail(plugin_id, row)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail={
+                    "code": "media_expired",
+                    "message": f"直链过期了，重取详情也没成功：{str(exc)[:200]}",
+                    "hint": "先去详情页点一次刷新，或者直接去原帖看"})
+            if isinstance(fresh, dict) and fresh:
+                store.save_detail(item_id, fresh)
+                payload = fresh
+                continue
+
         raise HTTPException(status_code=502, detail={
-            "code": "media_failed", "message": f"平台拒绝了这次取流（HTTP {status}）",
-            "hint": "直链可能过期了，刷新详情再试"})
+            "code": "media_expired" if status in _MEDIA_EXPIRED else "media_failed",
+            "message": f"平台拒绝了这次取流（HTTP {status}）",
+            "hint": ("直链过期，重取详情也没拿到新地址，去原帖看吧"
+                     if status in _MEDIA_EXPIRED else "过一会儿再试，或者去原帖看")})
 
     out = {k: headers[k] for k in
            ("content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified")

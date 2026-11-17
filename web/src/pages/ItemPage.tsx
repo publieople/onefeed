@@ -58,9 +58,28 @@ function statCards(item: FeedItem, detail: DetailPayload | null) {
     .map((k) => ({ key: k, label: labels[k] ?? k, value: merged[k] }));
 }
 
+/** 播放失败时的人话：<video> 的 onError 只给一个事件，用户看到的是一片黑。 */
+function MediaBroken({ item, onRetry }: { item: FeedItem; onRetry: () => void }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fade">
+      <span>视频取不到了，直链可能过期。</span>
+      <button onClick={onRetry} className="underline underline-offset-2 hover:text-ink">
+        重试播放
+      </button>
+      <a href={item.url} target="_blank" rel="noreferrer noopener"
+        className="underline underline-offset-2 hover:text-ink">
+        去原帖看
+      </a>
+    </div>
+  );
+}
+
 /** 媒体区：embed 走官方播放器，file 走直链（要 Referer 的走边车）。 */
 function Media({ item, media }: { item: FeedItem; media?: DetailMedia }) {
   const [direct, setDirect] = useState(false);
+  // 直链过期时 <video> 只会静默失败（黑框），给一句人话 + 重试按钮，别让人以为页面坏了
+  const [broken, setBroken] = useState(false);
+  const [tick, setTick] = useState(0);
   if (!media) return null;
   const base = "/api/media/" + encodeURIComponent(item.id);
 
@@ -73,6 +92,7 @@ function Media({ item, media }: { item: FeedItem; media?: DetailMedia }) {
         <div className="aspect-video overflow-hidden rounded-xl border border-line bg-black">
           {direct && canFallback ? (
             <video
+              key={tick}
               controls
               autoPlay
               preload="metadata"
@@ -80,6 +100,7 @@ function Media({ item, media }: { item: FeedItem; media?: DetailMedia }) {
               src={base + "/video"}
               poster={poster}
               className="h-full w-full"
+              onError={() => setBroken(true)}
             />
           ) : (
             <iframe
@@ -100,6 +121,9 @@ function Media({ item, media }: { item: FeedItem; media?: DetailMedia }) {
             {direct ? "回到官方播放器" : "播放器打不开？换直链播放"}
           </button>
         ) : null}
+        {direct && broken ? (
+          <MediaBroken item={item} onRetry={() => { setBroken(false); setTick((t) => t + 1); }} />
+        ) : null}
       </div>
     );
   }
@@ -107,15 +131,22 @@ function Media({ item, media }: { item: FeedItem; media?: DetailMedia }) {
   if (media.type === "file" && media.url) {
     const sidecar = Boolean(media.referer);
     return (
-      <div className="mt-5 overflow-hidden rounded-xl border border-line bg-black">
-        <video
-          controls
-          preload="metadata"
-          playsInline
-          src={sidecar ? base + "/video" : media.url}
-          poster={sidecar ? base + "/poster" : media.poster || undefined}
-          className="max-h-[72vh] w-full"
-        />
+      <div className="mt-5">
+        <div className="overflow-hidden rounded-xl border border-line bg-black">
+          <video
+            key={tick}
+            controls
+            preload="metadata"
+            playsInline
+            src={sidecar ? base + "/video" : media.url}
+            poster={sidecar ? base + "/poster" : media.poster || undefined}
+            className="max-h-[72vh] w-full"
+            onError={() => setBroken(true)}
+          />
+        </div>
+        {broken ? (
+          <MediaBroken item={item} onRetry={() => { setBroken(false); setTick((t) => t + 1); }} />
+        ) : null}
       </div>
     );
   }

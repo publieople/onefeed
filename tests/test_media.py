@@ -92,11 +92,143 @@ def test_normalize_detail() -> None:
     check("unknown" not in out, "白名单外字段被丢掉")
 
 
+def test_route_refreshes_expired_link() -> None:
+    """T46：直链过期（403）时重取一次详情、写回缓存、用新地址再取一次流。"""
+    import os
+    import tempfile
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from onefeed import api as api_mod
+    from onefeed.app import create_app
+    from onefeed.store import Store
+
+    state = tempfile.mkdtemp(prefix="onefeed-media-")
+    old_home = os.environ.get("ONEFEED_HOME")
+    os.environ["ONEFEED_HOME"] = state
+    store = None
+    try:
+        store = Store(Path(state) / "media-test.db")
+        now = int(time.time())
+        store.upsert_items([{
+            "id": "douyin:video:1", "platform": "douyin", "kind": "video",
+            "title": "一条用于直链过期的视频", "text": "", "author": "作者", "cover": "",
+            "url": "https://www.douyin.com/video/1", "published_at": now,
+            "like": 0, "comment": 0, "share": 0, "view": 0,
+            "tags": [], "extra": {}, "fetched_at": now,
+        }])
+        store.save_detail("douyin:video:1", {
+            "body": {"kind": "text", "value": "旧详情"},
+            "media": {"type": "file", "url": "https://cdn.example/old.mp4",
+                      "referer": "https://www.douyin.com/"},
+        })
+
+        class FakeHost:
+            def __init__(self) -> None:
+                self.detail_calls = 0
+
+            def supports(self, plugin_id: str, feature: str) -> bool:
+                return feature == "detail"
+
+            def get(self, plugin_id: str):
+                return SimpleNamespace(id=plugin_id, media_hosts=["*.example"],
+                                       embeds=[], features=["detail"])
+
+            def detail(self, plugin_id: str, item) -> dict:
+                self.detail_calls += 1
+                return {"body": {"kind": "text", "value": "新详情"},
+                        "media": {"type": "file", "url": "https://cdn.example/new.mp4",
+                                  "referer": "https://www.douyin.com/"}}
+
+        class FakeResp:
+            def __init__(self, payload: bytes = b"") -> None:
+                self.payload = payload
+                self.closed = False
+
+            def read(self, n: int = -1) -> bytes:
+                data, self.payload = self.payload, b""
+                return data
+
+            def close(self) -> None:
+                self.closed = True
+
+        host = FakeHost()
+        app = create_app(store)
+        app.state.refresher.host = host
+        api_mod._MEDIA_REFRESH_AT.clear()
+        calls: list[str] = []
+
+        def fake_open(url: str, referer: str = "", cookie: str = "",
+                      range_header: str | None = None):
+            calls.append(url)
+            if url.endswith("old.mp4"):
+                return 403, {}, FakeResp()
+            return 200, {"content-type": "video/mp4", "content-length": "3"}, FakeResp(b"abc")
+
+        orig = api_mod.media_mod.open_stream
+        api_mod.media_mod.open_stream = fake_open
+        try:
+            client = TestClient(app)
+            good = client.get("/api/media/douyin%3Avideo%3A1/video")
+            check(good.status_code == 200, "旧直链 403 时自动重取详情，最终 200")
+            check(good.content == b"abc", "返回的是新地址的字节")
+            check(calls == ["https://cdn.example/old.mp4", "https://cdn.example/new.mp4"],
+                  "先试旧地址、再试新地址，各一次")
+            check(host.detail_calls == 1, "只重取一次详情")
+            cached = store.get_detail("douyin:video:1", max_age=0)
+            check(cached["payload"]["media"]["url"] == "https://cdn.example/new.mp4",
+                  "新详情写回 details 表")
+
+            # 新地址也过期：只重试一次就放弃，别死循环
+            calls.clear()
+
+            def always_403(url: str, referer: str = "", cookie: str = "",
+                           range_header: str | None = None):
+                calls.append(url)
+                return 403, {}, FakeResp()
+
+            api_mod.media_mod.open_stream = always_403
+            api_mod._MEDIA_REFRESH_AT.clear()
+            bad = client.get("/api/media/douyin%3Avideo%3A1/video")
+            check(bad.status_code == 502, "两轮都过期就报 502")
+            check(bad.json()["error"]["code"] == "media_expired", "错误码是 media_expired")
+            check(len(calls) == 2, "最多两轮请求，不无限重试")
+            check(host.detail_calls == 2, "第二次过期也只会再重取一次详情")
+
+            # 冷却期：同一条内容 60 秒内不再重取详情，直接按过期报错
+            api_mod._MEDIA_REFRESH_AT.clear()
+            api_mod.media_mod.open_stream = fake_open
+            calls.clear()
+            host.detail_calls = 0
+            store.save_detail("douyin:video:1", {
+                "media": {"type": "file", "url": "https://cdn.example/old.mp4",
+                          "referer": "https://www.douyin.com/"}})
+            first = client.get("/api/media/douyin%3Avideo%3A1/video")
+            check(first.status_code == 200 and host.detail_calls == 1, "第一次仍会重取")
+            store.save_detail("douyin:video:1", {
+                "media": {"type": "file", "url": "https://cdn.example/old.mp4",
+                          "referer": "https://www.douyin.com/"}})
+            second = client.get("/api/media/douyin%3Avideo%3A1/video")
+            check(second.status_code == 502 and host.detail_calls == 1,
+                  "冷却期内不再重取详情，直接报过期")
+        finally:
+            api_mod.media_mod.open_stream = orig
+    finally:
+        if store is not None:
+            store.close()
+        if old_home is None:
+            os.environ.pop("ONEFEED_HOME", None)
+        else:
+            os.environ["ONEFEED_HOME"] = old_home
+
+
 def main() -> int:
     test_video_slot()
     test_other_slots()
     test_normalize_keeps_fallback()
     test_normalize_detail()
+    test_route_refreshes_expired_link()
     print(f"✅ test_media.py  T47 通过：{CHECKS} 项检查")
     return 0
 
