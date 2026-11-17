@@ -10,7 +10,8 @@ export const PLATFORMS: PlatformMeta[] = [
   { id: "douyin", label: "抖音", tint: "#FE2C55" },
   { id: "juejin", label: "掘金", tint: "#1E80FF" },
   { id: "v2ex", label: "V2EX", tint: "#778087" },
-  { id: "zhihu-hot", label: "知乎", tint: "#0084FF" },
+  { id: "zhihu", label: "知乎", tint: "#0084FF" },
+  { id: "zhihu-hot", label: "知乎热榜", tint: "#0084FF" },
 ];
 
 const FALLBACK: PlatformMeta = { id: "unknown", label: "未知道", tint: "#6b7280" };

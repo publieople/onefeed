@@ -138,7 +138,7 @@ function RankBand({ item }: { item: FeedItem }) {
 }
 
 /** 纯文字动态：给一块同尺寸的文字面板，高度不再塌下去。 */
-function TextPanel({ item }: { item: FeedItem }) {
+function TextPanel({ item, label }: { item: FeedItem; label?: string }) {
   const p = platform(item.platform);
   const text = (item.text || item.title || "").trim();
   return (
@@ -154,7 +154,7 @@ function TextPanel({ item }: { item: FeedItem }) {
           className="pointer-events-none absolute inset-x-0 bottom-[22px] h-14"
           style={{ background: "linear-gradient(to top, " + hexAlpha(p.tint, 0.06) + ", transparent)" }}
         />
-        <span className="relative text-[11px] text-fade">文字动态 · {p.label}</span>
+        <span className="relative text-[11px] text-fade">{(label ?? "文字动态") + " · " + p.label}</span>
       </div>
     </Frame>
   );
@@ -164,11 +164,17 @@ function Media({ item }: { item: FeedItem }) {
   if (item.kind === "list") return <RankBand item={item} />;
   if (item.kind === "short") return <TextPanel item={item} />;
   if (item.kind === "images" && item.images.length) return <ImageGrid item={item} />;
+  // 长文/视频没有封面时，与其留一块「没有配图」，不如把摘要铺成文字面板（尺寸不变，行仍然齐）
+  if (!item.cover && (item.kind === "article" || item.kind === "video")) {
+    return <TextPanel item={item} label="摘要" />;
+  }
   return <Cover item={item} />;
 }
 
 function excerpt(item: FeedItem): string {
   if (item.kind === "list" || item.kind === "short") return "";
+  // 摘要已经铺在媒体位上的长文，下面不再重复一遍
+  if (!item.cover && (item.kind === "article" || item.kind === "video")) return "";
   return (item.text ?? "").trim();
 }
 
@@ -183,7 +189,9 @@ function MetaLine({ item, body }: { item: FeedItem; body: string }) {
   }
   const reason = item.reasons?.[0] ?? "";
   const cluster = (item.cluster_size ?? 0) > 1 ? item.cluster_size + " 个平台同题" : "";
-  const hint = reason || cluster || (item.kind === "short" || item.kind === "list" ? "点开详情" : "");
+  const hint = reason || cluster || (item.kind === "short" || item.kind === "list"
+    ? "点开详情"
+    : !item.cover ? "点开看全文" : "");
   return (
     <p className={"clamp-2 mt-1.5 h-[43px] shrink-0 text-[12px] leading-[1.7] " + (hint ? "text-fade" : "")}>
       {hint || "\u00a0"}

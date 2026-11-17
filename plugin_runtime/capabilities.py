@@ -135,6 +135,35 @@ EXTRACTORS: dict[str, dict[str, Any]] = {
   } catch (e) { return { ok: false, reason: String(e).slice(0, 300) }; }
 }""",
     },
+    "zhihu.article": {
+        "hosts": ("zhihu.com",),
+        "settleMs": 4000,
+        "js": r"""() => {
+  try {
+    const el = document.getElementById('js-initialData');
+    if (!el) return { ok: false, reason: 'no_initial_data', href: location.href };
+    const data = JSON.parse(el.textContent || '{}');
+    const ents = ((data.initialState || {}).entities) || {};
+    const articles = ents.articles || {};
+    const keys = Object.keys(articles);
+    if (!keys.length) return { ok: false, reason: 'no_article', href: location.href };
+    const a = articles[keys[0]] || {};
+    const author = a.author || {};
+    return {
+      ok: true,
+      id: String(a.id || keys[0]),
+      title: String(a.title || ''),
+      content: String(a.content || '').slice(0, 60000),
+      author: String(author.name || ''),
+      avatar: String(author.avatarUrl || author.avatar_url || ''),
+      voteup: Number(a.voteupCount || 0),
+      comment: Number(a.commentCount || 0),
+      created: Number(a.created || 0),
+      updated: Number(a.updated || 0)
+    };
+  } catch (e) { return { ok: false, reason: String(e).slice(0, 300) }; }
+}""",
+    },
 }
 
 
