@@ -47,46 +47,127 @@ SYSTEM_PROMPT = """你是 OneFeed 的找内容助手。用户用一句话说自�
 
 # ---------------------------------------------------------------- 配置
 
-def _config() -> dict[str, Any]:
-    conf = settings_mod.load()
-    key = os.environ.get("ONEFEED_AI_KEY") or str(conf.get("ai_api_key") or "")
+def _public(provider: dict[str, Any]) -> dict[str, Any]:
+    """对外的模型条目：只报「配没配」和末四位，key 永不出宿主。"""
+    key = str(provider.get("key") or "")
     return {
-        "base_url": str(conf.get("ai_base_url") or DEFAULT_BASE).rstrip("/"),
-        "model": str(conf.get("ai_model") or DEFAULT_MODEL),
-        "key": key.strip(),
+        "id": provider.get("id", ""),
+        "name": provider.get("name", ""),
+        "base_url": provider.get("base_url", ""),
+        "model": provider.get("model", ""),
+        "key_set": bool(key),
+        "key_hint": ("…" + key[-4:]) if len(key) >= 8 else "",
     }
 
 
+def _provider_list(conf: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """按顺序排出「这一轮可以试哪些模型」。
+
+    顺序 = 环境变量（临时覆盖）→ 设置里的顺序表 → 旧版单模型字段。
+    顺序表里禁用的、没 key 的直接跳过——它们留在设置里但不上场。
+    """
+    conf = conf if conf is not None else settings_mod.load()
+    out: list[dict[str, Any]] = []
+    env_key = (os.environ.get("ONEFEED_AI_KEY") or "").strip()
+    if env_key:
+        out.append({
+            "id": "env", "name": "环境变量",
+            "base_url": str(conf.get("ai_base_url") or DEFAULT_BASE).rstrip("/"),
+            "model": str(conf.get("ai_model") or DEFAULT_MODEL), "key": env_key,
+        })
+    for item in conf.get("ai_providers") or []:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        base = str(item.get("base_url") or "").rstrip("/")
+        model = str(item.get("model") or "").strip()
+        if not key or not base or not model or item.get("enabled") is False:
+            continue
+        out.append({"id": str(item.get("id") or ""), "name": str(item.get("name") or model),
+                    "base_url": base, "model": model, "key": key})
+    if out:
+        return out
+    legacy = str(conf.get("ai_api_key") or "").strip()
+    if legacy:
+        out.append({
+            "id": "legacy", "name": "默认模型",
+            "base_url": str(conf.get("ai_base_url") or DEFAULT_BASE).rstrip("/"),
+            "model": str(conf.get("ai_model") or DEFAULT_MODEL), "key": legacy,
+        })
+    return out
+
+
+# 最近一次「谁上场、成没成」——设置页据此显示「上一个模型挂了，正在用第 2 个」。
+_LAST: dict[str, Any] = {"at": 0, "provider": "", "ok": False, "error": "", "tried": []}
+
+
 def status() -> dict[str, Any]:
-    conf = _config()
+    chain = _provider_list()
+    head = chain[0] if chain else None
     return {
-        "engine": "llm" if conf["key"] else "rules",
-        "model": conf["model"],
-        "base_url": conf["base_url"],
-        "configured": bool(conf["key"]),
+        "engine": "llm" if chain else "rules",
+        "model": head["model"] if head else str(settings_mod.load().get("ai_model") or DEFAULT_MODEL),
+        "base_url": head["base_url"] if head else str(
+            settings_mod.load().get("ai_base_url") or DEFAULT_BASE),
+        "configured": bool(chain),
+        "active": head["name"] if head else "",
+        "providers": [_public(p) for p in chain],
+        "last": dict(_LAST),
         "platforms": list(PLATFORM_IDS),
         "kinds": list(KINDS),
     }
 
 
-def _chat(messages: list[dict[str, str]]) -> str:
-    conf = _config()
-    if not conf["key"]:
+def _chat(provider: dict[str, Any], messages: list[dict[str, str]]) -> str:
+    if not provider.get("key"):
         raise RuntimeError("没有配置模型 key")
     body = json.dumps({
-        "model": conf["model"],
+        "model": provider["model"],
         "messages": messages,
         "temperature": 0.2,
         "max_tokens": 300,
         "response_format": {"type": "json_object"},
     }).encode("utf-8")
     req = urllib.request.Request(
-        conf["base_url"] + "/chat/completions", data=body, method="POST",
+        str(provider["base_url"]).rstrip("/") + "/chat/completions", data=body, method="POST",
         headers={"Content-Type": "application/json",
-                 "Authorization": "Bearer " + conf["key"]})
+                 "Authorization": "Bearer " + str(provider["key"])})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     return str(payload["choices"][0]["message"]["content"])
+
+
+def test_provider(raw: dict[str, Any] | None = None) -> dict[str, Any]:
+    """给设置页的「测一下」按钮用：只发一句最小请求，确认这个模型通不通。"""
+    raw = raw if isinstance(raw, dict) else {}
+    stored = {str(p.get("id")): p for p in settings_mod.load().get("ai_providers") or []
+              if isinstance(p, dict)}
+    target: dict[str, Any] | None = None
+    if raw.get("base_url") and raw.get("model"):
+        target = {
+            "id": str(raw.get("id") or "draft"),
+            "name": str(raw.get("name") or raw.get("model")),
+            "base_url": str(raw["base_url"]).rstrip("/"),
+            "model": str(raw["model"]),
+            "key": str(raw.get("key") or stored.get(str(raw.get("id")), {}).get("key") or "").strip(),
+        }
+    else:
+        wanted = str(raw.get("id") or "").strip()
+        chain = _provider_list()
+        target = next((p for p in chain if p["id"] == wanted), None) if wanted else None
+        target = target or (chain[0] if chain else None)
+    if not target:
+        return {"ok": False, "error": "还没有可用的模型配置"}
+    started = time.time()
+    try:
+        reply = _chat(target, [{"role": "user",
+                                "content": "只回一个 JSON：{\"reply\":\"在线\"}"}])
+        return {"ok": True, "ms": int((time.time() - started) * 1000),
+                "provider": target["name"], "model": target["model"], "reply": reply[:160]}
+    except Exception as exc:  # noqa: BLE001 - 设置页只需要一句话原因
+        return {"ok": False, "ms": int((time.time() - started) * 1000),
+                "provider": target["name"], "model": target["model"],
+                "error": (str(exc) or exc.__class__.__name__)[:300]}
 
 
 # ---------------------------------------------------------------- 解析
@@ -197,6 +278,7 @@ def _rule_plan(message: str, history: list[dict[str, str]] | None = None) -> dic
         "sort": "engagement" if re.search(r"最热|热门|火|高赞|爆", lowered) else "freshness",
         "reply": "",
         "engine": "rules",
+        "provider": "",
         "raw": message,
     }
 
@@ -223,24 +305,38 @@ def plan(message: str, history: list[dict[str, str]] | None = None) -> dict[str,
     message = (message or "").strip()[:200]
     if not message:
         return _rule_plan("")
-    conf = _config()
-    if conf["key"]:
-        messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        for turn in (history or [])[-MAX_HISTORY:]:
-            role = "user" if turn.get("role") == "user" else "assistant"
-            content = str(turn.get("text") or turn.get("content") or "")[:200]
-            if content:
-                messages.append({"role": role, "content": content})
-        messages.append({"role": "user", "content": message})
+    chain = _provider_list()
+    fallback = _rule_plan(message, history)
+    if not chain:
+        return fallback
+    messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for turn in (history or [])[-MAX_HISTORY:]:
+        role = "user" if turn.get("role") == "user" else "assistant"
+        content = str(turn.get("text") or turn.get("content") or "")[:200]
+        if content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": message})
+
+    tried: list[str] = []
+    for provider in chain:
+        tried.append(provider["name"])
         try:
-            raw = _chat(messages)
+            raw = _chat(provider, messages)
             match = re.search(r"\{.*\}", raw, re.S)
             obj = json.loads(match.group(0) if match else raw)
             if isinstance(obj, dict):
-                return _accept(obj, message)
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, RuntimeError):
-            pass
-    return _rule_plan(message, history)
+                plan = _accept(obj, message)
+                plan["provider"] = provider["name"]
+                _LAST.update({"at": int(time.time()), "provider": provider["name"],
+                              "ok": True, "error": "", "tried": tried})
+                return plan
+            raise ValueError("模型没给 JSON 对象")
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, RuntimeError) as exc:
+            # 这个模型挂了就换下一个：超时、额度用光、模型下线都走同一条路。
+            _LAST.update({"at": int(time.time()), "provider": provider["name"],
+                          "ok": False, "error": (str(exc) or exc.__class__.__name__)[:200],
+                          "tried": list(tried)})
+    return fallback
 
 
 # ---------------------------------------------------------------- 检索与说法
@@ -344,6 +440,7 @@ def chat(store, message: str, history: list[dict[str, str]] | None = None,
     rows = _decorate(rows[:limit])
     return {
         "engine": pl["engine"],
+        "provider": pl.get("provider", ""),
         "plan": {k: pl[k] for k in ("mode", "platforms", "kinds", "since", "keyword", "sort")},
         "reply": _reply_for(pl, rows),
         "items": rows,

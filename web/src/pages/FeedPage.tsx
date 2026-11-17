@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import type { OutletCtx } from "../App";
 import { useFeed } from "../api";
 import AiDock from "../components/AiDock";
@@ -82,37 +83,24 @@ export default function FeedPage({ ctx }: Props) {
     <div className="pb-24">
       <section className="flex flex-wrap items-center gap-3 pt-6">
         <h1 className="text-[15px] font-medium">{active ? "筛选结果" : range === "today" ? "今天" : "全部内容"}</h1>
-        <div className="flex items-center gap-1 rounded-full border border-line p-0.5 text-[12px]">
-          {[
+        <Seg
+          id="range"
+          value={range}
+          onChange={setRange}
+          options={[
             { id: "all" as const, label: "全部" },
             { id: "today" as const, label: "今天" },
-          ].map((r) => (
-            <button
-              key={r.id}
-              onClick={() => setRange(r.id)}
-              className={"rounded-full px-2.5 py-1 transition " + (range === r.id ? "bg-ink text-white" : "text-muted hover:text-ink")}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1 rounded-full border border-line p-0.5 text-[12px]">
-          {[
-            { id: "freshness", label: "按新鲜度" },
-            { id: "engagement", label: "按热度" },
-          ].map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setSort(s.id)}
-              className={
-                "rounded-full px-2.5 py-1 transition " +
-                (activeSort === s.id ? "bg-ink text-white" : "text-muted hover:text-ink")
-              }
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
+          ]}
+        />
+        <Seg
+          id="sort"
+          value={activeSort as "freshness" | "engagement"}
+          onChange={setSort}
+          options={[
+            { id: "freshness" as const, label: "按新鲜度" },
+            { id: "engagement" as const, label: "按热度" },
+          ]}
+        />
         <span className="ml-auto text-[12px] text-fade">
           {ctx.summary ? ctx.summary.platforms.length + " 个平台" : "加载中"}
           {newest ? " · 最近采集 " + newest : ""}
@@ -147,8 +135,10 @@ export default function FeedPage({ ctx }: Props) {
       ) : null}
 
       <section className="mt-5 grid grid-cols-1 items-stretch gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
-        {feed.items.map((item) => (
-          <Card key={item.id} item={item} onOpen={openItem} />
+        {feed.items.map((item, index) => (
+          <div key={item.id} className="rise h-full" style={{ animationDelay: Math.min(index, 11) * 22 + "ms" }}>
+            <Card item={item} onOpen={openItem} />
+          </div>
         ))}
       </section>
 
@@ -199,6 +189,43 @@ export default function FeedPage({ ctx }: Props) {
       ) : null}
 
       <AiDock onOpenItem={openItem} />
+    </div>
+  );
+}
+
+/** 分段控件：选中块用 layout 在两项之间滑过去，比瞬间换背景色顺 */
+function Seg<T extends string>({
+  id,
+  value,
+  options,
+  onChange,
+}: {
+  id: string;
+  value: T;
+  options: { id: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-full border border-line p-0.5 text-[12px]">
+      {options.map((o) => {
+        const on = o.id === value;
+        return (
+          <button
+            key={o.id}
+            onClick={() => onChange(o.id)}
+            className={"relative rounded-full px-2.5 py-1 transition-colors " + (on ? "text-white" : "text-muted hover:text-ink")}
+          >
+            {on ? (
+              <motion.span
+                layoutId={"seg-" + id}
+                className="absolute inset-0 rounded-full bg-ink"
+                transition={{ type: "spring", stiffness: 560, damping: 40 }}
+              />
+            ) : null}
+            <span className="relative">{o.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

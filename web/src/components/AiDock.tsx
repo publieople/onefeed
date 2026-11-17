@@ -1,5 +1,6 @@
 import { ArrowUp, Loader2, Sparkles, Wand2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { AiResponse, FeedItem } from "../api";
 import { aiChat, aiStatus } from "../api";
 import { platform } from "../platform";
@@ -27,6 +28,7 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
   const [engine, setEngine] = useState<"llm" | "rules">("rules");
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     aiStatus().then((s) => setEngine(s.engine)).catch(() => void 0);
@@ -76,14 +78,32 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
 
   return (
     <>
-      {open ? (
-        <div className="fixed inset-0 z-30 bg-ink/10 md:bg-transparent" onClick={() => setOpen(false)} />
-      ) : null}
+      <AnimatePresence>
+        {open ? (
+          <motion.div
+            key="scrim"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduce ? 0 : 0.18 }}
+            className="fixed inset-0 z-30 bg-ink/10 md:bg-transparent"
+            onClick={() => setOpen(false)}
+          />
+        ) : null}
+      </AnimatePresence>
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4">
         <div className="pointer-events-auto w-full max-w-[760px]">
+          <AnimatePresence initial={false}>
           {open ? (
-            <div className="mb-3 flex max-h-[62vh] flex-col overflow-hidden rounded-card border border-line bg-white shadow-[0_18px_50px_rgba(20,20,20,0.14)]">
+            <motion.div
+              key="panel"
+              initial={{ opacity: 0, y: 12, scale: 0.985 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.99 }}
+              transition={{ duration: reduce ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
+              className="mb-3 flex max-h-[62vh] flex-col overflow-hidden rounded-card border border-line bg-white shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
+            >
               <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
                 <Sparkles size={14} className="text-ink" />
                 <span className="text-[13px] font-medium">找内容</span>
@@ -119,13 +139,13 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
 
                 {turns.map((turn, index) =>
                   turn.role === "user" ? (
-                    <div key={index} className="flex justify-end">
+                    <div key={index} className="rise flex justify-end">
                       <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-ink px-3.5 py-2 text-[13px] text-white">
                         {turn.text}
                       </div>
                     </div>
                   ) : (
-                    <div key={index} className="space-y-2.5">
+                    <div key={index} className="rise space-y-2.5">
                       <div className="flex items-start gap-2">
                         <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line">
                           <Sparkles size={12} />
@@ -194,19 +214,31 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                 >
                   {manual ? "收起手动筛选" : "手动筛选"}
                 </button>
-                {manual ? (
-                  <FilterBox
-                    value=""
-                    parsed={null}
-                    onSubmit={(q) => {
-                      window.dispatchEvent(new CustomEvent("onefeed:filter", { detail: { keyword: q } }));
-                      setOpen(false);
-                    }}
-                  />
-                ) : null}
+                <AnimatePresence initial={false}>
+                  {manual ? (
+                    <motion.div
+                      key="manual"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: reduce ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+                      style={{ overflow: "hidden" }}
+                    >
+                      <FilterBox
+                        value=""
+                        parsed={null}
+                        onSubmit={(q) => {
+                          window.dispatchEvent(new CustomEvent("onefeed:filter", { detail: { keyword: q } }));
+                          setOpen(false);
+                        }}
+                      />
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
               </div>
-            </div>
+            </motion.div>
           ) : null}
+          </AnimatePresence>
 
           <form
             onSubmit={(e) => {

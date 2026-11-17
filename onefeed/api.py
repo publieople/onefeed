@@ -127,6 +127,16 @@ def _mask(conf: dict[str, Any]) -> dict[str, Any]:
     for secret in settings_mod.SECRET_KEYS:
         if out.get(secret):
             out[secret] = ""
+    providers = out.get("ai_providers")
+    if isinstance(providers, list):
+        masked: list[dict[str, Any]] = []
+        for item in providers:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "")
+            masked.append({**item, "key": "", "key_set": bool(key),
+                           "key_hint": ("…" + key[-4:]) if len(key) >= 8 else ""})
+        out["ai_providers"] = masked
     return out
 
 
@@ -163,6 +173,12 @@ def put_settings(request: Request, payload: dict[str, Any] = Body(default={})) -
 @router.get("/ai/status")
 def ai_status() -> dict:
     return ai_mod.status()
+
+
+@router.post("/ai/test")
+def ai_test(payload: dict[str, Any] = Body(default={})) -> dict:
+    """测一个模型通不通。传 id 测已保存的，传 base_url + model + key 测还没保存的草稿。"""
+    return ai_mod.test_provider(payload)
 
 
 @router.post("/ai/chat")

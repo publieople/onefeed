@@ -31,6 +31,58 @@ a {
 
 button {
   font: inherit;
+  /* 每个可点的东西都有一点点「按下去」的反馈，靠 transform 而不是改尺寸，不触发重排 */
+  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.18s ease,
+    border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+/* 列表进场：只用 opacity + translate，GPU 上跑，滚动时不掉帧 */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.rise {
+  animation: rise 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fade-in 0.2s ease both;
+}
+
+/* 路由切换只淡入淡出：任何 transform / will-change:transform 都会让后代的
+   position: fixed（底部 AI 胶囊、toast）以整页为参照，跑到页面底部去。 */
+.page-shell {
+  will-change: opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  button:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 .hairline {
@@ -95,3 +147,10 @@ button {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* 设置页左侧导航的当前项：一条贴着实色的短竖线，不抢视线 */
+.nav-active {
+  color: var(--ink);
+  background: var(--wash);
+}
+

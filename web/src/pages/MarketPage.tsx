@@ -156,8 +156,12 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
       ) : null}
 
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-        {entries.map((entry) => (
-          <article key={entry.id} className="rounded-card border border-line p-5">
+        {entries.map((entry, index) => (
+          <article
+            key={entry.id}
+            className="rise rounded-card border border-line p-5"
+            style={{ animationDelay: Math.min(index, 9) * 28 + "ms" }}
+          >
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">

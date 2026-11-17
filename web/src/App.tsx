@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import TopBar from "./components/TopBar";
 import FeedPage from "./pages/FeedPage";
 import ItemPage from "./pages/ItemPage";
@@ -35,6 +36,8 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [toast, setToast] = useState("");
   const wasRunning = useRef(false);
+  const location = useLocation();
+  const reduce = useReducedMotion();
 
   const reloadSettings = useCallback(async () => {
     try {
@@ -110,18 +113,39 @@ export default function App() {
     <div className="min-h-screen bg-paper">
       <TopBar health={health} progress={progress} onRefresh={refresh} />
       <main className="mx-auto w-full max-w-[1180px] px-6">
-        <Routes>
-          <Route path="/" element={<FeedPage ctx={ctx} />} />
-          <Route path="/item/:id" element={<ItemPage />} />
-          <Route path="/market" element={<MarketPage ctx={ctx} />} />
-          <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
-        </Routes>
+        {/* 切页时旧页先淡出再让新页进场，避免两页同时闪一下 */}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={location.pathname}
+            className="page-shell"
+            initial={reduce ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduce ? 0 : 0.16, ease: "easeOut" }}
+          >
+            <Routes location={location}>
+              <Route path="/" element={<FeedPage ctx={ctx} />} />
+              <Route path="/item/:id" element={<ItemPage />} />
+              <Route path="/market" element={<MarketPage ctx={ctx} />} />
+              <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
+            </Routes>
+          </motion.div>
+        </AnimatePresence>
       </main>
-      {toast ? (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-2.5 text-[13px] text-white shadow-pop">
-          {toast}
-        </div>
-      ) : null}
+      <AnimatePresence>
+        {toast ? (
+          <motion.div
+            key="toast"
+            initial={{ opacity: 0, y: 12, scale: 0.97, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
+            exit={{ opacity: 0, y: 12, scale: 0.97, x: "-50%" }}
+            transition={{ duration: reduce ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="fixed bottom-6 left-1/2 z-50 rounded-full bg-ink px-5 py-2.5 text-[13px] text-white shadow-pop"
+          >
+            {toast}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

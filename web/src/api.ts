@@ -119,6 +119,18 @@ export interface LoginStatus {
   cookie?: string;
 }
 
+export interface AiProvider {
+  id: string;
+  name: string;
+  base_url: string;
+  model: string;
+  enabled: boolean;
+  /** 只写不读：已保存的 key 返回空串 */
+  key?: string;
+  key_set?: boolean;
+  key_hint?: string;
+}
+
 export interface SettingsValues {
   plugins_dir: string;
   registry_url: string;
@@ -131,6 +143,8 @@ export interface SettingsValues {
   ai_model: string;
   /** 只写不读：后端返回时永远为空串 */
   ai_api_key: string;
+  /** 按顺序试的模型表；空数组时退回上面那组单模型字段 */
+  ai_providers: AiProvider[];
 }
 
 export interface SettingsResponse {
@@ -211,6 +225,8 @@ export interface AiPlan {
 
 export interface AiResponse {
   engine: "llm" | "rules";
+  /** 这一轮实际回答的是哪个模型（规则解析时为空） */
+  provider?: string;
   plan: AiPlan;
   reply: string;
   items: FeedItem[];
@@ -219,13 +235,47 @@ export interface AiResponse {
   understood: string;
 }
 
+export interface AiProviderStatus {
+  id: string;
+  name: string;
+  base_url: string;
+  model: string;
+  key_set: boolean;
+  key_hint: string;
+}
+
+export interface AiAttempt {
+  at: number;
+  provider: string;
+  ok: boolean;
+  error: string;
+  tried: string[];
+}
+
 export interface AiStatus {
   engine: "llm" | "rules";
   model: string;
   base_url: string;
   configured: boolean;
+  active?: string;
+  providers?: AiProviderStatus[];
+  last?: AiAttempt;
   platforms: string[];
   kinds: string[];
+}
+
+export interface AiTestResult {
+  ok: boolean;
+  ms?: number;
+  provider?: string;
+  model?: string;
+  reply?: string;
+  error?: string;
+}
+
+/** 测一个模型通不通：传已保存的 id，或传还没保存的 base_url + model + key */
+export function aiTest(body: Record<string, unknown>): Promise<AiTestResult> {
+  return postJSON<AiTestResult>("/api/ai/test", body);
 }
 
 export function aiChat(message: string, extra: Record<string, unknown> = {}): Promise<AiResponse> {

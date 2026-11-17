@@ -73,7 +73,7 @@ POST /api/ai/chat
   插件永远看不到；设置页留空表示「不改」，单独一个「清除 key」按钮才清。
 - 环境变量 `ONEFEED_AI_KEY` 可覆盖文件里的 key（演示机可临时注入，不落盘）。
 
-## 8. 验收（test_ai.py，31 项）
+## 8. 验收（test_ai.py，40 项）
 
 - 没 key → engine=rules；「只看今天 B 站的 AI 视频」→ 平台/B 站、类型视频、关键词 AI、结果全部同源同类型。
 - 「知乎」→ zhihu（推荐流），「知乎热榜」→ zhihu-hot，长别名先剥。
@@ -89,3 +89,38 @@ POST /api/ai/chat
 - 结果受库内数据限制：没采到的平台/时间窗，问也问不出来；搜索匹配的是标题与摘要，不搜全文。
 - 不做生成式摘要与多轮追问式推荐（"还有吗" 只能靠换一批），避免模型替平台内容下结论。
 - 同平台同标题在结果层去重（热榜会把同一问题按不同 id 收两次）。
+
+## 10. 多模型顺序表（2026-11-17 追加）
+
+原来只有一组 `ai_base_url / ai_model / ai_api_key`。实际用起来是两个供应商轮流上班：
+MiniMax 的 token plan 便宜、DeepSeek 稳，谁挂了都不能让 AI 入口整块退回规则解析。
+
+- 设置字段 `ai_providers`：数组，最多 5 条，每条 `{id, name, base_url, model, key, enabled}`；
+  顺序即优先级。启用且填了 key 的才上场，全部不可用时才落回 `ai_api_key` 单模型字段（兼容旧配置）。
+- `_provider_list()` 的优先级：环境变量 `ONEFEED_AI_KEY`（临时覆盖，不落盘）→ `ai_providers` 顺序链 → 旧单模型字段。
+- `plan()` 遍历整条链：任一模型返回可解析的 JSON plan 就用它，并在 plan 上记 `provider`；
+  抛 `URLError / TimeoutError / OSError / ValueError / KeyError / RuntimeError` 一律记进 `_LAST` 后换下一个。
+  全挂 → 规则解析，`provider` 为空串。
+- `GET /api/ai/status` 多返回三样：`active`（当前会用的模型名）、`providers`（脱敏链，带 `key_set` / 末四位）、
+  `last`（上一次尝试：`{at, provider, ok, error, tried}`）。
+- 新增 `POST /api/ai/test`：传 `{id}` 测已存的，或传 `{base_url, model, key}` 测草稿；key 留空时按 id 继承已存的。
+  返回 `{ok, ms, provider, model, reply}` 或 `{ok:false, error}`。
+- 凭据口径不变：`GET /api/settings` 里每条 provider 的 `key` 一律空串，只回 `key_set` 与 `key_hint`（末四位）；
+  `PUT` 时空 key 表示「不改」，按 id 继承旧值。「清除所有 key」是单独一个动作（把 `ai_providers` 清空）。
+
+实测（2026-11-17）：MiniMax `MiniMax-M3.1-Flash` 982 ms、DeepSeek `deepseek-chat` 351 ms；
+把 MiniMax 的模型名改成一个不存在的，`/api/ai/chat` 仍返回 `provider=DeepSeek`，`last.tried=["MiniMax","DeepSeek"]`。
+
+## 11. 设置页与动效（2026-11-17 追加）
+
+设置页原来把所有 section 平铺，一屏放不下，改完还得滚回顶部按保存。
+
+- 两栏：左侧 184px 分类导航（跟着滚动高亮），右侧分组卡片。小于 `lg` 时导航隐藏，只留卡片。
+- 每个分组默认收起，收起态露一行摘要（如「12 条/平台 · 保留 14 天 · 不自动更新」），
+  只有「运行状态」和「AI 助手」默认展开。展开/收起用 `AnimatePresence` 做高度 + 透明度过渡。
+- 有未保存改动时，底部浮出一条胶囊「有未保存的改动 · 保存 / 放弃」，不占文档流、不推动页面；
+  保存或放弃后浮条淡出。之前那版把它做成 sticky 顶栏，第一次输入会把整页往下顶一下，已否掉。
+- 动效统一用 `framer-motion`（已在依赖里但此前零使用）+ 少量 CSS：`rise` 列表进场、`fade-in`、
+  `button:active` 轻微缩放、分段控件用 `layoutId` 滑块、路由切换只做透明度过渡、toast 从底部弹入。
+- **坑**：路由外层容器不能带 `transform` / `will-change: transform`，否则后代的 `position: fixed`
+  （底部 AI 胶囊、toast）会以整页为参照，跑到页面最底部看不见。`.page-shell` 只留 `will-change: opacity`。

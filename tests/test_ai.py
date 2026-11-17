@@ -143,10 +143,57 @@ def main() -> int:
     check(raw.json()["ai"]["engine"] == "llm", "配了 key 之后引擎变 llm")
     check(settings_mod.load().get("ai_api_key") == "sk-test-only", "磁盘上确实存了（宿主自己用）")
 
+    # 7b) 顺序表：按提交顺序上场，key 只进不出
+    saved = client.put("/api/settings", json={"ai_providers": [
+        {"id": "p1", "name": "MiniMax", "base_url": "https://api.minimaxi.com/v1",
+         "model": "MiniMax-M3.1-Flash", "key": "sk-minimax-secret", "enabled": True},
+        {"id": "p2", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1",
+         "model": "deepseek-chat", "key": "sk-deepseek-secret", "enabled": True},
+    ]}).json()
+    check([p["name"] for p in saved["settings"]["ai_providers"]] == ["MiniMax", "DeepSeek"],
+          "顺序表按提交顺序保存")
+    check(all(p["key"] == "" and p["key_set"] for p in saved["settings"]["ai_providers"]),
+          "回包里的 key 被抹掉，只留已配标记")
+    check("sk-minimax-secret" not in client.get("/api/settings").text, "GET 不含顺序表明文")
+    st2 = client.get("/api/ai/status").json()
+    check([p["name"] for p in st2["providers"]] == ["MiniMax", "DeepSeek"], "status 按顺序列出可用模型")
+    check(st2["active"] == "MiniMax" and st2["engine"] == "llm", "排第一的当主模型")
+
+    # 7c) key 留空 = 不改：前端看不到明文，不能让它冲掉已存的 key
+    client.put("/api/settings", json={"ai_providers": [
+        {"id": "p1", "name": "MiniMax", "base_url": "https://api.minimaxi.com/v1",
+         "model": "MiniMax-M3.1-Flash", "key": ""},
+        {"id": "p2", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1",
+         "model": "deepseek-chat", "key": ""},
+    ]})
+    check(settings_mod.load()["ai_providers"][0]["key"] == "sk-minimax-secret",
+          "空 key 不覆盖已存的 key")
+
+    # 7d) 第一个挂了自动换第二个
+    real_chat_chain = ai_mod._chat
+    try:
+        def first_boom(provider, messages):
+            if provider["id"] == "p1":
+                raise TimeoutError("minimax slow")
+            return json.dumps({"mode": "find", "platforms": ["bilibili"], "kinds": ["video"],
+                               "since": None, "keyword": "AI", "sort": "freshness",
+                               "reply": "换到第二个了"})
+        ai_mod._chat = first_boom
+        fb = client.post("/api/ai/chat", json={"message": "B 站 AI 视频"}).json()
+        check(fb["engine"] == "llm" and fb["provider"] == "DeepSeek", "第一个模型超时后自动换第二个")
+        check(ai_mod.status()["last"]["ok"] is True, "记住最后一次成功的是谁")
+
+        # 7e) 测一下：传 id 测已保存的，走同一套 _chat
+        ai_mod._chat = lambda provider, messages: json.dumps({"reply": "在线"})
+        probe = client.post("/api/ai/test", json={"id": "p2"}).json()
+        check(probe["ok"] is True and probe["model"] == "deepseek-chat", "「测一下」按 id 找到对应模型")
+    finally:
+        ai_mod._chat = real_chat_chain
+
     # 8) 模型正常输出 -> 用模型的计划
     real_chat = ai_mod._chat
     try:
-        ai_mod._chat = lambda messages: json.dumps({
+        ai_mod._chat = lambda provider, messages: json.dumps({
             "mode": "find", "platforms": ["xiaohongshu"], "kinds": ["images"],
             "since": "week", "keyword": "海报", "sort": "engagement",
             "reply": "找小红书这周的海报图",
@@ -158,12 +205,12 @@ def main() -> int:
         check(all(i["platform"] == "xiaohongshu" for i in llm["items"]), "按模型计划检索")
 
         # 9) 模型抽风 -> 落回规则，不报错
-        ai_mod._chat = lambda messages: "抱歉我不能回答这个"
+        ai_mod._chat = lambda provider, messages: "抱歉我不能回答这个"
         bad = client.post("/api/ai/chat", json={"message": "B 站的 AI 视频"}).json()
         check(bad["engine"] == "rules", "模型输出不是 JSON 时落回规则")
         check(bad["plan"]["platforms"] == ["bilibili"], "落回规则后解析仍然正确")
 
-        def boom(messages):
+        def boom(provider, messages):
             raise TimeoutError("slow")
         ai_mod._chat = boom
         slow = client.post("/api/ai/chat", json={"message": "B 站的 AI 视频"}).json()
