@@ -512,7 +512,7 @@ export default function ItemPage() {
                 onClick={() => setCommentExpanded(true)}
                 className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-line py-2.5 text-[12.5px] text-muted transition hover:bg-wash hover:text-ink"
               >
-                查看更多评论（共 {comments.count} 条）
+                查看更多评论（已取 {comments.items.length} 条）
                 <ChevronDown size={13} />
               </button>
             ) : null}
@@ -531,7 +531,7 @@ export default function ItemPage() {
                   </button>
                 ) : (
                   <p className="py-2 text-center text-[12px] leading-relaxed text-fade">
-                    插件能读到的评论就这些（{comments.items.length} 条）。全部评论去{" "}
+                    插件能读到的评论就这些（已取 {comments.items.length} 条）。全部评论去{" "}
                     <a href={item.url} target="_blank" rel="noreferrer" className="text-ink underline decoration-line underline-offset-2 hover:decoration-ink">
                       {p.label}看原帖
                     </a>
