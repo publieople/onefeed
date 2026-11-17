@@ -28,9 +28,14 @@ DEFAULTS: dict[str, Any] = {
     # 自动更新：每轮采集前问一次 registry，有新版就静默升级。
     # 默认关：现场演示时远端悄悄改插件不是好事；要开就是一键。
     "auto_update": False,
+    # AI 助手：base_url / model 可换任何 OpenAI 兼容网关；key 只进不出（GET /settings 会脱敏）。
+    "ai_base_url": "https://api.deepseek.com/v1",
+    "ai_model": "deepseek-chat",
+    "ai_api_key": "",
 }
 
 ENV_KEYS = {"registry_url": "ONEFEED_REGISTRY", "plugins_dir": "ONEFEED_PLUGINS_DIR"}
+SECRET_KEYS = ("ai_api_key",)
 SORTS = ("freshness", "engagement")
 
 
@@ -115,6 +120,19 @@ def validate(patch: dict[str, Any]) -> dict[str, Any]:
         if value not in SORTS:
             raise ValueError(f"default_sort 只能是 {', '.join(SORTS)}")
         out["default_sort"] = value
+
+    if "ai_base_url" in patch:
+        raw = str(patch["ai_base_url"] or "").strip().rstrip("/")
+        if raw and not raw.startswith(("http://", "https://")):
+            raise ValueError("ai_base_url 必须是 http(s) 链接（OpenAI 兼容网关，通常以 /v1 结尾）")
+        out["ai_base_url"] = raw or DEFAULTS["ai_base_url"]
+
+    if "ai_model" in patch:
+        value = str(patch["ai_model"] or "").strip()
+        out["ai_model"] = value or DEFAULTS["ai_model"]
+
+    if "ai_api_key" in patch:
+        out["ai_api_key"] = str(patch["ai_api_key"] or "").strip()
 
     return out
 

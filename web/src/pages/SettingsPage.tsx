@@ -91,9 +91,12 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
     if (!form) return;
     setSaving(true);
     try {
+      // 空 key 表示「不改」，不然后把已存的 key 清掉；要清有单独的按钮。
+      const payload: Record<string, unknown> = { ...form };
+      if (!form.ai_api_key.trim()) delete payload.ai_api_key;
       const resp = await putJSON<{ ok: boolean; settings: SettingsValues; applied: string[]; resolved: SettingsResponse["resolved"] }>(
         "/api/settings",
-        form,
+        payload,
       );
       setForm(resp.settings);
       await ctx.reloadSettings();
@@ -348,6 +351,71 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
       </section>
 
       <section className="mt-5 rounded-card border border-line p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-[15px] font-semibold">AI 助手</h2>
+          <span className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">
+            {ctx.settings?.ai?.engine === "llm" ? "模型在线" : "本地解析"}
+          </span>
+          <span className="text-[11px] text-fade">
+            {ctx.settings?.ai?.configured ? ctx.settings.ai.model : "还没配 key"}
+          </span>
+        </div>
+        <p className="mt-1 text-[12px] leading-relaxed text-fade">
+          模型只负责理解你的话和措辞，内容永远从本地库里取——所以断网也能用，只是「理解」会退回规则解析。
+          填任何 OpenAI 兼容网关都行（DeepSeek、硅基流动、本地 vLLM）。
+        </p>
+        {form ? (
+          <div className="mt-4 space-y-4">
+            <label className="block">
+              <span className="text-[13px] font-medium">接口地址</span>
+              <input
+                value={form.ai_base_url ?? ""}
+                onChange={(e) => setForm({ ...form, ai_base_url: e.target.value })}
+                placeholder="https://api.deepseek.com/v1"
+                className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 font-mono text-[12px] outline-none focus:border-ink/40"
+              />
+            </label>
+            <div className="grid grid-cols-2 gap-4">
+              <label className="block">
+                <span className="text-[13px] font-medium">模型</span>
+                <input
+                  value={form.ai_model ?? ""}
+                  onChange={(e) => setForm({ ...form, ai_model: e.target.value })}
+                  placeholder="deepseek-chat"
+                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 font-mono text-[12px] outline-none focus:border-ink/40"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[13px] font-medium">API Key</span>
+                <input
+                  type="password"
+                  value={form.ai_api_key ?? ""}
+                  onChange={(e) => setForm({ ...form, ai_api_key: e.target.value })}
+                  placeholder={ctx.settings?.ai?.configured ? "已保存，留空不改" : "sk-…"}
+                  className="mt-1.5 h-9 w-full rounded-lg border border-line bg-white px-3 font-mono text-[12px] outline-none focus:border-ink/40"
+                />
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-fade">
+                存本机 settings.json，接口只写不读；插件永远看不到。
+              </span>
+              <button
+                onClick={async () => {
+                  await putJSON("/api/settings", { ai_api_key: "" });
+                  await ctx.reloadSettings();
+                  flash("已清除模型 key，AI 退回本地解析");
+                }}
+                className="ml-auto h-8 rounded-lg border border-line px-3 text-[12px] text-muted hover:text-ink"
+              >
+                清除 key
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="mt-5 rounded-card border border-line p-5">
         <h2 className="text-[15px] font-semibold">登录态</h2>
         <p className="mt-1 text-[12px] text-fade">插件拿不到你的明文 cookie，只由宿主在发请求时注入。登录窗口是独立的 Chrome，登录完会自动关掉。</p>
         <ul className="mt-3 space-y-2">
@@ -405,7 +473,9 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
                   {login[id] ? LOGIN_TEXT[login[id].state] + (login[id].message ? " · " + login[id].message : "") : state?.message || "还没检查"}
                 </p>
-                {state?.hint && !login[id] ? <p className="mt-1 text-[12px] text-fade">{state.hint}</p> : null}
+                {state?.hint && !login[id] && state.hint !== state.message ? (
+                  <p className="mt-1 text-[12px] text-fade">{state.hint}</p>
+                ) : null}
                 {isCli && state?.command ? (
                   <p className="mt-1 font-mono text-[12px] text-fade">
                     $ {state.command}

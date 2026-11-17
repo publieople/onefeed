@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { OutletCtx } from "../App";
 import { useFeed } from "../api";
+import AiDock from "../components/AiDock";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
-import FilterBox from "../components/FilterBox";
 import { platform } from "../platform";
 
 interface Props {
@@ -32,6 +32,23 @@ export default function FeedPage({ ctx }: Props) {
   );
   const feed = useFeed(query, ctx.reloadKey);
   const active = selected.length > 0 || q.trim().length > 0;
+
+  // AI 对话框把「它理解的条件」交给信息流：用事件而不是上下文，
+  // 免得为一个筛选状态把整个 App 的 props 再穿一遍。
+  useEffect(() => {
+    const onFilter = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        platforms?: string[]; keyword?: string; range?: "today" | "all"; sort?: string;
+      } | undefined;
+      if (!detail) return;
+      setSelected(Array.isArray(detail.platforms) ? detail.platforms : []);
+      setQ(typeof detail.keyword === "string" ? detail.keyword : "");
+      setRange(detail.range === "today" ? "today" : "all");
+      if (detail.sort) setSort(detail.sort);
+    };
+    window.addEventListener("onefeed:filter", onFilter);
+    return () => window.removeEventListener("onefeed:filter", onFilter);
+  }, []);
 
   useEffect(() => {
     document.title = ctx.summary?.total ? "OneFeed · " + ctx.summary.total + " 条" : "OneFeed";
@@ -115,8 +132,6 @@ export default function FeedPage({ ctx }: Props) {
         />
       </section>
 
-      <FilterBox value={q} parsed={feed.parsed} onSubmit={setQ} />
-
       <p className="mt-4 min-h-[20px] text-[13px] leading-relaxed text-muted">
         {feed.loading && feed.items.length === 0
           ? "正在取内容…"
@@ -182,6 +197,8 @@ export default function FeedPage({ ctx }: Props) {
           正在看 {platform(selected[0]).label}，再点一个平台可以并排比较
         </div>
       ) : null}
+
+      <AiDock onOpenItem={openItem} />
     </div>
   );
 }

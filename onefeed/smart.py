@@ -105,7 +105,9 @@ PLATFORM_ALIASES: dict[str, list[str]] = {
     "douyin": ["抖音", "douyin"],
     "juejin": ["掘金", "juejin"],
     "v2ex": ["v2ex", "v站"],
-    "zhihu-hot": ["知乎", "zhihu"],
+    # 先长后短：先把「知乎热榜」剥掉，剩下的「知乎」才是推荐流，不然热榜会把两个都吃掉
+    "zhihu-hot": ["知乎热榜", "zhihu-hot", "热榜"],
+    "zhihu": ["知乎", "zhihu"],
 }
 KIND_ALIASES: dict[str, list[str]] = {
     "video": ["视频", "短视频"],
@@ -175,7 +177,7 @@ def parse_query(text: str, now: int | None = None) -> dict[str, Any]:
 
 PLATFORM_LABELS = {
     "bilibili": "B 站", "xiaohongshu": "小红书", "douyin": "抖音",
-    "juejin": "掘金", "v2ex": "V2EX", "zhihu-hot": "知乎",
+    "juejin": "掘金", "v2ex": "V2EX", "zhihu": "知乎", "zhihu-hot": "知乎热榜",
 }
 
 

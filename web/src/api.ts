@@ -127,10 +127,15 @@ export interface SettingsValues {
   default_sort: string;
   prune_days: number;
   auto_update: boolean;
+  ai_base_url: string;
+  ai_model: string;
+  /** 只写不读：后端返回时永远为空串 */
+  ai_api_key: string;
 }
 
 export interface SettingsResponse {
   settings: SettingsValues;
+  ai: AiStatus;
   resolved: { plugins_dir: string; registry_url: string; state_dir?: string };
   defaults: SettingsValues;
   sorts: string[];
@@ -193,6 +198,42 @@ export interface DetailResponse {
   fetched_at?: number;
   reason?: string;
   error?: string;
+}
+
+export interface AiPlan {
+  mode: "find" | "browse";
+  platforms: string[];
+  kinds: string[];
+  since: number | null;
+  keyword: string;
+  sort: string;
+}
+
+export interface AiResponse {
+  engine: "llm" | "rules";
+  plan: AiPlan;
+  reply: string;
+  items: FeedItem[];
+  count: number;
+  suggestions: string[];
+  understood: string;
+}
+
+export interface AiStatus {
+  engine: "llm" | "rules";
+  model: string;
+  base_url: string;
+  configured: boolean;
+  platforms: string[];
+  kinds: string[];
+}
+
+export function aiChat(message: string, extra: Record<string, unknown> = {}): Promise<AiResponse> {
+  return postJSON<AiResponse>("/api/ai/chat", { message, ...extra });
+}
+
+export function aiStatus(signal?: AbortSignal): Promise<AiStatus> {
+  return getJSON<AiStatus>("/api/ai/status", signal);
 }
 
 export function getDetail(id: string, refresh = false, signal?: AbortSignal): Promise<DetailResponse> {

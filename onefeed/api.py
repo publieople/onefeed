@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from plugin_runtime.host import PluginHost
 from plugin_runtime.paths import state_root
 
-from . import __version__, auth as auth_mod, market, media as media_mod, smart, settings as settings_mod
+from . import __version__, ai as ai_mod, auth as auth_mod, market, media as media_mod, smart, settings as settings_mod
 from .service import RefreshRunner, demo_mode, sync_installed
 from .store import SORTS, Store
 
@@ -121,12 +121,22 @@ def health(request: Request) -> dict:
     }
 
 
+def _mask(conf: dict[str, Any]) -> dict[str, Any]:
+    """key 只进不出：前端只需要知道"配没配"，写接口照收。"""
+    out = dict(conf)
+    for secret in settings_mod.SECRET_KEYS:
+        if out.get(secret):
+            out[secret] = ""
+    return out
+
+
 @router.get("/settings")
 def get_settings(request: Request) -> dict:
     conf = settings_mod.load()
     plugins_dir = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
     return {
-        "settings": conf,
+        "settings": _mask(conf),
+        "ai": ai_mod.status(),
         "resolved": {"plugins_dir": str(plugins_dir),
                      "registry_url": settings_mod.registry_url(),
                      "state_dir": str(state_root())},
@@ -144,10 +154,36 @@ def put_settings(request: Request, payload: dict[str, Any] = Body(default={})) -
             "code": "bad_settings", "message": str(exc),
             "hint": "看 /api/settings 里的 defaults 与允许范围"})
     applied = _apply_settings(request, conf, set(payload or {}))
-    return {"ok": True, "settings": conf, "applied": applied,
+    return {"ok": True, "settings": _mask(conf), "applied": applied, "ai": ai_mod.status(),
             "resolved": {"plugins_dir": str(settings_mod.resolve_plugins_dir(
                 str(conf.get("plugins_dir") or ""))),
                 "registry_url": settings_mod.registry_url()}}
+
+
+@router.get("/ai/status")
+def ai_status() -> dict:
+    return ai_mod.status()
+
+
+@router.post("/ai/chat")
+def ai_chat(request: Request, payload: dict[str, Any] = Body(default={})) -> dict:
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail={
+            "code": "empty_message", "message": "说一句话再问", "hint": "例如「今天 B 站有什么 AI 的」"})
+    history = payload.get("history")
+    exclude = payload.get("exclude")
+    try:
+        limit = int(payload.get("limit") or 12)
+    except (TypeError, ValueError):
+        limit = 12
+    limit = max(1, min(limit, 24))
+    return ai_mod.chat(
+        _store(request), message,
+        history=history if isinstance(history, list) else None,
+        limit=limit,
+        exclude=[str(x) for x in exclude] if isinstance(exclude, list) else None,
+    )
 
 
 @router.get("/feed")

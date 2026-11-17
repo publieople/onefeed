@@ -25,6 +25,7 @@ ORDER = [
     "test_market_update.py",
     "test_media.py",
     "test_preflight.py",
+    "test_ai.py",
     "test_entry.py",
     "test_e2e_feed.py",
 ]
