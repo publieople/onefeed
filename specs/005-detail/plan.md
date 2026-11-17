@@ -139,3 +139,12 @@ P1 已落地并实测，T43 的小红书与 T44 的抖音按等价方案提前�
 - [x] T45 抽屉下线：`CommentBody` 迁到 `web/src/components/CommentBody.tsx`，`Drawer.tsx` 删除（全站只有 ItemPage 还引用它）。
 - [x] 顺手：`ItemPage` 统计卡补 `answer` → 「回答」，否则知乎这类只有问答数的地方会被过滤掉。
 - [x] 测试：新增 `tests/test_media.py`（15 项：video/poster/img-N 解析、embed 兜底直链透传、白名单外字段丢弃），`run_all.py` 加进 ORDER；离线七组全过（store 37 / api 24 / settings 31 / auth 5 / market 44 / media 15 / entry 7）。
+
+## 9. 知乎登录态推荐流（2026-11-17）
+
+- 登录：宿主 `onefeed/auth.py` 的 `SPECS` 里有 `zhihu`（domain `.zhihu.com`，判据 `z_c0`）。扫码成功后 16 条 cookie 落到 `.onefeed/cookies/zhihu.json`；**插件 id 必须叫 `zhihu`**，宿主是按插件 id 找这个文件的。
+- 取数：`onefeed-plugins/plugins/zhihu` 用 `ctx.browser.capture` 回放 `/api/v3/feed/topstory/recommend`（`x-zse-96` 由页面自己算，纯 HTTP 带 cookie 也是 401）。`scroll {times:8, dy:3000, intervalMs:2200}` + `stopWhenMatched:false`，一屏拿 8 个响应 × 6 条，按 `type:id` 去重后 40 条 / 27s。
+- 详情：`plugin_runtime/capabilities.py` 新增 `zhihu.article` 提取器（读 `initialState.entities.articles`），和既有 `zhihu.question` 配对；插件按 `extra.zhihu_type` 选一个，`ctx.browser.extract` 取 `js-initialData` 里的正文 HTML 交给 DOMPurify。实测回答页 7.5s / 3603 字，专栏页 7.7s / 4344 字。
+- 前端：`platform.ts` 注册 `zhihu` 与 `zhihu-hot`（原先两个都显示「知乎」）；`Card.tsx` 里无封面的 article/video 走摘要文字面板并提示「点开看全文」；`ItemPage` 对 html 正文隐藏知乎空段落（`p.ztext-empty-paragraph` / `p` 内只有 `br`），段距不再被撑开。
+- 证据：`design/zhihu-feed.png`（推荐流筛选视图）、`design/zhihu-detail.png`（专栏全文带图）。
+- 未做：关注流 `/api/v3/moments`（同一套回放机制，多一个 pattern 即可）；知乎评论区（要登录态 + 分页，暂缓）。
