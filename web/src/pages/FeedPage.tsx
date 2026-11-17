@@ -117,13 +117,13 @@ export default function FeedPage({ ctx }: Props) {
 
       <FilterBox value={q} parsed={feed.parsed} onSubmit={setQ} />
 
-      {!feed.loading ? (
-        <p className="mt-4 text-[13px] leading-relaxed text-muted">
-          {active
+      <p className="mt-4 min-h-[20px] text-[13px] leading-relaxed text-muted">
+        {feed.loading && feed.items.length === 0
+          ? "正在取内容…"
+          : active
             ? `筛选出 ${feed.items.length} 条，共 ${feed.count} 条命中`
             : ctx.summary?.text ?? ""}
-        </p>
-      ) : null}
+      </p>
 
       {feed.error ? (
         <div className="mt-6 rounded-card border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
@@ -140,7 +140,7 @@ export default function FeedPage({ ctx }: Props) {
       {feed.loading && feed.items.length === 0 ? (
         <div className="mt-5 grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="animate-pulse rounded-card border border-line bg-white p-3">
+            <div key={i} className="min-h-[340px] animate-pulse rounded-card border border-line bg-white p-3">
               <div className="h-5 w-24 rounded bg-wash" />
               <div className="mt-2.5 aspect-video rounded-lg bg-wash" />
               <div className="mt-3 h-4 w-4/5 rounded bg-wash" />

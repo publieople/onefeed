@@ -37,23 +37,26 @@ export default function FilterBox({ value, parsed, onSubmit }: Props) {
           筛选
         </button>
       </form>
-      {parsed && parsed.understood ? (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
-          <span className="text-fade">理解为</span>
-          {parsed.platforms.map((id) => (
-            <span key={id} className="rounded-full border border-line px-2 py-0.5">
-              {platform(id).label}
-            </span>
-          ))}
-          {parsed.kinds.map((k) => (
-            <span key={k} className="rounded-full border border-line px-2 py-0.5">
-              {k}
-            </span>
-          ))}
-          {parsed.since ? <span className="rounded-full border border-line px-2 py-0.5">今天起</span> : null}
-          {parsed.keyword ? <span className="rounded-full border border-line px-2 py-0.5">含「{parsed.keyword}」</span> : null}
-        </div>
-      ) : null}
+      {/* 固定高度占位：解析结果出现时不把下面的内容整体推下去 */}
+      <div className="mt-2 min-h-[22px]">
+        {parsed && parsed.understood ? (
+          <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
+            <span className="text-fade">理解为</span>
+            {parsed.platforms.map((id) => (
+              <span key={id} className="rounded-full border border-line px-2 py-0.5">
+                {platform(id).label}
+              </span>
+            ))}
+            {parsed.kinds.map((k) => (
+              <span key={k} className="rounded-full border border-line px-2 py-0.5">
+                {k}
+              </span>
+            ))}
+            {parsed.since ? <span className="rounded-full border border-line px-2 py-0.5">今天起</span> : null}
+            {parsed.keyword ? <span className="rounded-full border border-line px-2 py-0.5">含「{parsed.keyword}」</span> : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

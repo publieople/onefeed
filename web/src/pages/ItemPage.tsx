@@ -397,7 +397,12 @@ export default function ItemPage() {
 
       {detailLoading ? (
         <div className="mt-5">
-          <div className="aspect-video animate-pulse rounded-xl bg-wash" />
+          {/* 只有真会有媒体（视频/图文/有封面）才占 16:9，文章类用小骨架，避免正文被推来推去 */}
+          {item.kind === "video" || item.kind === "images" || item.cover ? (
+            <div className="aspect-video animate-pulse rounded-xl bg-wash" />
+          ) : (
+            <div className="h-16 animate-pulse rounded-xl bg-wash/70" />
+          )}
           <p className="mt-2 text-[12px] text-fade">正在取详情…（小红书要开浏览器取一次，通常十几秒）</p>
         </div>
       ) : (

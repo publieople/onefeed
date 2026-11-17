@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "title": "OneFeed 前端：让界面别在刷新时抖",
+    "author": "冯周杰 · Undefined 队",
+    "date": "2026.11.17",
+    "reading_time": "约 3 分钟",
+    "tags": [
+      "前端",
+      "交互设计",
+      "OneFeed"
+    ],
+    "subtitle": "一次刷新位移审计：六处问题，三条规则，21 次采样位移为零。"
+  },
+  "upgrades": [
+    {
+      "type": "pullquote",
+      "line": 14,
+      "accent": "位移陷阱"
+    },
+    {
+      "type": "process",
+      "lines": [
+        31,
+        32,
+        33
+      ],
+      "items": [
+        {
+          "title": "能浮就浮",
+          "desc": "瞬时状态用绝对定位贴边，不占文档流。"
+        },
+        {
+          "title": "先占位",
+          "desc": "会出现的内容，容器先留固定高度或宽度。"
+        },
+        {
+          "title": "骨架贴身",
+          "desc": "骨架形状跟真实内容一致，别一律 16:9。"
+        }
+      ]
+    },
+    {
+      "type": "checklist",
+      "lines": [
+        63,
+        64
+      ]
+    }
+  ]
+}

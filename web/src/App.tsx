@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import TopBar from "./components/TopBar";
-import ProgressBar from "./components/ProgressBar";
 import FeedPage from "./pages/FeedPage";
 import ItemPage from "./pages/ItemPage";
 import MarketPage from "./pages/MarketPage";
@@ -110,7 +109,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-paper">
       <TopBar health={health} progress={progress} onRefresh={refresh} />
-      {progress?.running ? <ProgressBar state={progress} /> : null}
       <main className="mx-auto w-full max-w-[1180px] px-6">
         <Routes>
           <Route path="/" element={<FeedPage ctx={ctx} />} />

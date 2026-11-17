@@ -10,10 +10,13 @@ interface Props {
 
 export default function TopBar({ health, progress, onRefresh }: Props) {
   const running = Boolean(progress?.running);
+  const done = progress?.done ?? 0;
+  const total = progress?.total ?? 0;
+  const pct = running && total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
   const count = health?.items ?? 0;
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-white/92 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-[1180px] items-center gap-4 px-6">
+      <div className="relative mx-auto flex h-14 w-full max-w-[1180px] items-center gap-4 px-6">
         <NavLink to="/" className="flex items-baseline gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink text-[13px] font-semibold text-white">
             O
@@ -27,6 +30,16 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
           {count ? count + " 条 · 最近采集 " + timeOf(health?.platforms ?? []) : "还没有内容"}
         </span>
         <div className="ml-2 flex items-center gap-1">
+          {/* 固定宽度占位：刷新与否都占同样宽度，按钮不会左右跳 */}
+          <span
+            aria-live="polite"
+            className={
+              "hidden w-10 text-right text-[11px] tabular-nums text-fade transition-opacity duration-200 md:inline-block " +
+              (running ? "opacity-100" : "opacity-0")
+            }
+          >
+            {done}/{total}
+          </span>
           <button
             onClick={onRefresh}
             disabled={running}
@@ -56,6 +69,10 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
             <Settings size={17} />
           </NavLink>
         </div>
+        {/* 进度条贴在页头下边缘：绝对定位，出现和消失都不推动页面 */}
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 -bottom-px h-[2px] bg-transparent">
+          <span className="block h-full bg-ink transition-[width] duration-500" style={{ width: pct + "%" }} />
+        </span>
       </div>
     </header>
   );

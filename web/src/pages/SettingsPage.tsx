@@ -339,7 +339,11 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             </div>
           </div>
         ) : (
-          <p className="mt-3 text-[13px] text-fade">读取中…</p>
+          <div className="mt-3 min-h-[420px] animate-pulse space-y-3">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-9 rounded-lg bg-wash" />
+            ))}
+          </div>
         )}
       </section>
 

@@ -147,6 +147,14 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
         <div className="mt-4 rounded-card border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">{error}</div>
       ) : null}
 
+      {!data && !error ? (
+        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-[148px] animate-pulse rounded-card border border-line bg-white" />
+          ))}
+        </div>
+      ) : null}
+
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
         {entries.map((entry) => (
           <article key={entry.id} className="rounded-card border border-line p-5">
@@ -222,8 +230,8 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
         ))}
       </div>
 
-      {!entries.length && !error ? (
-        <div className="mt-16 text-center text-[13px] text-muted">目录还没拉到，点右上角「刷新目录」。</div>
+      {data && !entries.length && !error ? (
+        <div className="mt-16 text-center text-[13px] text-muted">目录是空的，点右上角「刷新目录」再试一次。</div>
       ) : null}
 
       <p className="mt-8 text-[12px] leading-relaxed text-fade">

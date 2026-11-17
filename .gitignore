@@ -28,6 +28,10 @@ onefeed-market-*/
 probes/tmp_*.json
 probes/*.png
 
+# 设计稿导出物（本地分享用，不进仓库）
+design/guizang/*.pdf
+design/guizang/*.png
+
 # 编辑器
 .vscode/
 .idea/
@@ -36,4 +40,3 @@ Thumbs.db
 
 # 临时提交信息
 .git-commit-msg.tmp
-
