@@ -5,7 +5,9 @@
 """
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -19,9 +21,29 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# 状态目录指到临时目录，别动真实的 cookie / settings
+# 状态目录指到临时目录，别动真实的 cookie / settings。
 _TMP_STATE = tempfile.mkdtemp(prefix="onefeed-state-")
 os.environ["ONEFEED_HOME"] = _TMP_STATE
+
+
+def _drop_tmp_state() -> None:
+    """进程退出时删掉临时状态目录。
+
+    sqlite 连接没显式关时文件还锁着，Windows 上第一轮 rmtree 会静默失败；
+    gc 一次再重试几轮就够了。以前不删，仓库根堆了几十个 onefeed-state-* 空壳。
+    """
+    import gc
+    import time
+
+    gc.collect()
+    for _ in range(4):
+        shutil.rmtree(_TMP_STATE, ignore_errors=True)
+        if not Path(_TMP_STATE).exists():
+            return
+        time.sleep(0.15)
+
+
+atexit.register(_drop_tmp_state)
 
 from fastapi.testclient import TestClient  # noqa: E402
 

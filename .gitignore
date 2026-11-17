@@ -24,6 +24,9 @@ onefeed-market-*/
 *.sqlite
 *.sqlite3
 
+# 测试残留（在仓库根跑测试时临时状态目录会落在这里）
+/tmp*/
+
 # 探针产物
 probes/tmp_*.json
 probes/*.png

@@ -50,18 +50,19 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 
 ## 当前状态
 
-运行时（`plugin_runtime/`）与官方插件集已跑通，六个平台吐同一套 `Item`（2026-11-14 实测）：
+运行时（`plugin_runtime/`）与官方插件集已跑通，七个平台吐同一套 `Item`（2026-11-17 实测）：
 
 | 插件 | 引擎 | 状态 |
 |---|---|---|
-| bilibili | `cli`（bili CLI） | ✅ 推荐流 + 封面 + 评论；关注动态 |
-| douyin | `browser`（浏览器回放） | ✅ 推荐流 20 条 + 封面 |
-| xiaohongshu | `browser`（截 `homefeed` 接口） | ✅ 已跑通：注入 cookie 后 15.8s 出 29 条，带封面/点赞/作者 |
+| bilibili | `cli`（bili CLI） | ✅ 推荐流 + 封面 + 评论（可翻页）；关注动态 |
+| douyin | `browser`（浏览器回放） | ✅ 推荐流 20 条 + 封面 + 官方播放器内嵌 + 评论 |
+| xiaohongshu | `browser`（截 `homefeed` 接口） | ✅ 注入 cookie 后 15.8s 出 29 条，带封面/点赞/作者；评论可翻页 |
+| zhihu | `browser`（登录态回放 `topstory/recommend`） | ✅ 推荐流 40 条 + 全文详情 + 评论 |
 | juejin | `http` | ✅ 免登录 |
 | v2ex | `http` | ✅ 免登录（部分网络需代理） |
-| zhihu-hot | `http` | ✅ 免登录热榜 |
+| zhihu-hot | `http` | ✅ 免登录热榜 + 详情卡 |
 
-宿主应用（`onefeed/`）已经能跑：`python -m onefeed` 起一个本地 Web 应用，六平台卡片混排、五种 kind 卡片、详情抽屉（含插件评论区）、一句话筛选、同题合并、插件市场（安装 / 卸载 / 更新 / 自动更新 / sha256 校验）、设置页、登录窗口、`--demo` 离线兜底。
+宿主应用（`onefeed/`）已经能跑：`python -m onefeed` 起一个本地 Web 应用，七平台卡片混排、五种 kind 卡片、独立详情页（含可翻页的插件评论区）、一句话筛选、同题合并、插件市场（安装 / 卸载 / 更新 / 自动更新 / sha256 校验）、设置页、登录窗口、`--preflight` 现场自检、`--demo` 离线兜底。
 
 实测（2026-11-15 21:00，本机，端口 8791）：275 条 / 6 平台；卡片统一成「平台标签 + kind + 时间 / 媒体 / 标题 / 摘要 / 作者 + 互动」，缺封面走虚线占位块而不是假装加载失败；B 站抽屉能拉到 20 条真实评论（楼中楼 3 层内）；市场页能把 B 站 0.1.0 一键更新到 0.2.0；热度排序按平台内分位归一，六个平台都能上榜首；设置页可改插件目录、registry、每轮条数、评论条数、默认排序、保留天数与自动更新，保存即生效；`8787` 被别的程序占用时自动改用 `8788` 并在启动日志里说明。
 
@@ -86,8 +87,11 @@ uv run python -m onefeed            # 库空时自动拉一轮
 uv run python -m onefeed --warmup   # 采集并导出 fixtures/<plugin>.json
 uv run python -m onefeed --demo     # 断网演示：只读 fixtures，不碰网络
 
-# 5) 验收
-uv run python tests/run_all.py            # 八项全跑（含联网的 real / e2e）
+# 5) 现场自检：依赖 / 浏览器内核 / 插件 / 登录态 / 端口 / 网络，逐项给结论与修法
+uv run python -m onefeed --preflight
+
+# 6) 验收
+uv run python tests/run_all.py            # 九项全跑（含联网的 real / e2e）
 uv run python tests/run_all.py --offline  # 跳过联网用例
 ```
 
@@ -97,6 +101,28 @@ uv run python tests/run_all.py --offline  # 跳过联网用例
 
 抖音插件用系统 Chrome 跑 headless 回放，首次会建持久档案；
 状态目录默认 `~/.onefeed`，不可写时自动退回仓库内 `.onefeed/`（已 gitignore），也可用 `ONEFEED_HOME` 指定。
+
+## 现场怎么演（比赛 / 演示机）
+
+演示前先跑一次自检，别等到评委坐下才发现少东西：
+
+```bash
+uv run python -m onefeed --preflight
+```
+
+它按顺序检查 Python 版本、依赖、浏览器内核、状态目录可写、插件目录与每个 manifest、库里有没有数据、
+前端产物、各平台登录态、端口占用、registry 与 B 站接口是否可达。每项给三件事：
+现在能不能用、不能用时降级成什么、修它敲哪条命令。有 FAIL 退出码 1，WARN 只影响那一个平台。
+
+不想敲命令就直接双击：
+
+- Windows：`start.bat`（可选参数当端口，例如 `start.bat 8792`）
+- Linux / macOS：`./start.sh`（同上）
+
+两个脚本都是「先自检、通过了再起服务」，起完自动开浏览器。
+
+断网也不慌：离线快照在 `hackathon-submit/Undefined周铉/demo/index.html`，双击就能看 54 条真实数据、
+三个 Tab 与详情抽屉，不依赖 Python 和网络。真实版本要现场采集，断网时先用快照顶住，网恢复再演实时。
 
 **登录怎么给**：设置页里点「打开登录窗口」，宿主用 Playwright 起一个**独立的 Chrome 窗口**
 （profile 在 `<状态目录>/login/<plugin-id>/`，不碰你日常浏览器），你在窗口里扫码/输密码，
@@ -136,7 +162,8 @@ onefeed/
 │   ├── 000-constitution.md
 │   ├── 001-v1-core/       产品规格 / 技术方案 / 任务清单
 │   ├── 002-plugin-arch/   插件架构提案（manifest / 生命周期 / 呈现规范 / 风险边界）
-│   └── 003-host-app/      宿主应用规格（API 契约 / 分层 / T29–T53 任务）
+│   ├── 003-host-app/      宿主应用规格（API 契约 / 分层 / T29–T53 任务）
+│   └── 005-detail/        详情页规格（能力模型 / 边车 / 嵌入实测 / 评论分页）
 ├── onefeed/               宿主应用本体
 │   ├── app.py             FastAPI 装配（静态前端 + 插件目录解析）
 │   ├── api.py             只读 API + 插件市场 + 登录 + 设置
@@ -146,13 +173,15 @@ onefeed/
 │   ├── auth.py            登录窗口（Playwright 持久上下文 + cookie 轮询）
 │   ├── market.py          registry 拉取 / 下载 / sha256 校验 / 安装
 │   ├── smart.py           同题聚类、一句话筛选、推荐理由
+│   ├── preflight.py       现场自检（--preflight：依赖 / 插件 / 登录态 / 端口 / 网络）
 │   └── demo.py            --demo 的离线 fixtures 装载
 ├── docs/                  调研记录（抖音 feed 机制、平台开放度普查、STATUS-2026-11-15 现状盘点）
 ├── design/                视觉稿与实机截图
 ├── web/                   前端（Vite + React + TS，dist 已入库）
 ├── tests/                 验收脚本，入口 run_all.py
 ├── probes/                一次性探针脚本，历史留档
-└── pull_all.py            多平台试跑入口
+├── pull_all.py            多平台试跑入口
+└── start.bat / start.sh   现场一键启动（先自检，通过了再起服务）
 ```
 
 ## 开发流程

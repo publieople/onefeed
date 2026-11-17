@@ -71,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--demo", action="store_true", help="零网络演示模式（读本地样例）")
     parser.add_argument("--warmup", action="store_true", help="采集一轮并写入 fixtures/，供 --demo 使用")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    parser.add_argument("--preflight", action="store_true",
+                        help="只做现场自检（依赖、浏览器内核、插件、登录态、端口、网络），不起服务")
     args = parser.parse_args(argv)
 
     for stream in (sys.stdout, sys.stderr):
@@ -78,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+
+    if args.preflight:
+        from .preflight import main as preflight_main
+        return preflight_main(args.port)
 
     if args.demo:
         os.environ["ONEFEED_DEMO"] = "1"
