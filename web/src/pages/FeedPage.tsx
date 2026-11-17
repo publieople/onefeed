@@ -152,7 +152,7 @@ export default function FeedPage({ ctx }: Props) {
       ) : null}
 
       {!feed.loading && feed.items.length === 0 ? (
-        <div className="mt-16 text-center">
+        <div className="mt-5 flex min-h-[420px] flex-col items-center justify-center text-center">
           <div className="text-[15px] font-medium">这里还没有内容</div>
           <p className="mt-2 text-[13px] text-muted">
             {selected.length || q
