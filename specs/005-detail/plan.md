@@ -158,3 +158,13 @@ P1 已落地并实测，T43 的小红书与 T44 的抖音按等价方案提前�
 - 修并发 bug：详情与评论会同时请求，两边都要用同一个 Chrome user-data-dir。插件跑在各自 worker 子进程里，进程内线程锁拦不住，改成 profile 目录下的文件锁 `_ProfileGuard`（Windows `msvcrt.locking`，非 Windows `fcntl.flock`）。
 - 实测：回答 18 条 / 23.5–24.9s；专栏 4 条 / 14.6–19.9s（同 URL 探针能拿 9 条，插件注入登录态后只给 4 条，差异未查明，接受）。并发请求串行后总计 28.3s。
 - 证据：`design/zhihu-comments.png`。
+
+## 11. 评论分页：先看几条，滚到底再要（2026-11-17）
+
+- 目的：一进详情页就把几十条评论全渲染出来既慢又没意义。改成折叠 5 条 + 「查看更多评论（共 N 条）」，点开后滚到底自动要下一页，要不到时给一句去原站的引导。
+- 契约：`host.comments(plugin_id, item, limit=20, cursor=None)` 返回 `{items, next}`（老插件直接返回数组仍然兼容，`next` 视为 None）。`GET /api/item/{id}/comments` 新增 `cursor` 参数，缓存键变成 `(item_id, limit, cursor)`；异常分支同样带 `next: null`。
+- 插件：B 站 `comments()` 把 `cursor` 当页码（`bili comment list --page`，上限 20）；第 2 页起失败按 `{items: [], next: null}` 吞掉——那些页要登录态，不该把评论区打红。知乎评论是页面按滚轮拉的，拿不到可复用游标，只出第一页（`next: null`）。
+- 前端：`COLLAPSED_COMMENTS = 5`；`commentTailVisible = expanded || 条数 <= 5`，所以评论本来就只有几条时也照样显示尾部那句「插件能读到的评论就这些（N 条）。全部评论去 X 看原帖」。`IntersectionObserver`（rootMargin 240px）负责滚动加载，按评论 id 去重合并，失败即置 `next = null` 以免无限重试。
+- 实测：B 站 `BV1GDsW6XErJ` 首页 20 条 `next: "2"`，`cursor=2` 再拿 20 条 `next: "3"`；知乎专栏 4 条 `next: null`，页面直接全显示并给出引导。
+- 证据：`design/comments-collapsed.png`（折叠 5 条 + 查看更多）、`design/comments-loadmore.png`（滚动后追加第 2 页）、`design/comments-exhausted.png`（知乎 4 条时的去原站提示）。
+

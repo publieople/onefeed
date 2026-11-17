@@ -23,7 +23,7 @@ from .store import SORTS, Store
 router = APIRouter(prefix="/api")
 
 # 评论不像信息流那样每分钟在变，缓存十分钟，省掉反复起子进程的开销。
-_COMMENT_CACHE: dict[tuple[str, int], tuple[float, dict[str, Any]]] = {}
+_COMMENT_CACHE: dict[tuple[str, int, str], tuple[float, dict[str, Any]]] = {}
 COMMENT_TTL = 600
 
 # 详情比评论变得还慢；6 小时足够，刷新按钮会显式 refresh=1 绕过。
@@ -199,7 +199,7 @@ def item(request: Request, item_id: str) -> dict:
 
 @router.get("/item/{item_id}/comments")
 def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, le=50),
-                  refresh: bool = Query(False)) -> dict:
+                  cursor: str | None = Query(None), refresh: bool = Query(False)) -> dict:
     """评论是插件的可选能力：实现了 comments() 的平台才有，没实现的照常出卡片。"""
     store = _store(request)
     row = store.get_item(item_id)
@@ -213,23 +213,25 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
         return {"supported": False, "items": [], "count": 0,
                 "reason": f"{plugin_id} 的插件没有提供评论接口"}
 
-    key = (item_id, limit)
+    key = (item_id, limit, cursor or "")
     now = time.time()
     cached = _COMMENT_CACHE.get(key)
     if cached and not refresh and now - cached[0] < COMMENT_TTL:
         return {**cached[1], "from_cache": True}
 
     try:
-        items = host.comments(plugin_id, row, limit=limit)
+        page = host.comments(plugin_id, row, limit=limit, cursor=cursor)
     except RuntimeError as exc:
         message = str(exc)
         if "插件未实现" in message:
             return {"supported": False, "items": [], "count": 0,
                     "reason": f"{plugin_id} 的插件没有提供评论接口"}
-        return {"supported": True, "items": [], "count": 0,
+        return {"supported": True, "items": [], "count": 0, "next": None,
                 "error": message[:300]}
 
-    payload = {"supported": True, "items": items, "count": len(items), "limit": limit}
+    items = page["items"]
+    payload = {"supported": True, "items": items, "count": len(items),
+               "limit": limit, "next": page["next"]}
     _COMMENT_CACHE[key] = (now, payload)
     return payload
 

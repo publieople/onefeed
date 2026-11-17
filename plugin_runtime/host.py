@@ -204,13 +204,21 @@ class PluginHost:
             return False
 
     def comments(self, plugin_id: str, item: Item | dict[str, Any],
-                 limit: int = 20) -> list[dict[str, Any]]:
+                 limit: int = 20, cursor: str | None = None) -> dict[str, Any]:
+        """取一页评论。插件可以返回 {items, next}，老插件直接返回数组也能用（next 视为 None）。"""
         raw = item if isinstance(item, dict) else item.to_dict()
-        out = self.run(plugin_id, "comments", {"item": raw, "limit": limit})
+        payload: dict[str, Any] = {"item": raw, "limit": limit}
+        if cursor:
+            payload["cursor"] = cursor
+        out = self.run(plugin_id, "comments", payload)
         if not out["ok"]:
             raise RuntimeError(f"[{plugin_id}] {out['error']}")
         value = out["value"] or {}
-        return list((value.get("items") if isinstance(value, dict) else []) or [])
+        if isinstance(value, dict):
+            items = list(value.get("items") or [])
+            nxt = value.get("next")
+            return {"items": items, "next": str(nxt) if nxt else None}
+        return {"items": list(value or []), "next": None}
 
     def detail(self, plugin_id: str, item: Item | dict[str, Any]) -> dict[str, Any]:
         """取一条内容的详情。插件只交字段，能渲染成什么样由宿主决定。"""

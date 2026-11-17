@@ -62,12 +62,15 @@ class FakeHost:
     def supports(self, plugin_id: str, feature: str) -> bool:
         return feature == "comments" and plugin_id in self.supported
 
-    def comments(self, plugin_id: str, item, limit: int = 20):
+    def comments(self, plugin_id: str, item, limit: int = 20, cursor: str | None = None):
         self.calls += 1
         if self.boom:
             raise RuntimeError(f"[{plugin_id}] 插件未实现 comments")
-        return [{"id": "c1", "author": "层主", "text": "第一条评论",
-                 "like_count": 12, "created_at": int(time.time()) - 60}]
+        if cursor:
+            return {"items": [], "next": None}
+        return {"items": [{"id": "c1", "author": "层主", "text": "第一条评论",
+                           "like_count": 12, "created_at": int(time.time()) - 60}],
+                "next": "2"}
 
     def discover(self):
         return []
@@ -161,6 +164,9 @@ def main() -> int:
           "没声明 comments 的插件返回 supported=false")
     hit = client.get("/api/item/bilibili:BV1/comments?limit=5").json()
     check(hit.get("from_cache") is True, "第二次走缓存")
+    check(hit.get("next") == "2", "首页带下一页游标")
+    tail = client.get("/api/item/bilibili:BV1/comments?limit=5&cursor=2").json()
+    check(tail["items"] == [] and tail["next"] is None, "末页没有游标，前端据此提示去原站")
 
     app.state.refresher.host = FakeHost(Path(_TMP_STATE), {"bilibili"}, boom=True)
     # 缓存还在，先换一条 id 触发真正的调用

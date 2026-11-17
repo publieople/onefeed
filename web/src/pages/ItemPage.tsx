@@ -1,6 +1,6 @@
 import DOMPurify from "dompurify";
-import { ArrowLeft, Check, Copy, ExternalLink, MessageCircle, RefreshCw, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, MessageCircle, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   getDetail,
@@ -20,6 +20,9 @@ interface ItemResponse {
   item: FeedItem;
   siblings: { id: string; platform: string; title: string; author: string; url: string; published_at: number }[];
 }
+
+/** 评论区折叠时先放几条，剩下的点了「查看全部」再展开，滚到底继续翻页 */
+const COLLAPSED_COMMENTS = 5;
 
 const VIEW_LABEL: Record<string, string> = {
   video: "播放",
@@ -161,6 +164,10 @@ export default function ItemPage() {
   const [detailLoading, setDetailLoading] = useState(true);
   const [comments, setComments] = useState<CommentsResponse | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentNext, setCommentNext] = useState<string | null>(null);
+  const [commentExpanded, setCommentExpanded] = useState(false);
+  const [commentLoadingMore, setCommentLoadingMore] = useState(false);
+  const commentSentinel = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
 
@@ -206,12 +213,16 @@ export default function ItemPage() {
     let alive = true;
     setComments(null);
     setCommentsLoading(true);
+    setCommentNext(null);
+    setCommentExpanded(false);
     getJSON<CommentsResponse>("/api/item/" + encodeURIComponent(id) + "/comments?limit=20")
       .then((d) => {
-        if (alive) setComments(d);
+        if (!alive) return;
+        setComments(d);
+        setCommentNext(d.next ?? null);
       })
       .catch((err: Error) => {
-        if (alive) setComments({ supported: true, items: [], count: 0, error: err.message });
+        if (alive) setComments({ supported: true, items: [], count: 0, next: null, error: err.message });
       })
       .finally(() => {
         if (alive) setCommentsLoading(false);
@@ -220,6 +231,42 @@ export default function ItemPage() {
       alive = false;
     };
   }, [id]);
+
+  const loadMoreComments = useCallback(() => {
+    if (!id || !commentNext || commentLoadingMore) return;
+    setCommentLoadingMore(true);
+    getJSON<CommentsResponse>(
+      "/api/item/" + encodeURIComponent(id) + "/comments?limit=20&cursor=" + encodeURIComponent(commentNext),
+    )
+      .then((d) => {
+        setComments((prev) => {
+          if (!prev) return d;
+          const seen = new Set(prev.items.map((c) => c.id));
+          const add = d.items.filter((c) => !seen.has(c.id));
+          return { ...prev, supported: prev.supported, items: prev.items.concat(add) };
+        });
+        setCommentNext(d.next ?? null);
+      })
+      .catch(() => {
+        // 翻页失败就当到底，把用户引回原站
+        setCommentNext(null);
+      })
+      .finally(() => setCommentLoadingMore(false));
+  }, [id, commentNext, commentLoadingMore]);
+
+  /** 列表已经完整展示（没被折叠）或用户点了展开，尾部才需要显示「加载更多 / 就这些」 */
+  const commentTailVisible = commentExpanded || (comments?.items.length ?? 0) <= COLLAPSED_COMMENTS;
+
+  useEffect(() => {
+    if (!commentTailVisible) return;
+    const el = commentSentinel.current;
+    if (!el || !commentNext) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMoreComments();
+    }, { rootMargin: "240px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [commentTailVisible, commentNext, loadMoreComments]);
 
   const item = data?.item;
   useEffect(() => {
@@ -451,13 +498,48 @@ export default function ItemPage() {
         ) : comments.items.length === 0 ? (
           <p className="mt-2 text-[12px] text-fade">暂时没取到评论。</p>
         ) : (
-          <ul className="mt-3 space-y-4">
-            {comments.items.map((c: CommentItem) => (
-              <li key={c.id}>
-                <CommentBody comment={c} />
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="mt-3 space-y-4">
+              {(commentExpanded ? comments.items : comments.items.slice(0, COLLAPSED_COMMENTS)).map((c: CommentItem) => (
+                <li key={c.id}>
+                  <CommentBody comment={c} />
+                </li>
+              ))}
+            </ul>
+            {!commentExpanded && comments.items.length > COLLAPSED_COMMENTS ? (
+              <button
+                type="button"
+                onClick={() => setCommentExpanded(true)}
+                className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border border-line py-2.5 text-[12.5px] text-muted transition hover:bg-wash hover:text-ink"
+              >
+                查看更多评论（共 {comments.count} 条）
+                <ChevronDown size={13} />
+              </button>
+            ) : null}
+            {commentTailVisible ? (
+              <div ref={commentSentinel} className="mt-4">
+                {commentLoadingMore ? (
+                  <p className="py-2 text-center text-[12px] text-fade">正在取更多评论…</p>
+                ) : commentNext ? (
+                  <button
+                    type="button"
+                    onClick={loadMoreComments}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-line py-2.5 text-[12.5px] text-muted transition hover:bg-wash hover:text-ink"
+                  >
+                    加载更多评论
+                    <ChevronDown size={13} />
+                  </button>
+                ) : (
+                  <p className="py-2 text-center text-[12px] leading-relaxed text-fade">
+                    插件能读到的评论就这些（{comments.items.length} 条）。全部评论去{" "}
+                    <a href={item.url} target="_blank" rel="noreferrer" className="text-ink underline decoration-line underline-offset-2 hover:decoration-ink">
+                      {p.label}看原帖
+                    </a>
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </>
         )}
       </section>
 

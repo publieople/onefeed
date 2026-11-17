@@ -152,6 +152,8 @@ export interface CommentsResponse {
   items: CommentItem[];
   count: number;
   limit?: number;
+  /** 下一页游标；null/缺省表示插件取不到更多了 */
+  next?: string | null;
   reason?: string;
   hint?: string;
   error?: string;
