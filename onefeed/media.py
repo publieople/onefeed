@@ -35,12 +35,17 @@ def resolve_slot(detail: dict[str, Any], slot: str) -> dict[str, str] | None:
     media = media if isinstance(media, dict) else {}
 
     if slot == "video":
-        if str(media.get("type") or "") != "file":
-            return None
-        url = str(media.get("url") or "")
+        kind = str(media.get("type") or "")
+        if kind == "file":
+            url = str(media.get("url") or "")
+            referer = str(media.get("referer") or "")
+        else:
+            # 官方播放器（embed）的兜底直链：前端点「换直链」时才走这里
+            url = str(media.get("fallbackUrl") or "")
+            referer = str(media.get("fallbackReferer") or "")
         if not url:
             return None
-        return {"url": url, "referer": str(media.get("referer") or "")}
+        return {"url": url, "referer": referer}
 
     if slot == "poster":
         url = str(media.get("poster") or "")

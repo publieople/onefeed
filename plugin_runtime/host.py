@@ -271,9 +271,16 @@ class PluginHost:
             if provider is None or provider not in manifest.embeds:
                 print(f"[{manifest.id}] 丢弃未声明的嵌入源: {url[:120]}", file=sys.stderr)
                 return None
-            return {"type": "embed", "embedUrl": url,
-                    "poster": str(media.get("poster") or ""),
-                    "duration": clamp(media.get("duration"))}
+            out = {"type": "embed", "embedUrl": url,
+                   "poster": str(media.get("poster") or ""),
+                   "duration": clamp(media.get("duration"))}
+            # 官方播放器打不开时的兜底直链（抖音 open.douyin.com 偶发拒绝时用），
+            # 只作为「换直链」按钮，不参与 iframe 白名单。
+            fallback = str(media.get("fallbackUrl") or "")
+            if fallback.startswith(("http://", "https://")):
+                out["fallbackUrl"] = fallback
+                out["fallbackReferer"] = str(media.get("fallbackReferer") or "")
+            return out
         if kind == "file":
             url = str(media.get("url") or "")
             if not url.startswith(("http://", "https://")):

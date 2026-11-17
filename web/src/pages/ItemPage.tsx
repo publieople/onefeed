@@ -12,7 +12,7 @@ import {
   type DetailResponse,
   type FeedItem,
 } from "../api";
-import { CommentBody } from "../components/Drawer";
+import { CommentBody } from "../components/CommentBody";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
 
@@ -39,6 +39,7 @@ function statCards(item: FeedItem, detail: DetailPayload | null) {
     share: fromDetail.share || item.share_count,
     collect: fromDetail.collect || 0,
     danmaku: fromDetail.danmaku || 0,
+    answer: fromDetail.answer || 0,
   };
   const labels: Record<string, string> = {
     view: VIEW_LABEL[item.kind] ?? "浏览",
@@ -47,6 +48,7 @@ function statCards(item: FeedItem, detail: DetailPayload | null) {
     share: "分享",
     collect: "收藏",
     danmaku: "弹幕",
+    answer: "回答",
   };
   return Object.keys(merged)
     .filter((k) => merged[k] > 0)
@@ -55,26 +57,52 @@ function statCards(item: FeedItem, detail: DetailPayload | null) {
 
 /** 媒体区：embed 走官方播放器，file 走直链（要 Referer 的走边车）。 */
 function Media({ item, media }: { item: FeedItem; media?: DetailMedia }) {
+  const [direct, setDirect] = useState(false);
   if (!media) return null;
+  const base = "/api/media/" + encodeURIComponent(item.id);
 
   if (media.type === "embed" && media.embedUrl) {
+    // 官方播放器不是万能的（抖音 open.douyin.com 会挑 vid / 网络），插件给了直链就留个开关
+    const canFallback = Boolean(media.fallbackUrl);
+    const poster = media.poster ? base + "/poster" : undefined;
     return (
-      <div className="mt-5 aspect-video overflow-hidden rounded-xl border border-line bg-black">
-        <iframe
-          src={media.embedUrl}
-          title={item.title}
-          className="h-full w-full"
-          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-          allowFullScreen
-          referrerPolicy="no-referrer"
-        />
+      <div className="mt-5">
+        <div className="aspect-video overflow-hidden rounded-xl border border-line bg-black">
+          {direct && canFallback ? (
+            <video
+              controls
+              autoPlay
+              preload="metadata"
+              playsInline
+              src={base + "/video"}
+              poster={poster}
+              className="h-full w-full"
+            />
+          ) : (
+            <iframe
+              src={media.embedUrl}
+              title={item.title}
+              className="h-full w-full"
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+              allowFullScreen
+              referrerPolicy="no-referrer"
+            />
+          )}
+        </div>
+        {canFallback ? (
+          <button
+            onClick={() => setDirect((v) => !v)}
+            className="mt-2 text-[12px] text-fade underline-offset-2 hover:text-ink hover:underline"
+          >
+            {direct ? "回到官方播放器" : "播放器打不开？换直链播放"}
+          </button>
+        ) : null}
       </div>
     );
   }
 
   if (media.type === "file" && media.url) {
     const sidecar = Boolean(media.referer);
-    const base = "/api/media/" + encodeURIComponent(item.id);
     return (
       <div className="mt-5 overflow-hidden rounded-xl border border-line bg-black">
         <video

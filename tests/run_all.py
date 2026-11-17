@@ -23,6 +23,7 @@ ORDER = [
     "test_settings.py",
     "test_auth_flow.py",
     "test_market_update.py",
+    "test_media.py",
     "test_entry.py",
     "test_e2e_feed.py",
 ]

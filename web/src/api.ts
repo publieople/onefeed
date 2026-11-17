@@ -166,6 +166,9 @@ export interface DetailBody {
 export interface DetailMedia {
   type: "embed" | "file";
   embedUrl?: string;
+  /** 官方播放器失败时的兜底直链，走 /api/media/<id>/video 边车 */
+  fallbackUrl?: string;
+  fallbackReferer?: string;
   url?: string;
   poster?: string;
   referer?: string;

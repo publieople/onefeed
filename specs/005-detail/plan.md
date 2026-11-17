@@ -124,10 +124,18 @@ P1 已落地并实测，T43 的小红书与 T44 的抖音按等价方案提前�
 - [x] T38 `web/src/pages/ItemPage.tsx` + `App.tsx` 的 `/item/:id`；`FeedPage` 卡片改为 `navigate`。
 - [x] T39 DOMPurify 净化 html 正文；图片走 `/api/media/<id>/img-N`；单图居中大图、多图网格 + 灯箱；视频笔记不重复铺封面。
 
-未做（P2/P3 余项）：T40 抖音 `pull` 保留 `play_addr`、T41 知乎热榜详情卡、T42 抽 `Comments`/`Siblings` 组件、T45 抽屉下线、T46 `expiresAt` 自动刷新。
+未做（P2/P3 余项）：T42 抽 `Comments`/`Siblings` 组件、T46 `expiresAt` 自动刷新。（原列的 T40/T41/T45 已于 2026-11-17 完成，见第 8 节。）
 
 验收证据（`design/`）：`detail-feed-entry.png`、`detail-bilibili-top.png`、`detail-bilibili-comments.png`、`detail-douyin-player.png`、`detail-xhs-video.png`、`detail-xhs-body.png`、`detail-xhs-images.png`、`detail-juejin.png`、`detail-v2ex.png`、`detail-zhihu-fallback.png`。
 
 测试：`uv run python tests/run_all.py --offline`（store 37 / api 24 / settings 31 / auth 5 / market 44 / entry 7 全过）、`cd web && npm run build` 通过、`scripts/validate.py` 6/6。
 
 实际耗时：T31–T39 约 5 小时（含小红书 403 排查与掘金去头），比 P1 预算 6–8h 略快；剩下的 P2/P3 里只有 T45（抽屉下线）会影响演示观感，建议在彩排前处理。
+
+## 8. 交付状态（2026-11-17）：T40 / T41 / T45
+
+- [x] T40 抖音 `pull` 保留 `play_addr`：`awemeItem()` 把网页端直链存进 `extra.play_addr`;详情里同时给 `media.fallbackUrl` + `media.fallbackReferer`。宿主 `_normalize_media`（embed 分支）透传这两个字段（仍是白名单，且有 `embeds` 校验）；`media.resolve_slot("video")` 对 embed 型回兜底直链，边车照旧补 Referer。前端 `ItemPage` 的 embed 播放器下面多一个「播放器打不开？换直链播放」开关。实测 `/api/media/<id>/video` 带 Range → `206 video/mp4, content-range bytes 0-2047/14279234`，点开关后 video 正常播放（`design/detail-douyin-fallback.png`）。
+- [x] T41 知乎热榜详情卡：zhihu-hot 0.2.0，capabilities 加 `browser`、features 加 `detail`，详情调宿主内置提取器 `ctx.browser.extract({name:"zhihu.question"})`；问题描述（页面数据里是 HTML 片段）先 strip 成纯文本再分段，回答正文保留 HTML 交给 DOMPurify，只列赞数前 5 条。实测 22s 出 5085 字正文 + `stats {view:5200000, answer:456, comment:38}`（`design/detail-zhihu-hot.png`、`design/detail-zhihu-answers.png`）。
+- [x] T45 抽屉下线：`CommentBody` 迁到 `web/src/components/CommentBody.tsx`，`Drawer.tsx` 删除（全站只有 ItemPage 还引用它）。
+- [x] 顺手：`ItemPage` 统计卡补 `answer` → 「回答」，否则知乎这类只有问答数的地方会被过滤掉。
+- [x] 测试：新增 `tests/test_media.py`（15 项：video/poster/img-N 解析、embed 兜底直链透传、白名单外字段丢弃），`run_all.py` 加进 ORDER；离线七组全过（store 37 / api 24 / settings 31 / auth 5 / market 44 / media 15 / entry 7）。
