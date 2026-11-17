@@ -174,7 +174,7 @@ P1 已落地并实测，T43 的小红书与 T44 的抖音按等价方案提前�
 - 抖音字段：`comments[].cid/text/user.nickname/digg_count/reply_comment_total/create_time`（**秒**）、楼中楼在 `reply_comment`（列表里常为空，取前 3 条映射进 `replies`）。
 - 小红书（插件 0.4.0，features 补 `comments`）：接口 `/api/sns/web/v2/comment/page?note_id=&cursor=&xsec_token=`，cursor 是页面自己算的 opaque 值，插件无法直接续。做法是首轮 `capture` 一次滚到底（`scroll {times:10, dy:1100, intervalMs:1000}`，**必须 `scrollPoint {x:1180,y:620}` 把鼠标移进右侧评论列**，否则滚轮只滚正文、一个评论请求都不发），抓到的整批存进 `ctx.cache`（10 分钟），`cursor` 当 offset 切片；翻页直接命中缓存，不再重开浏览器。
 - 小红书字段：`data.comments[].id/content/user_info.nickname/like_count`（**字符串**）`/sub_comment_count/create_time`（**毫秒**，除 1000）、楼中楼在 `sub_comments`。
-- 实测：抖音未登录 5 条 / 约 9s；小红书首屏 18.2s → 20 条 `next: "20"`，第二页走缓存 0.5s → 16 条 `next: null`（这批共 36 条），第 4 页越界返回 0 条。
+- 实测：抖音未登录 5 条 / 12.0s；小红书首屏 18.2s → 20 条 `next: "20"`，第二页走缓存 0.5s → 16 条 `next: null`（这批共 36 条），第 4 页越界返回 0 条。
 - 前端文案跟着改准：「查看更多评论（共 N 条）」→「已取 N 条」，尾部同样说「已取 N 条」，因为插件能翻到的总数和首页 `count` 不是一回事。
 - 证据：`design/comments-douyin.png`（5 条 + 去原站）、`design/comments-xhs-collapsed.png`（折叠 5 条 + 查看更多（已取 20 条））、`design/comments-xhs-exhausted.png`（展开后滚到 36 条 + 提示）。
 
