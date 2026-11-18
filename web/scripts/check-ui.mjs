@@ -8,14 +8,16 @@ import path from "node:path";
  *   3. motion-token：时长必须走 DUR.*，否则全站动效节奏会各写各的。
  * 例外：同一行或上一行写 ui-lint-ignore 即可豁免（图片、平台色底上的白字属于例外）。
  */
-const root = path.join(process.cwd(), "src");
+// 从脚本位置推 web/ 根，这样在仓库根或 web/ 里执行都行
+const web = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
+const root = path.join(web, "src");
 const walk = (d) =>
   fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
     const p = path.join(d, e.name);
     return e.isDirectory() ? walk(p) : /\.(tsx|ts)$/.test(p) ? [p] : [];
   });
 
-const rel = (p) => path.relative(process.cwd(), p).replaceAll("\\", "/");
+const rel = (p) => path.relative(web, p).replaceAll("\\", "/");
 const violations = [];
 const add = (file, line, rule, text) => violations.push({ file: rel(file), line, rule, text: text.trim().slice(0, 120) });
 

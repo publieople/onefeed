@@ -85,18 +85,43 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 - 详情页的骨架 / 内容切换还可以补一层交叉淡入，现在是骨架直接消失。
 - 列表筛选后重排没有 FLIP 位移动画，只有重新进场。
 
-## 7. 平台筛选：按连续段合并的胶囊（2026-11-18）
+## 7. 平台筛选：反色遮罩扫过，文字不动（2026-11-18）
 
-平台 chips 走过三版：独立药丸（背景硬切）→ 单选胶囊（同一个 `motion.span` 在两项之间滑动）→ 现在的多选分段胶囊。多选之后「一个椭圆到处挪」不再成立：选中的项可能连成一段，也可能分成几段，所以高亮改成**每个连续段一个黑胶囊**。
+平台 chips 走过三版：独立药丸（背景硬切）→ 单选胶囊（同一个 `motion.span` 在两项之间滑动）→ 多选分段胶囊（文字跟着父级缩放、位移，看起来在抖）→ 现在的**反色遮罩**。
 
-- 分段判据：按 `PLATFORMS` 顺序扫一遍选中集合，相邻的归为一段；「全部」永远独占一段。
-- 视觉：段内是一个整体黑胶囊，段与段之间保持原来的间隙；段内每项保留自己的内边距与圆点，不再加内边框，避免「胶囊里还有缝」。
-- 动画：每段一个 `motion.span`，`layoutId={"rail-"+id+"-"+段首 id}` 让段在合并/拆分/拖动时是同一个元素在变形；宽度靠 `layout` 自动补间。新出现的段用 `initial={{opacity: 0, scaleX: .86}}`，`transformOrigin` 朝向已选区域那一侧（新段位于已有段之后 → `left`，之前 → `right`），复用 `SPRING`（stiffness 420 / damping 34 / mass 0.7）；`useReducedMotion()` 退化为 `{duration: 0}`。
-- 合并与拆分：往段边上 Ctrl 加一项 → 两段并成一段，宽度朝那一侧长出去；挖掉段中间一项 → 一段劈成两段；Shift 选一段 → 直接生成一整段。
-- 交互（照文件管理器）：单击只留这一项；`Ctrl`/`⌘` 点击加/减一项；`Shift` 点击从锚点选一段（`Shift+Ctrl` 并入现有选择）；点「全部」或再点唯一选中项回全部；`←`/`→` 移动焦点并顺带选中。
-- 宽度与溢出：外层 `w-fit max-w-full`；内层横向滚动（隐藏滚动条），选中屏幕外的项时 `scrollIntoView({inline: "nearest"})` 带回可视区。
+### 7.1 为什么之前的文字会动
 
-实测（1440×900，`probes/check_tabrail_multi.py` 13 项全过）：B 站 + 小红书（相邻）合成一条，宽度等于两枚胶囊之和（误差 ≤8px）；再 Ctrl 加抖音、掘金，四项仍是一条；Ctrl 挖掉中间的小红书 → 劈成 `[B 站]` 与 `[抖音, 掘金]` 两条；Shift 从 B 站到 V2EX 一次成条；段内 Ctrl 取消掘金 → 劈成 `[B 站, 小红书, 抖音]` 与 `[V2EX]`。`probes/check_tabrail_runs.py` 另测合并宽度、断开与扩散中间帧。截图：`design/tabrail-run-merged.png`（合并成条）、`tabrail-run-split.png`（断开成两条）、`tabrail-run-split-growing.png`（新段长出来的中间帧）、`tabrail-run-shift.png`（Shift 整段）、`tabrail-multi.png`（亮）、`tabrail-multi-dark.png`（暗）。
+多选版把选中项塞进新的段容器，等于换了一次 DOM 父级，三件事同时发生：段容器 `initial={{scale: .86}}` 让按钮跟着缩放；合并时 `layoutId` 的段首变化导致元素被当成新元素；组与组之间的 `gap-0.5` 与段内 `gap-0` 不一致，让相邻文字横移 2px。实测 45ms 时掘金按钮 `matrix(0.9888…)`，文字 span 宽 61.2 → 60.5，合并瞬间 61.2 → 64.4。
 
-包体：移掉 Radix 时从 426.67 kB 回落到 402.40 kB；分段胶囊这一版为 407.41 kB（gzip 130.6 kB），多段 `layout` 的代价。
+### 7.2 现在的结构
+
+- 所有 chip 永远是同一排 `button`，父子关系在任何一次点击里都不变，排版由浏览器自己负责。
+- 高亮是一层独立遮罩：绝对定位、`pointer-events-none`、`rounded-full`、`bg-solid`，只动画 `x` 与 `width`，不参与排版。
+- 遮罩里放一份与按钮内文字盒逐像素重合的**反色副本**（`text-solid-fg`），副本用 `useTransform(maskX, v => -v)` 反向平移，抵消遮罩的移动。视觉上是反色扫过去，字形一次都没位移。
+- 段划分：按 `PLATFORMS` 顺序扫描选中集合，相邻的归为一段（`railAdjacent` 硬编码顺序，索引差 1 即相邻）；「全部」独占一段。
+- 遮罩几何：`measure()` 量每个 button 的 `offsetLeft/offsetTop/offsetWidth/offsetHeight` 与按钮内 `[data-inner]` 的盒子；`useLayoutEffect` + `ResizeObserver`（rail 与每个 button）+ `document.fonts.ready` + `resize` 复测。
+- 动画：每段一个 `RunMask`，`useMotionValue` 起于旧盒子（`seeds()` 按 x 区间重叠 > 4px 认领）再 `animate` 到新盒子，`SPRING`；消失的段由 `GhostMask` 原地淡出 180ms，避免高亮凭空消失。
+- 当段容器用 `fixed` 定位时会被页面 transform 带跑，所以焦点环单独用 `z-20` 的 `ring-2 ring-ink/25` 画在遮罩之上。
+
+### 7.3 两个必须记住的坑
+
+1. **副本层的宽度不能是胶囊宽度**。副本子项用的是 rail 坐标（例如 `left: 430`），如果副本容器只有胶囊那 172px 宽，绝对定位子项的可用宽度会被算成负数，浏览器按最小宽度折行——「抖音117」变成两行，只看得见第一个字。修法：副本容器显式给整条轨道的宽度（`railW = max(box.x + box.w)`）。
+2. **副本必须继承按钮的排版**（`text-[13px] leading-none`）。漏掉时副本按 16px 渲染，字更宽更高，和底层文字对不齐。
+
+### 7.4 验收（`probes/check_tabrail_mask.py`）
+
+断言四类，任何一条不过就说明「文字会动」或者「反色不对」：
+
+- 单选 / 多选 / 拆分三个阶段，每个 `[data-inner]` 的 x 与宽度相对点击前偏差 ≤ 0.5px（实测三段全部 `none`）；
+- 遮罩条数与几何：单选 1 条 88px；Ctrl 加相邻项合成 1 条 172px（等于两按钮宽度之和）；再加不相邻项拆成 2 条（172 / 114）；
+- 副本正确性：每份副本的 x、宽度、高度与原字一致（≤1.5px），颜色是 `rgb(255, 255, 255)`（暗色下取反），高度不超过原字行高（不许折行）；
+- 无 `pageerror`。
+
+截图：`design/tabrail-mask-single.png`、`tabrail-mask-merged.png`、`tabrail-mask-split.png`、`tabrail-mask-dark.png`（暗色下胶囊变成浅底深字）。
+
+### 7.5 交互（照文件管理器）
+
+单击只留这一项；`Ctrl`/`⌘` 点击加/减一项；`Shift` 点击从锚点选一段（`Shift+Ctrl` 并入现有选择）；点「全部」或再点唯一选中项回全部；`←`/`→` 移动焦点并顺带选中。外层 `w-fit max-w-full`，内层横向滚动，选中屏幕外的项时 `scrollIntoView({inline: "nearest"})` 带回可视区。
+
+包体：416.2 kB（gzip 134.0 kB）。
 

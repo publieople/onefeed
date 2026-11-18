@@ -1,6 +1,6 @@
-import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
-import { SPRING } from "../../motion";
+import { animate, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { DUR, SPRING } from "../../motion";
 
 export interface RailItem {
   id: string;
@@ -10,7 +10,7 @@ export interface RailItem {
 }
 
 interface Props {
-  /** layoutId 的后缀，同一页里多个 rail 要各用各的 */
+  /** 同一页里多个 rail 用不同 id，避免 layout 动画串味 */
   id: string;
   items: RailItem[];
   /** 选中的平台 id；空数组 = 全部 */
@@ -19,22 +19,158 @@ interface Props {
   label: string;
 }
 
-type Segment =
-  | { kind: "run"; items: RailItem[]; origin: "left" | "right" | "center" }
-  | { kind: "item"; item: RailItem };
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface ItemBox extends Box {
+  inner: Box;
+}
+
+interface Run {
+  key: string;
+  items: RailItem[];
+  box: Box;
+}
+
+const sameBox = (a: Box, b: Box) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+
+const sameBoxes = (a: Record<string, ItemBox>, b: Record<string, ItemBox>) => {
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    const x = a[k];
+    const y = b[k];
+    if (!y || !sameBox(x, y) || !sameBox(x.inner, y.inner)) return false;
+  }
+  return true;
+};
+
+/** chip 里的内容，正文层与遮罩副本层共用；tone 只换颜色，排版完全一致 */
+function Inner({ item, inverted }: { item: RailItem; inverted: boolean }) {
+  return (
+    <span
+      data-inner=""
+      className={"flex items-center gap-1.5 " + (inverted ? "text-solid-fg" : "text-muted")}
+    >
+      {item.tint ? <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: item.tint }} /> : null}
+      {item.label}
+      {item.count === undefined ? null : (
+        <span className={"text-[11px] tabular-nums " + (inverted ? "text-solid-fg/60" : "text-fade")}>
+          {item.count}
+        </span>
+      )}
+    </span>
+  );
+}
 
 /**
- * 一排多选胶囊，交互照文件管理器：单击只留这一个，Ctrl 加/减，Shift 选一段。
+ * 选中高亮 = 独立遮罩层，文字层永远不动。
  *
- * 选中态按「连续段」画：挨着的选中项合并成一整条黑胶囊，中间断开就分成两条。
- * 合并时靠共享 layoutId 让胶囊原地伸长（前一段的起点不变，动画自然连过去）；
- * 断点处长出的新胶囊从相邻那段的方向扩散出来，而不是凭空出现。
+ * 所有 chip 始终是同一排 button，父子关系在任何一次点击里都不变；
+ * 遮罩是绝对定位的反色胶囊，只动画 x / width，里面放一份和正文逐像素重合的副本，
+ * 副本跟着遮罩反向平移，所以看起来是「反色扫过去」，字形一次都没位移。
  */
-export default function TabRail({ id, items, value, onChange, label }: Props) {
-  const reduce = useReducedMotion();
+function RunMask({
+  run,
+  boxes,
+  railW,
+  reduce,
+  seed,
+}: {
+  run: Run;
+  boxes: Record<string, ItemBox>;
+  railW: number;
+  reduce: boolean;
+  seed?: Box;
+}) {
+  const x = useMotionValue(seed ? seed.x : run.box.x);
+  const w = useMotionValue(seed ? seed.w : run.box.w);
+  const counter = useTransform(x, (value) => -value);
+
+  useEffect(() => {
+    if (reduce) {
+      x.set(run.box.x);
+      w.set(run.box.w);
+      return;
+    }
+    const move = animate(x, run.box.x, SPRING);
+    const grow = animate(w, run.box.w, SPRING);
+    return () => {
+      move.stop();
+      grow.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.box.x, run.box.w, reduce]);
+
+  return (
+    <motion.div
+      aria-hidden
+      className="pointer-events-none absolute left-0 z-10 overflow-hidden rounded-full bg-solid shadow-sm"
+      style={{ x, width: w, top: run.box.y, height: run.box.h }}
+    >
+      {/* 副本层要按整条轨道的宽度铺开：子项用的是 rail 坐标，宽度被胶囊框住会把文字折行 */}
+      <motion.div className="absolute top-0 left-0 h-full" style={{ x: counter, width: railW }}>
+        {run.items.map((item) => {
+          const inner = boxes[item.id]?.inner;
+          if (!inner) return null;
+          return (
+            <div
+              key={item.id}
+              data-copy-of={item.id}
+              className="absolute text-[13px] leading-none"
+              style={{ left: inner.x, top: inner.y - run.box.y }}
+            >
+              <Inner item={item} inverted />
+            </div>
+          );
+        })}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/** 被合并 / 拆掉的那条胶囊：原地淡出，避免高亮凭空消失 */
+function GhostMask({ box, items, boxes }: { box: Box; items: RailItem[]; boxes: Record<string, ItemBox> }) {
+  return (
+    <motion.div
+      aria-hidden
+      className="pointer-events-none absolute left-0 z-10 overflow-hidden rounded-full bg-solid shadow-sm"
+      style={{ top: box.y, height: box.h }}
+      initial={{ x: box.x, width: box.w, opacity: 1 }}
+      animate={{ opacity: 0 }}
+      transition={{ duration: DUR.base }}
+    >
+      {items.map((item) => {
+        const inner = boxes[item.id]?.inner;
+        if (!inner) return null;
+        return (
+          <div
+            key={item.id}
+            className="absolute text-[13px] leading-none"
+            style={{ left: inner.x - box.x, top: inner.y - box.y }}
+          >
+            <Inner item={item} inverted />
+          </div>
+        );
+      })}
+    </motion.div>
+  );
+}
+
+export default function TabRail({ items, value, onChange, label }: Props) {
+  const reduce = useReducedMotion() ?? false;
   const rail = useRef<HTMLDivElement>(null);
   const anchor = useRef<string | null>(null);
   const [primary, setPrimary] = useState<string>("all");
+  const [boxes, setBoxes] = useState<Record<string, ItemBox>>({});
+  const [focused, setFocused] = useState<string | null>(null);
+  const [ghosts, setGhosts] = useState<{ gid: string; run: Run; box: Box }[]>([]);
+  const seen = useRef<Run[]>([]);
 
   const key = value.join(",");
   useEffect(() => {
@@ -42,29 +178,99 @@ export default function TabRail({ id, items, value, onChange, label }: Props) {
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const platforms = items.filter((item) => item.id !== "all").map((item) => item.id);
-
   const isOn = (item: RailItem) => (item.id === "all" ? value.length === 0 : value.includes(item.id));
 
-  const segments: Segment[] = [];
-  for (const item of items) {
-    if (!isOn(item)) {
-      segments.push({ kind: "item", item });
-      continue;
+  /** 量每个 chip 与 chip 内文字的盒子；只在尺寸真的变了才写 state，避免空转 */
+  const measure = useCallback(() => {
+    const root = rail.current;
+    if (!root) return;
+    const next: Record<string, ItemBox> = {};
+    root.querySelectorAll<HTMLElement>("button[data-value]").forEach((button) => {
+      const id = button.dataset.value;
+      if (!id) return;
+      const inner = button.querySelector<HTMLElement>("[data-inner]");
+      next[id] = {
+        x: button.offsetLeft,
+        y: button.offsetTop,
+        w: button.offsetWidth,
+        h: button.offsetHeight,
+        inner: inner
+          ? {
+              x: button.offsetLeft + inner.offsetLeft,
+              y: button.offsetTop + inner.offsetTop,
+              w: inner.offsetWidth,
+              h: inner.offsetHeight,
+            }
+          : { x: button.offsetLeft, y: button.offsetTop, w: button.offsetWidth, h: button.offsetHeight },
+      };
+    });
+    setBoxes((prev) => (sameBoxes(prev, next) ? prev : next));
+  }, []);
+
+  useLayoutEffect(() => {
+    measure();
+  }, [measure, items, value]);
+
+  useEffect(() => {
+    const root = rail.current;
+    if (!root) return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(root);
+    for (const child of Array.from(root.children)) {
+      if (child.tagName === "BUTTON") observer.observe(child);
     }
-    const last = segments[segments.length - 1];
-    if (last && last.kind === "run") {
+    const onFonts = () => measure();
+    void document.fonts?.ready.then(onFonts).catch(() => undefined);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [measure, items]);
+
+  const runs: Run[] = [];
+  for (const item of items) {
+    if (!isOn(item)) continue;
+    const box = boxes[item.id];
+    if (!box) continue;
+    const last = runs[runs.length - 1];
+    if (last && last.items[last.items.length - 1].id && railAdjacent(last.items[last.items.length - 1].id, item.id)) {
       last.items.push(item);
     } else {
-      segments.push({ kind: "run", items: [item], origin: "center" });
+      runs.push({ key: item.id, items: [item], box });
     }
   }
-  // 新长出来的胶囊朝「已经有选中段的那一侧」扩散，读起来像从前一段延伸出去
-  segments.forEach((seg, index) => {
-    if (seg.kind !== "run") return;
-    const before = segments.slice(0, index).some((each) => each.kind === "run");
-    const after = segments.slice(index + 1).some((each) => each.kind === "run");
-    seg.origin = before ? "left" : after ? "right" : "center";
-  });
+  for (const run of runs) {
+    const first = boxes[run.items[0].id];
+    const tail = boxes[run.items[run.items.length - 1].id];
+    run.box = { x: first.x, y: first.y, w: tail.x + tail.w - first.x, h: first.h };
+  }
+
+  // 断点出来的新胶囊从旧胶囊的方向长出来；消失的那条原地淡出
+  const signature = runs.map((run) => run.key + ":" + run.items.length).join("|");
+  useEffect(() => {
+    const prev = seen.current;
+    const live = new Set(runs.map((run) => run.key));
+    const gone = prev.filter((run) => !live.has(run.key));
+    seen.current = runs;
+    if (!gone.length) return;
+    const stamp = Date.now();
+    setGhosts((old) => [...old, ...gone.map((run) => ({ gid: run.key + "@" + stamp, run, box: run.box }))]);
+    const timer = window.setTimeout(() => {
+      setGhosts((old) => old.filter((each) => !each.gid.endsWith("@" + stamp)));
+    }, 260);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+
+  const seeds = (run: Run): Box | undefined => {
+    for (const old of seen.current) {
+      if (old.key === run.key) return undefined;
+      const overlap = Math.min(old.box.x + old.box.w, run.box.x + run.box.w) - Math.max(old.box.x, run.box.x);
+      if (overlap > 4) return old.box;
+    }
+    return undefined;
+  };
 
   const bring = (target: string) => {
     requestAnimationFrame(() => {
@@ -116,29 +322,8 @@ export default function TabRail({ id, items, value, onChange, label }: Props) {
     rail.current?.querySelector<HTMLElement>('[data-value="' + target + '"]')?.focus();
   };
 
-  const chip = (item: RailItem, inside: boolean) => (
-    <button
-      key={item.id}
-      type="button"
-      data-value={item.id}
-      aria-pressed={isOn(item)}
-      tabIndex={primary === item.id ? 0 : -1}
-      onClick={(event) => choose(item.id, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey })}
-      className={
-        "relative shrink-0 rounded-full px-3 py-1.5 text-[13px] leading-none transition-colors duration-150 " +
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 " +
-        (inside ? "text-solid-fg" : "text-muted hover:bg-wash hover:text-ink")
-      }
-    >
-      <span className="relative flex items-center gap-1.5">
-        {item.tint ? <span className="h-[7px] w-[7px] rounded-full" style={{ background: item.tint }} /> : null}
-        {item.label}
-        {item.count === undefined ? null : (
-          <span className={"text-[11px] tabular-nums " + (inside ? "text-solid-fg/60" : "text-fade")}>{item.count}</span>
-        )}
-      </span>
-    </button>
-  );
+  const focusBox = focused ? boxes[focused] : undefined;
+  const railW = Object.values(boxes).reduce((max, box) => Math.max(max, box.x + box.w), 0);
 
   return (
     <div className="w-fit max-w-full rounded-full border border-line bg-paper p-1">
@@ -147,26 +332,46 @@ export default function TabRail({ id, items, value, onChange, label }: Props) {
         role="group"
         aria-label={label}
         onKeyDown={step}
-        className="flex min-w-0 items-center gap-0.5 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="relative flex min-w-0 items-center gap-0.5 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {segments.map((seg) => {
-          if (seg.kind === "item") return chip(seg.item, false);
-          const lead = seg.items[0];
-          return (
-            <motion.div
-              key={"run-" + lead.id}
-              layoutId={"rail-" + id + "-" + lead.id}
-              initial={reduce ? false : { opacity: 0, scale: 0.86 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={reduce ? { duration: 0 } : SPRING}
-              style={{ transformOrigin: seg.origin }}
-              className="relative flex shrink-0 items-center overflow-hidden rounded-full bg-solid shadow-sm"
-            >
-              {seg.items.map((item) => chip(item, true))}
-            </motion.div>
-          );
-        })}
+        {items.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            data-value={item.id}
+            aria-pressed={isOn(item)}
+            tabIndex={primary === item.id ? 0 : -1}
+            onClick={(event) => choose(item.id, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey })}
+            onFocus={() => setFocused(item.id)}
+            onBlur={() => setFocused((prev) => (prev === item.id ? null : prev))}
+            className="relative z-0 shrink-0 rounded-full px-3 py-1.5 text-[13px] leading-none transition-colors duration-150 hover:bg-wash focus-visible:outline-none"
+          >
+            <Inner item={item} inverted={false} />
+          </button>
+        ))}
+
+        {runs.map((run) => (
+          <RunMask key={run.key} run={run} boxes={boxes} railW={railW} reduce={reduce} seed={seeds(run)} />
+        ))}
+
+        {ghosts.map((ghost) => (
+          <GhostMask key={ghost.gid} box={ghost.box} items={ghost.run.items} boxes={boxes} />
+        ))}
+
+        {focusBox ? (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute z-20 rounded-full ring-2 ring-ink/25"
+            style={{ left: focusBox.x, top: focusBox.y, width: focusBox.w, height: focusBox.h }}
+          />
+        ) : null}
       </div>
     </div>
   );
+}
+
+/** 平台在 rail 里的相邻关系：只和上一个 chip 挨着才算同一段 */
+function railAdjacent(left: string, right: string) {
+  const order = ["all", "bilibili", "xiaohongshu", "douyin", "juejin", "v2ex", "zhihu", "zhihu-hot"];
+  return order.indexOf(right) - order.indexOf(left) === 1;
 }
