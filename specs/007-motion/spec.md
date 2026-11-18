@@ -123,29 +123,30 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 
 单击只留这一项；`Ctrl`/`⌘` 点击加/减一项；`Shift` 点击从锚点选一段（`Shift+Ctrl` 并入现有选择）；点「全部」或再点唯一选中项回全部；`←`/`→` 移动焦点并顺带选中。外层 `w-fit max-w-full`，内层横向滚动，选中屏幕外的项时 `scrollIntoView({inline: "nearest"})` 带回可视区。
 
-### 7.6 单击换平台：新胶囊从被点的 chip 里长出来（2026-11-18）
+### 7.6 选中动效按状态分三种（2026-11-18，含初版「一律就地生长」的修正）
 
-最早的做法是「一整块黑胶囊从旧位置滑到新位置」。点「全部」再点「抖音」，观众看到的是一枚胶囊横着飞过去，跟手指点的那个 chip 没有关系；位置上离得远时更像页面里有个东西在乱跑。
+初版是「不管怎么点都原地长出来」，于是单选换平台时旧胶囊淡出、新胶囊从窄条长开，看起来像一截黑条在轨道上挪。现在按这一帧的选中状态分流，三种走法：
 
-现在单击换平台是**就地生长**：
+1. **单选平移**：`slide = 上一帧选中数 ≤ 1 && 这一帧选中数 ≤ 1`。沿用同一块遮罩（id 无条件继承、不设 `seed`），`RunMask` 从当前 motion value 继续 Spring 到新盒子——是同一枚胶囊滑过去，不是旧的散、新的长。
+2. **多选、相邻已有选中**：新段带着已选项一起变长，`carried` = 段内上一帧已选的 chip，`seed` = carried 盒子的并集。遮罩从相邻那段长过去，新芯片被依次盖住，全程不露白；**不撒淡影**。
+3. **多选、左右都没选**（含多选状态下点一个全新平台）：carried 为空且有新项 → 标 `born`，`seed` 取以被点 chip（`primary`，Shift 选段时取段内的那一枚）中心为轴、宽 `w0 = max(18, min(30, round(box.w * 0.45)))` 的窄条，同时撒一圈 `BloomPill` 淡影。表现为从点击中心扩散出一枚新胶囊。
 
-- 新段标记 `born`，`seed` 是一条窄条（`w0 = max(18, min(30, round(box.w * 0.45)))`，x 取 chip 的左端），Spring 把它拉成完整宽度；
-- 旧段不再被平移，交给 GhostMask 原地淡出（被新段包住时走 `absorbed`，等新遮罩接力）；
-- 同一帧再撒一层 `BloomPill`：与被点 chip 等宽等高的实底胶囊，1 倍缩放到 1.15 倍、透明度 0.34 → 0，`DUR.list`（340ms）、`EASE`；它不带文字、在遮罩下面（`z-[5]`），所以缩放不会把反色副本拉变形，看起来就是一圈扩散出去的淡影。
+身份：slide 时无条件沿用上一帧唯一那段的 id；其余先按同段首 `key` 继承，再按横向重叠 > 4px 继承，都没有才取 `key`。React key 仍是 `id + ":" + items.length`：合并 / 拆分会重挂一次以读取新 seed，单选平移两侧长度都是 1，不重挂，动画才连得上。
 
-身份规则改了一处：`runs.length === 1` 且没有现成身份时，只有「首帧」或「与上一帧唯一那条横向重叠 > 4px」才继承旧身份；位置完全错位的一跳（全部 ↔ 抖音）直接新建身份，旧的淡出、新的铺开。相邻或部分重叠的切换照旧继承，几何由 Spring 连续过去，不闪。
+拆分 / 收缩的段没有新项，`seed` 取与它重叠的旧段并集，就地缩回去；被去掉的那截由 GhostMask 原地淡出（absorbed 规则见 7.7）。
 
-连点保护：淡影列表最多留 8 个（`slice(-8)`），每个自己 `onAnimationComplete` 后从列表移除；ghost 的定时器不在 cleanup 里取消，所以连点不会留下永久元素。
+**必须记住的坑**：比较上一帧不能用「signature 变了才跑」。单选平移会沿用同一个 id，signature（`id:长度`）恰好不变，effect 不跑，`seen` 停在上一帧；下一次 Ctrl 追加就会把已选中的段误判成新生。实测症状：Ctrl 加掘金时 t≈47ms 出现 31.4px 的窄条、原来的 88px 直接消失，变成从点击中心冒出来而不是从相邻段长出去。改成 `useLayoutEffect` 每次提交都比较一次，代价只是几次数组比较。
 
-验收（`probes/check_tabrail_spread.py`）：页面内 rAF 采 900ms，遮罩按 `:scope > div[aria-hidden]` 且背景非透明取，淡影按 `:scope > span[aria-hidden]` 且背景非透明取（焦点环也是 `span[aria-hidden]`，但背景透明，不能数进去）。三次切换（全部→抖音、抖音→知乎、知乎→全部）都要满足：
+淡影只在 `born` 段撒：列表最多留 8 个，每个 `onAnimationComplete` 后自清；平移、相邻跟长、拆分都不撒。ghost 的清理定时器不在 effect cleanup 里取消（见 7.7），连点不会留下永久元素。
 
-- 出现过窄于目标宽度 75% 的帧（真的从窄条开始的）；
-- 出现过目标宽度 50%–(目标−3) 之间的中间帧（全部→抖音 19 帧、抖音→知乎 5 帧、知乎→全部 12 帧）；
-- 末帧只剩一条，x 与宽误差 ≤ 1.5px；
-- 旧胶囊淡出或出现过两条；
-- 淡影宽度等于 chip 宽（误差 ≤ 2px）、透明度递减、末帧清零（实测 18 / 20 / 26 个淡影帧）。
+验收（`probes/check_tabrail_spread.py`）：页面内 rAF 采 900ms；遮罩按 `:scope > div[aria-hidden]` 且背景非透明取，淡影按 `:scope > span[aria-hidden]` 且背景非透明取（焦点环也是 `span[aria-hidden]`，但背景透明，不能数进去）。三段状态各断言：
 
-连点 B 站→小红书→抖音→掘金（间隔 90ms）后等 1.4s：遮罩必须恰好 1 条、淡影 0 个。截图 `design/tabrail-spread-after.png`、`tabrail-spread-rapid.png`。
+- **全部 → 抖音（平移）**：全程恰好 1 条遮罩，x 从 0 连续滑到 270（8 个中间帧），末帧几何误差 ≤ 1.5px，**无淡影**；
+- **抖音 → Ctrl 加掘金（相邻扩散）**：最窄帧 = 抖音宽 88（±6px），出现 88–169 的中间宽度，末帧 172.27（= 两枚 chip 之和），**无淡影**；
+- **+ Ctrl 知乎（中心扩散）**：出现两条遮罩，新段起点宽 31.6px、中心与知乎 chip 中心误差 ≤ 4px，淡影宽度 = chip 宽且透明度递减，末帧两条；
+- **连点** 4 次（间隔 90ms）后等 1.4s：遮罩恰好 1 条、淡影 0 个、无 pageerror。
+
+截图由 `probes/shot_tabrail_modes.py` 抓中间帧：`design/tabrail-mode-slide.png`（平移途中）、`tabrail-mode-adjacent.png`（从抖音那段长出去）、`tabrail-mode-center.png`（知乎中心扩散 + 淡影）。
 
 采样方式注意：`page.evaluate` 的往返有几十毫秒，在 Python 里循环「等 16ms → 读一次几何」量到的是几十毫秒前的状态，动画早跑完了。必须把采样循环放进页面（`window.__frames`，rAF 里记 `performance.now()` 与几何），点完等 900ms 再一次性取回。
 
@@ -159,13 +160,13 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 
 修法：
 
-- **seed 并集**：每个 run 除了目标盒子 `box`，再算一个 `seed` = 上一帧所有与它横向重叠 > 4px 的 run 的并集（`min(x)` 到 `max(x+w)`）。`RunMask` 用 seed 初始化 `useMotionValue`，再用 `animate` 走到 `box`。中间插一项时 seed 恰好是三枚芯片的总宽，遮罩一上来就盖满整段，没有露白；相邻追加时 seed 就是旧段本身，长过去的动画照旧。这条只在非 `born` 段上生效——`born` 段故意从窄条开始（§7.6）。
+- **seed 并集**：每个 run 除了目标盒子 `box`，再算一个 `seed`：段内已有选中项时取这些 chip 的并集，纯拆分 / 收缩时取与它横向重叠 > 4px 的旧段并集（`min(x)` 到 `max(x+w)`）。`RunMask` 用 seed 初始化 `useMotionValue`，再用 `animate` 走到 `box`。中间插一项时 seed 恰好是三枚芯片的总宽，遮罩一上来就盖满整段，没有露白；相邻追加时 seed 就是旧段本身，长过去的动画照旧。这条只在非 `born` 段上生效——`born` 段故意从窄条开始（§7.6）。
 - **React key 带上 `items.length`**：`run.id + ":" + run.items.length`。合并 / 拆分必须重挂一次组件，新的 seed 才会被读取；「全部 ↔ 单个平台」两侧长度都是 1，不重挂。
 - **GhostMask 增加 `absorbed`**：被新 run 的盒子完全包住（x ≤ +1、右边界 ≥、|y| ≤ 1、|h| ≤ 1）时直接 `opacity: 1`，等新遮罩接力；清理定时器改成 620ms（被吸收）/ 260ms，而且不再在 cleanup 里 `clearTimeout`——它会留在 DOM 里直到自己到期，但被新遮罩盖着看不见。
 
 验收（`probes/check_tabrail_merge.py`）：选 B 站 + 抖音 → Ctrl 加小红书后，遮罩必须并成一条、宽度等于三枚芯片宽度之和（281 vs 276，±10），且**只在 `aria-pressed=true` 的帧上检查覆盖**（点击到 React 提交之间的白底是正常的过渡态）。实测 51 帧无露白，连点三次后幽灵胶囊归零。
 
-包体：422.6 kB（gzip 136.3 kB）。
+包体：423.3 kB（gzip 136.6 kB）。
 
 ## 8. 跳页：卡片长大铺满整页（2026-11-18）
 

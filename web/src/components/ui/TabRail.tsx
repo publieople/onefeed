@@ -291,29 +291,38 @@ export default function TabRail({ items, value, onChange, label }: Props) {
     run.box = { x: first.x, y: first.y, w: tail.x + tail.w - first.x, h: first.h };
   }
 
-  // 身份：只有同一段（或位置有重叠）沿用同一个身份，遮罩组件才不会被卸载，动画才有起点。
-  // 位置完全错位的一跳不沿用：旧胶囊原地淡出、新胶囊就地铺开，才像「从点的这个平台扩散出来」，
-  // 而不是一整块黑胶囊横着平移过去。
+  // 身份与起点按这一帧的选中状态分三种走法：
+  // 1. 前后都只选一个（含「全部」）：沿用同一个遮罩，位置/宽度直接补间 → 平移过去；
+  // 2. 多选、新点的那枚旁边已有选中：从已选中那段长过去（用已选项的并集做起点，不会露白）；
+  // 3. 多选、左右都没选：从被点的 chip 中心扩散出一条新胶囊（配 bloom 淡影）。
   const prevRuns = seen.current;
   const firstPaint = prevRuns.length === 0;
+  const prevSel = new Set(prevRuns.flatMap((run) => run.items.map((item) => item.id)));
+  const nextSel = runs.flatMap((run) => run.items.map((item) => item.id));
+  const slide = !firstPaint && prevSel.size <= 1 && nextSel.length <= 1;
   const used = new Set<string>();
   const overlaps = (a: Box, b: Box) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 4;
+
+  // 平移时不管隔多远都沿用同一块遮罩：它自己滑过去，而不是「旧的淡出、新的长出来」
+  let slideId: string | null = null;
+  if (slide && runs.length === 1) {
+    const free = prevRuns.find((each) => !used.has(each.id));
+    if (free) {
+      runs[0].id = free.id;
+      used.add(free.id);
+      slideId = free.id;
+    }
+  }
+
+  // 同段首沿用身份；剩下的按横向重叠继承（合并、拆分、没挪位置的段）
   for (const run of runs) {
+    if (run.id) continue;
     const old = prevRuns.find((each) => each.key === run.key && !used.has(each.id));
     if (old) {
       run.id = old.id;
       used.add(old.id);
     }
   }
-  // 只剩一段时（全部 ↔ 单个平台、单个平台之间）：位置接得上才让同一个遮罩平移/合并
-  if (runs.length === 1 && !runs[0].id) {
-    const free = prevRuns.find((each) => !used.has(each.id));
-    if (free && (firstPaint || overlaps(free.box, runs[0].box))) {
-      runs[0].id = free.id;
-      used.add(free.id);
-    }
-  }
-  // 其余按横向重叠继承（合并、拆分），没得继承就是新生的一段
   for (const run of runs) {
     if (run.id) continue;
     const old = prevRuns.find((each) => !used.has(each.id) && overlaps(each.box, run.box));
@@ -321,42 +330,65 @@ export default function TabRail({ items, value, onChange, label }: Props) {
       run.id = old.id;
     } else {
       run.id = run.key;
-      run.born = !firstPaint;
     }
     used.add(run.id);
   }
 
-  // 新一段的起点：所有和它横向重叠的旧段的并集（合并时一下就盖满，拆分时从整条缩回去）。
-  // 凭空新生的一段没有旧段可继承，就从一个窄条铺开，配合 bloom 做成扩散。
+  // 起点：带着已选中项一起变长的段，只从已选中那部分长（相邻扩散）；
+  // 一个已选项都没有的新段，才从被点的 chip 中心扩散；
+  // 纯拆分/收缩的段没有新项，从它原来盖住的旧段并集缩回去。
+  const born: Run[] = [];
   for (const run of runs) {
-    if (run.born) {
-      const w0 = Math.max(18, Math.min(30, Math.round(run.box.w * 0.45)));
-      run.seed = { x: run.box.x, w: w0 };
+    if (slideId && run.id === slideId) continue; // 平移：不设 seed，从当前 motion value 继续滑
+    const carried = run.items.filter((item) => prevSel.has(item.id) && boxes[item.id]);
+    const hasNew = run.items.some((item) => !prevSel.has(item.id));
+    if (carried.length) {
+      const first = boxes[carried[0].id];
+      let minX = first.x;
+      let maxR = first.x + first.w;
+      for (const item of carried) {
+        const box = boxes[item.id];
+        minX = Math.min(minX, box.x);
+        maxR = Math.max(maxR, box.x + box.w);
+      }
+      run.seed = { x: minX, w: maxR - minX };
       continue;
     }
-    let minX = run.box.x;
-    let maxR = run.box.x + run.box.w;
-    for (const old of prevRuns) {
-      const overlap = Math.min(old.box.x + old.box.w, run.box.x + run.box.w) - Math.max(old.box.x, run.box.x);
-      if (overlap <= 4) continue;
-      minX = Math.min(minX, old.box.x);
-      maxR = Math.max(maxR, old.box.x + old.box.w);
+    if (hasNew && !firstPaint) {
+      const target = run.items.find((item) => item.id === primary) ?? run.items[0];
+      const box = boxes[target.id];
+      const w0 = Math.max(18, Math.min(30, Math.round(box.w * 0.45)));
+      run.born = true;
+      run.seed = { x: Math.round(box.x + box.w / 2 - w0 / 2), w: w0 };
+      born.push(run);
+      continue;
     }
-    run.seed = { x: minX, w: maxR - minX };
+    if (!firstPaint) {
+      let minX = run.box.x;
+      let maxR = run.box.x + run.box.w;
+      for (const old of prevRuns) {
+        const overlap = Math.min(old.box.x + old.box.w, run.box.x + run.box.w) - Math.max(old.box.x, run.box.x);
+        if (overlap <= 4) continue;
+        minX = Math.min(minX, old.box.x);
+        maxR = Math.max(maxR, old.box.x + old.box.w);
+      }
+      run.seed = { x: minX, w: maxR - minX };
+    }
   }
 
-  // 消失的那条：被新胶囊整条盖住的保持不透明等接力，其余原地淡出
-  const signature = runs.map((run) => run.id + ":" + run.items.length).join("|");
-  useEffect(() => {
+  // 消失的那条：被新胶囊整条盖住的保持不透明等接力，其余原地淡出。
+  // 这里不能用「签名变了才跑」：单选平移会沿用同一个 id，签名（id:长度）恰好不变，
+  // seen 停在上一帧，下一次多选就会把已选中的段误判成新生。每帧提交后都比一次，代价只是几次数组比较。
+  useLayoutEffect(() => {
     const prev = seen.current;
     const live = new Set(runs.map((run) => run.id));
     const gone = prev.filter((run) => !live.has(run.id));
-    // 这一帧新盖上的 chip：每人放一圈往外散的淡影（连点也只保留最近 8 个，不堆垃圾）
-    if (prev.length && !reduce) {
-      const before = new Set(prev.flatMap((run) => run.items.map((item) => item.id)));
-      const fresh = runs
+    // 只有「凭空从点击中心扩散」的那几枚才放淡影：相邻跟长、平移都不该再散一圈
+    // （连点也只保留最近 8 个，不堆垃圾）
+    if (prev.length && !reduce && born.length) {
+      const fresh = born
         .flatMap((run) => run.items)
-        .filter((item) => !before.has(item.id) && boxes[item.id])
+        .filter((item) => !prevSel.has(item.id) && boxes[item.id])
         .slice(0, 4);
       if (fresh.length) {
         const stamp = Date.now();
@@ -394,7 +426,7 @@ export default function TabRail({ items, value, onChange, label }: Props) {
       added.some((each) => each.absorbed) ? 620 : 260,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  });
 
   const bring = (target: string) => {
     requestAnimationFrame(() => {
