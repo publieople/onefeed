@@ -88,3 +88,9 @@ onClick={() => { document.startViewTransition
 - `tests/test_theme_reveal.py`（5 项，静态回归）：CSS 里两组 keyframes 与 polygon 都在、`theme-vt` 抑制规则在、`runThemeTransition` 有降级分支、TopBar 用了 `flushSync`。已接进 `tests/run_all.py` 的 ORDER。
 - `probes/check_theme_reveal.py`（7 项，真浏览器）：包一层 `startViewTransition` 计数、点按钮、读 `::view-transition-group(root)` 的 `animationDuration` 必须是 0.7s、`html.dark` 与 localStorage 落位、来回都走 VT。中途截图 `design/theme-reveal-light-to-dark.png`、`design/theme-reveal-dark-to-light.png`。
 - 想调手感：时长在 `theme.css` 的 `::view-transition-group(root)`；曲线换 `cubic-bezier` 的最后两个数；两组 polygon 决定斜带的角度与方向，改坐标即可。
+
+### 5.4 与跳页过渡共存（2026-11-18 补）
+
+换肤与「点卡片进详情」都走 View Transition，两套 `::view-transition-*` 规则会互相打架：跳页时也套上 `reveal-light` / `reveal-dark` 的斜带，缩放与扫屏叠在一起。
+
+所以换肤的选择器全部收进 `html.theme-vt`：`html.theme-vt::view-transition-group(root)`、`html.theme-vt::view-transition-old(root)`、`html.theme-vt::view-transition-new(root)`、`html.theme-vt.dark::view-transition-new(root)`。跳页的规则挂在 `html.nav-vt`，两者互不可见。`tests/test_nav_motion.py` 里有一条断言专门守这个作用域，改 CSS 时不要把前缀删掉。

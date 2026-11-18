@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, MessageCircle, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   getDetail,
   getJSON,
@@ -15,6 +15,7 @@ import {
   type SummaryResponse,
 } from "../api";
 import { CommentBody } from "../components/CommentBody";
+import { runNavTransition } from "../navTransition";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
 
@@ -314,6 +315,9 @@ function SummaryPanel({ data, loading, error, canSeek, onJump, onRetry, url }: S
 
 export default function ItemPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
+  // 返回时和进来时反着来：整页缩一点退场，信息流再长回来
+  const goBack = () => runNavTransition(() => navigate("/", { state: { vt: true, back: 1 } }), "page", true);
   const [data, setData] = useState<ItemResponse | null>(null);
   const [itemError, setItemError] = useState("");
   const [detail, setDetail] = useState<DetailResponse | null>(null);
@@ -509,9 +513,13 @@ export default function ItemPage() {
       <div className="py-24 text-center">
         <p className="text-[15px] font-medium">这条内容打不开</p>
         <p className="mt-2 text-[13px] text-muted">{itemError}</p>
-        <Link to="/" className="mt-5 inline-block rounded-lg border border-line px-4 py-2 text-[13px] text-muted hover:text-ink">
+        <button
+          type="button"
+          onClick={goBack}
+          className="mt-5 inline-block rounded-lg border border-line px-4 py-2 text-[13px] text-muted hover:text-ink"
+        >
           回到信息流
-        </Link>
+        </button>
       </div>
     );
   }
@@ -544,10 +552,14 @@ export default function ItemPage() {
   return (
     <div className="mx-auto max-w-[860px] pb-24 pt-6">
       <div className="flex items-center gap-3 text-[12px] text-muted">
-        <Link to="/" className="inline-flex items-center gap-1 rounded-full px-2 py-1 hover:bg-wash hover:text-ink">
+        <button
+          type="button"
+          onClick={goBack}
+          className="inline-flex items-center gap-1 rounded-full px-2 py-1 hover:bg-wash hover:text-ink"
+        >
           <ArrowLeft size={13} />
           返回
-        </Link>
+        </button>
         <span
           className="inline-flex h-[18px] items-center rounded-full px-1.5 text-[11px] font-medium leading-none text-white"
           style={{ background: p.tint }}

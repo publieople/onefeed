@@ -76,7 +76,20 @@ def main() -> int:
         page.mouse.up()
         ok("卡片按下有缩放", pressed != after, after + " -> " + pressed)
 
-        # 4. 切页有过渡：点下去 90ms 时旧页应该正在淡出或位移，而不是瞬间消失
+        # 松手那一下已经算一次点击，会跳进详情；回到信息流再单独测「点进去」
+        page.goto(URL, wait_until="networkidle")
+        page.wait_for_selector("article", timeout=20000)
+        box = page.locator("article").first.bounding_box()
+
+        # 4. 切页有过渡：要么旧页正在淡出/位移，要么走了 View Transition（页面本身不动，
+        #    动画在快照层上）。两条都算「不是瞬间切换」。
+        page.evaluate(
+            """() => {
+            window.__vt = 0;
+            const orig = document.startViewTransition?.bind(document);
+            if (orig) document.startViewTransition = (cb) => { window.__vt += 1; return orig(cb); };
+        }"""
+        )
         page.mouse.click(box["x"] + box["width"] / 2, box["y"] + 40)
         page.wait_for_timeout(90)
         mid = page.evaluate(
@@ -84,10 +97,12 @@ def main() -> int:
             " if (!el) return 'gone'; const s = getComputedStyle(el);"
             " return s.opacity + '|' + s.transform; }"
         )
+        vt = page.evaluate("window.__vt")
+        nav = page.evaluate("document.documentElement.classList.contains('nav-vt')")
         page.wait_for_url("**/item/**", timeout=15000)
         opacity = mid.split("|")[0]
         moving = opacity not in ("1", "gone") or mid.split("|")[-1] != "none"
-        ok("切页有过渡帧", moving, mid)
+        ok("切页有过渡", moving or (vt >= 1 and nav), mid + " vt=" + str(vt))
         page.wait_for_selector("h1", timeout=20000)
         title = page.inner_text("h1").strip()
         ok("详情页渲染出标题", len(title) > 0, title[:40])

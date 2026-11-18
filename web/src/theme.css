@@ -208,26 +208,26 @@ button:active:not(:disabled) {
   transition: none !important;
 }
 
-::view-transition-group(root) {
+html.theme-vt::view-transition-group(root) {
   animation-duration: 0.7s;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-::view-transition-old(root) {
+html.theme-vt::view-transition-old(root) {
   z-index: -1;
   animation: none;
 }
 
-::view-transition-new(root) {
+html.theme-vt::view-transition-new(root) {
   animation-name: reveal-light;
 }
 
-html.dark::view-transition-old(root) {
+html.theme-vt.dark::view-transition-old(root) {
   z-index: -1;
   animation: none;
 }
 
-html.dark::view-transition-new(root) {
+html.theme-vt.dark::view-transition-new(root) {
   animation-name: reveal-dark;
 }
 
@@ -253,3 +253,95 @@ html.dark::view-transition-new(root) {
   }
 }
 
+
+/* 卡片 → 详情：被点的卡片单独一层，先轻轻放大再化开；新页面同时在下面淡入。
+   返回时反着来：详情页缩一点退场，信息流从 0.972 长回 1。
+   曲线和换肤同一组：0.7s / cubic-bezier(0.16, 1, 0.3, 1)。 */
+.nav-vt,
+.nav-vt *,
+.nav-vt *::before,
+.nav-vt *::after {
+  transition: none !important;
+}
+
+html.nav-vt::view-transition-group(root) {
+  animation-duration: 0.7s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 旧页压在新页上面淡出：两页各自半透明地叠着会糊成一片白，
+   这样看到的是「旧页退开、露出已经就位的新页」，文字不会重影。 */
+html.nav-vt::view-transition-old(root) {
+  z-index: 2;
+  animation: nav-root-out 0.34s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+}
+
+html.nav-vt::view-transition-new(root) {
+  z-index: 1;
+  animation: none;
+}
+
+@keyframes nav-root-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* 被点的卡片：先放大一点点，再化开 */
+html.nav-vt::view-transition-group(of-card) {
+  z-index: 3;
+  animation-duration: 0.7s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html.nav-vt::view-transition-old(of-card) {
+  transform-origin: center;
+  animation: nav-card-lift 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html.nav-vt::view-transition-new(of-card) {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes nav-card-lift {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.075);
+    opacity: 0;
+  }
+}
+
+/* 返回时退场的是详情页：缩一点、淡出 */
+html.nav-vt::view-transition-group(of-page) {
+  z-index: 3;
+  animation-duration: 0.55s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html.nav-vt::view-transition-old(of-page) {
+  transform-origin: center;
+  animation: nav-page-down 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html.nav-vt::view-transition-new(of-page) {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes nav-page-down {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.972);
+    opacity: 0;
+  }
+}

@@ -6,6 +6,7 @@ import { useFeed } from "../api";
 import AiDock from "../components/AiDock";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
+import { runNavTransition } from "../navTransition";
 
 interface Props {
   ctx: OutletCtx;
@@ -17,7 +18,13 @@ export default function FeedPage({ ctx }: Props) {
   const [range, setRange] = useState<"all" | "today">("all");
   const [q, setQ] = useState("");
   const navigate = useNavigate();
-  const openItem = (id: string) => navigate("/item/" + encodeURIComponent(id));
+  // 卡片先放大再进详情：把被点的元素作为过渡的那一层
+  const openItem = (id: string, el?: HTMLElement) => {
+    runNavTransition(
+      () => navigate("/item/" + encodeURIComponent(id), { state: { vt: true } }),
+      el ?? null,
+    );
+  };
 
   const activeSort = sort || ctx.settings?.settings.default_sort || "freshness";
   const since = useMemo(() => {

@@ -32,7 +32,7 @@ def test_view_transition_rules() -> None:
         "::view-transition-old(root)",
         "animation-duration: 0.7s",
         "animation-name: reveal-light",
-        "html.dark::view-transition-new(root)",
+        "html.theme-vt.dark::view-transition-new(root)",
     ):
         assert needle in CSS, "theme.css 缺 " + needle
 

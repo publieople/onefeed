@@ -39,6 +39,8 @@ export default function App() {
   const wasRunning = useRef(false);
   const location = useLocation();
   const reduce = useReducedMotion();
+  // 走 View Transition 的那一次跳转不播进场动画：新页要立刻以最终样子进快照
+  const instant = Boolean((location.state as { vt?: boolean } | null)?.vt);
   // 从首页进详情/市场算「往里走」，回到首页算「往回走」，切页方向跟着走
   const depth = (p: string) => (p === "/" ? 0 : 1);
   const prevPath = useRef(location.pathname);
@@ -123,24 +125,21 @@ export default function App() {
     <div className="min-h-screen bg-paper">
       <TopBar health={health} progress={progress} onRefresh={refresh} />
       <main className="mx-auto w-full max-w-[1180px] px-6">
-        {/* 切页时旧页先淡出再让新页进场，避免两页同时闪一下 */}
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={location.pathname}
-            className="page-shell"
-            initial={reduce ? false : page.initial}
-            animate={page.animate}
-            exit={reduce ? { opacity: 0 } : page.exit}
-            transition={{ duration: reduce ? 0 : DUR.page, ease: EASE }}
-          >
-            <Routes location={location}>
-              <Route path="/" element={<FeedPage ctx={ctx} />} />
-              <Route path="/item/:id" element={<ItemPage />} />
-              <Route path="/market" element={<MarketPage ctx={ctx} />} />
-              <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
-            </Routes>
-          </motion.div>
-        </AnimatePresence>
+        {/* 走 View Transition 时新页已经以最终样子进了快照，这里不能再播进场动画 */}
+        <motion.div
+          key={location.pathname}
+          className="page-shell"
+          initial={instant || reduce ? false : page.initial}
+          animate={page.animate}
+          transition={{ duration: instant || reduce ? 0 : DUR.page, ease: EASE }}
+        >
+          <Routes location={location}>
+            <Route path="/" element={<FeedPage ctx={ctx} />} />
+            <Route path="/item/:id" element={<ItemPage />} />
+            <Route path="/market" element={<MarketPage ctx={ctx} />} />
+            <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
+          </Routes>
+        </motion.div>
       </main>
       <AnimatePresence>
         {toast ? (

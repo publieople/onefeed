@@ -7,7 +7,8 @@ import { duration, num, timeAgo } from "../format";
 
 interface Props {
   item: FeedItem;
-  onOpen: (id: string) => void;
+  /** 一起把被点的卡片元素交出去：跳页时要给它一个 view-transition-name */
+  onOpen: (id: string, el: HTMLElement) => void;
 }
 
 function hexAlpha(hex: string, alpha: number): string {
@@ -216,11 +217,11 @@ export default function Card({ item, onOpen }: Props) {
       role="button"
       tabIndex={0}
       aria-label={p.label + " · " + kindLabel + " · " + item.title}
-      onClick={() => onOpen(item.id)}
+      onClick={(e) => onOpen(item.id, e.currentTarget)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onOpen(item.id);
+          onOpen(item.id, e.currentTarget);
         }
       }}
       whileHover={{ y: -2 }}

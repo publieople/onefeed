@@ -139,3 +139,44 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 
 包体：416.4 kB（gzip 134.1 kB）。
 
+## 8. 跳页：卡片先放大再进详情（2026-11-18）
+
+点一张卡片时，页面不能「瞬间换掉」。这里用的是浏览器原生 View Transition：点下去先把旧页拍一张快照，等 React 换完 DOM 再让快照按 CSS 演出去。
+
+### 8.1 分组与层叠
+
+三个过渡名各管一块：
+
+- `of-card`：被点的卡片。旧快照 `scale(1) → scale(1.075)`、`opacity 1 → 0`，0.7s，`cubic-bezier(0.16,1,0.3,1)`（expo-out，与主题切换同一组参数）；新快照 `opacity:0` 直接不画。
+- `of-page`（只在返回时）：详情页整块。`scale(1) → scale(0.972)`、淡出，0.5s，分组时长 0.55s。
+- `root`：其余全部。旧页压在新页**上面**（`z-index: 2` 对 `1`），延迟 0.1s 开始、0.34s 淡出。
+
+旧页放在上层是有原因的：两页各自半透明叠着时，200ms 的截图整屏发白、两层文字互相穿透；反过来让旧页盖住新页淡出，看到的是「旧页退开、露出已经就位的新页」，没有白闪。卡片与详情退场组都抬到 `z-index: 3`，压在两层之上。
+
+### 8.2 时间表
+
+| 时间 | 发生什么 |
+| --- | --- |
+| 0–100ms | 旧页不动，卡片开始放大 |
+| 100–440ms | 旧页淡出，新页从下面露出来 |
+| 0–700ms | 卡片放大到 1.075 并淡到 0 |
+| 返回 | 详情页缩到 0.972 淡出，旧页同样退开 |
+
+### 8.3 降级
+
+不支持 View Transition（`document.startViewTransition` 不存在）或 `prefers-reduced-motion: reduce` 时，`runNavTransition` 直接执行 `apply()`：路由照常跳，没有过渡，也不会留下 `nav-vt` 类。
+
+### 8.4 四个坑
+
+1. **路由上不能留 `AnimatePresence mode="wait"`**。wait 会等旧页退场动画跑完才挂新页，快照拍到的还是旧页，过渡变成「旧页动两下、新页凭空出现」。改成单 `motion.div`，`initial={false}`（`location.state.vt` 为真时）。
+2. **`apply()` 必须 `flushSync`**。React 默认把更新放进微任务，View Transition 会在回调返回后立刻拍新快照，可能拍到旧 DOM。
+3. **主题切换的 `::view-transition-*` 选择器必须收进 `html.theme-vt`**。否则换肤的 `reveal-light` / `reveal-dark` 会套到跳页过渡上，扫屏形状与缩放同时出现。
+4. **快照期间要关掉逐元素过渡**（`.nav-vt * { transition: none !important }`），否则新旧两帧都会抓到颜色过渡的中间值。
+
+### 8.5 验收
+
+- `tests/test_nav_motion.py`（6 项静态）：分组、关键帧、缓动、`html.theme-vt` 作用域、`runNavTransition` 的降级分支、四处接线。
+- `probes/check_card_morph.py`（18 项行为）：点卡片走 VT 且地址进 `/item`、期间 `html.nav-vt`、`of-card` 组 0.7s 与 expo-out、旧卡片动画名与放大值、结束清类、返回走 VT、`of-page` 组 0.55s、`nav-page-down`、把 `startViewTransition` 抹掉后照常前进与返回、减少动效时 `__vt==0`、无 `pageerror`。
+- 截图：`design/card-morph-lift.png`（90ms）、`card-morph-enter.png`（200ms）、`card-morph-back.png`（返回中点）。
+
+
