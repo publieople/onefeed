@@ -35,6 +35,10 @@ DEFAULTS: dict[str, Any] = {
     # 多模型顺序表：按顺序试，前一个超时 / 报错 / 额度用光就换下一个。
     # 留空时退回上面那组单模型字段（兼容旧配置）。
     "ai_providers": [],
+    # Agent 化：模型拿工具自己搜、看结果、换词，而不是一次 JSON 计划 + 盲目 LIKE。
+    # 出问题一键关掉就退回旧路径；ONEFEED_AI_AGENT=0 也能关（环境变量优先）。
+    "ai_agent": True,
+    "ai_agent_max_tools": 6,
 }
 
 ENV_KEYS = {"registry_url": "ONEFEED_REGISTRY", "plugins_dir": "ONEFEED_PLUGINS_DIR"}
@@ -187,6 +191,21 @@ def validate(patch: dict[str, Any]) -> dict[str, Any]:
 
     if "ai_providers" in patch:
         out["ai_providers"] = _clean_providers(patch["ai_providers"])
+
+    if "ai_agent" in patch:
+        value = patch["ai_agent"]
+        if not isinstance(value, bool):
+            raise ValueError("ai_agent 必须是 true / false")
+        out["ai_agent"] = value
+
+    if "ai_agent_max_tools" in patch:
+        try:
+            value = int(patch["ai_agent_max_tools"])
+        except (TypeError, ValueError):
+            raise ValueError("ai_agent_max_tools 必须是整数") from None
+        if not (1 <= value <= 12):
+            raise ValueError("ai_agent_max_tools 必须在 1–12 之间")
+        out["ai_agent_max_tools"] = value
 
     return out
 

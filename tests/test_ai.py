@@ -84,6 +84,8 @@ def main() -> int:
     store = Store(db)
     store.upsert_items(seed(now))
     client = TestClient(create_app(store))
+    # 本脚本用假 key + monkeypatch 的 _chat 测旧路径；agent 开着会用真 provider 发请求
+    settings_mod.save({"ai_agent": False})
 
     # 1) 没配 key：rules 引擎
     st = client.get("/api/ai/status").json()

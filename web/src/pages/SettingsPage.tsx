@@ -494,7 +494,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             summary={
               <>
                 <span className="rounded-full border border-line px-1.5 py-0.5 text-[11px]">
-                  {ai?.engine === "llm" ? "模型在线" : "本地兜底"}
+                  {ai?.agent ? "Agent 在线" : ai?.engine === "llm" ? "模型在线" : "本地兜底"}
                 </span>
                 <span>{providerCount ? providerCount + " 个模型" : "还没配 key"}</span>
                 {ai?.active ? (

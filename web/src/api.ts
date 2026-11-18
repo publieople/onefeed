@@ -215,7 +215,7 @@ export interface DetailResponse {
 }
 
 export interface AiPlan {
-  mode: "find" | "browse";
+  mode: "find" | "browse" | "agent";
   platforms: string[];
   kinds: string[];
   since: number | null;
@@ -224,7 +224,7 @@ export interface AiPlan {
 }
 
 export interface AiResponse {
-  engine: "llm" | "rules";
+  engine: "llm" | "rules" | "agent";
   /** 这一轮实际回答的是哪个模型（规则解析时为空） */
   provider?: string;
   plan: AiPlan;
@@ -233,6 +233,9 @@ export interface AiResponse {
   count: number;
   suggestions: string[];
   understood: string;
+  /** Agent 路径：这次实际查了几次、花了多久 */
+  steps?: number;
+  ms?: number;
 }
 
 export interface AiProviderStatus {
@@ -254,6 +257,8 @@ export interface AiAttempt {
 
 export interface AiStatus {
   engine: "llm" | "rules";
+  /** 模型能自己调工具检索（走 Agent 路径）；关掉后回到「一次出计划」 */
+  agent?: boolean;
   model: string;
   base_url: string;
   configured: boolean;

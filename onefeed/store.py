@@ -11,13 +11,26 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 SCHEMA_VERSION = 4
+
+_CJK = re.compile(r"[\u3400-\u9fff]")
+
+
+@lru_cache(maxsize=256)
+def _word_boundary(term: str) -> re.Pattern[str]:
+    """英文/数字词按词边界匹配：AI 不该命中 said、main、rail。
+
+    LIKE %AI% 在 127 条 B 站数据里假命中 7 条（23%），这就是补它的那一刀。
+    """
+    return re.compile(r"(?<![0-9a-z])" + re.escape(term) + r"(?![0-9a-z])")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -321,6 +334,97 @@ class Store:
             self._decode_row(row)
         next_cursor = encode_cursor(rows[-1], sort) if has_more and rows else None
         return rows, next_cursor
+
+    # ------------------------------------------------------------ 检索
+    @staticmethod
+    def _hit_score(terms: Sequence[str], row: dict[str, Any]) -> float:
+        """一个条目对一组词的加权命中分：标题×3、正文×1、作者×0.2。
+
+        英文/数字词按词边界，中文按子串（中文没空格，边界无从谈起）。
+        同一个词在同一字段里只记一次，免得长正文靠复读刷分。
+        """
+        title = str(row.get("title") or "").lower()
+        text = str(row.get("text") or "").lower()
+        author = str(row.get("author") or "").lower()
+        score = 0.0
+        for raw in terms:
+            term = str(raw or "").strip().lower()
+            if not term:
+                continue
+            if _CJK.search(term):
+                hits = (term in title, term in text, term in author)
+            else:
+                pattern = _word_boundary(term)
+                hits = (bool(pattern.search(title)), bool(pattern.search(text)),
+                        bool(pattern.search(author)))
+            score += 3.0 * hits[0] + 1.0 * hits[1] + 0.2 * hits[2]
+        return score
+
+    def search_items(self, terms: Sequence[str] | None = None,
+                     platforms: Sequence[str] | None = None, kind: str | None = None,
+                     sort: str = "freshness", limit: int = 12,
+                     since: int | None = None, duration_min: int | None = None,
+                     duration_max: int | None = None, like_min: int | None = None,
+                     exclude: Sequence[str] | None = None) -> list[dict[str, Any]]:
+        """带权检索：先按硬条件取候选池，再按词打分。
+
+        与 page(keyword=...) 的区别：多个词是「或」不是整串 LIKE，标题命中
+        权重更高，时长 / 点赞是真过滤。terms 为空就退化成候选池（browse 用）。
+        """
+        limit = max(1, min(int(limit), 60))
+        pool = max(60, limit * 5)  # 池子太小会让打分失灵：好条目根本没进候选
+        where: list[str] = []
+        params: list[Any] = []
+        if platforms:
+            where.append(f"i.platform IN ({', '.join('?' for _ in platforms)})")
+            params.extend(platforms)
+        if kind:
+            where.append("i.kind = ?")
+            params.append(kind)
+        if since:
+            where.append(f"{FRESH_KEY} >= ?")
+            params.append(int(since))
+        if duration_min:
+            where.append("i.duration >= ?")
+            params.append(int(duration_min))
+        if duration_max:
+            where.append("i.duration <= ?")
+            params.append(int(duration_max))
+        if like_min:
+            where.append("i.like_count >= ?")
+            params.append(int(like_min))
+        if exclude:
+            ids = [str(x) for x in exclude][:200]
+            where.append(f"i.id NOT IN ({', '.join('?' for _ in ids)})")
+            params.extend(ids)
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        sql = f"SELECT i.* FROM items i {clause} ORDER BY {SORTS.get(sort, SORTS['freshness'])} LIMIT ?"
+        params.append(pool)
+        rows = [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+        for row in rows:
+            self._decode_row(row)
+        cleaned = [str(t).strip() for t in (terms or []) if str(t or "").strip()][:8]
+        if cleaned:
+            scored = [(self._hit_score(cleaned, row), row) for row in rows]
+            scored = [(s, r) for s, r in scored if s > 0]
+            # sorted 是稳定的：分数相同的仍按 SQL 的排序（新鲜度/热度）
+            scored.sort(key=lambda pair: pair[0], reverse=True)
+            return [row for _score, row in scored[:limit]]
+        return rows[:limit]
+
+    def cluster_items(self, cluster_id: str, exclude_id: str = "",
+                      limit: int = 6) -> list[dict[str, Any]]:
+        """同一件事的其它平台说法（cluster_id 由 smart.cluster 算出来）。"""
+        if not cluster_id:
+            return []
+        rows = self.conn.execute(
+            "SELECT i.* FROM items i WHERE i.cluster_id = ? AND i.id != ? "
+            f"ORDER BY {ENGAGE_KEY} DESC LIMIT ?",
+            (cluster_id, exclude_id, max(1, min(int(limit), 20)))).fetchall()
+        out = [dict(r) for r in rows]
+        for row in out:
+            self._decode_row(row)
+        return out
 
     @staticmethod
     def _decode_row(row: dict[str, Any]) -> None:

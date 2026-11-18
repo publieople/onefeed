@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn>=0.30",
     "quickjs>=1.19",
     "playwright>=1.45",
+    "pydantic-ai-slim[openai]==2.70.0",
 ]
 
 [dependency-groups]
@@ -21,6 +22,10 @@ dev = [
 # 仓库根目录就是工作目录，onefeed/ 与 plugin_runtime/ 直接可 import，
 # 不需要构建 wheel，所以按虚拟项目（virtual project）管理。
 package = false
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
 
 # 验收脚本自带 main()，用退出码判定；跑法：
 #   uv run python tests/run_all.py [--offline]

@@ -101,14 +101,37 @@ def _provider_list(conf: dict[str, Any] | None = None) -> list[dict[str, Any]]:
 _LAST: dict[str, Any] = {"at": 0, "provider": "", "ok": False, "error": "", "tried": []}
 
 
+def _agent_enabled(conf: dict[str, Any] | None = None) -> bool:
+    env = (os.environ.get("ONEFEED_AI_AGENT") or "").strip().lower()
+    if env in ("0", "false", "off", "no"):
+        return False
+    conf = conf if conf is not None else settings_mod.load()
+    return bool(conf.get("ai_agent", True))
+
+
+def _agent_available(conf: dict[str, Any] | None = None,
+                     chain: list[dict[str, Any]] | None = None) -> bool:
+    """agent 能不能上场：开关开着 + 有模型 + 依赖装得上。只查包存不存在，不 import（1.7s）。"""
+    if not _agent_enabled(conf):
+        return False
+    if not (chain if chain is not None else _provider_list(conf)):
+        return False
+    try:
+        from importlib.util import find_spec
+        return find_spec("pydantic_ai") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def status() -> dict[str, Any]:
-    chain = _provider_list()
+    conf = settings_mod.load()
+    chain = _provider_list(conf)
     head = chain[0] if chain else None
     return {
         "engine": "llm" if chain else "rules",
-        "model": head["model"] if head else str(settings_mod.load().get("ai_model") or DEFAULT_MODEL),
-        "base_url": head["base_url"] if head else str(
-            settings_mod.load().get("ai_base_url") or DEFAULT_BASE),
+        "agent": _agent_available(conf, chain),
+        "model": head["model"] if head else str(conf.get("ai_model") or DEFAULT_MODEL),
+        "base_url": head["base_url"] if head else str(conf.get("ai_base_url") or DEFAULT_BASE),
         "configured": bool(chain),
         "active": head["name"] if head else "",
         "providers": [_public(p) for p in chain],
@@ -446,6 +469,27 @@ def _decorate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def chat(store, message: str, history: list[dict[str, str]] | None = None,
          limit: int = 12, exclude: list[str] | None = None) -> dict[str, Any]:
+    """一句话找内容。优先走 agent（能自己搜、看结果、换词），失败静默退回旧路径。"""
+    conf = settings_mod.load()
+    chain = _provider_list(conf)
+    if _agent_available(conf, chain):
+        try:
+            from . import agent as agent_mod  # 懒加载：import pydantic_ai 要 1.7s
+            result = agent_mod.run(store, message, history=history, limit=limit,
+                                   exclude=exclude, chain=chain,
+                                   max_tools=int(conf.get("ai_agent_max_tools") or 6))
+            _LAST.update({"at": int(time.time()), "provider": result.get("provider", ""),
+                          "ok": True, "error": "", "tried": [p["name"] for p in chain]})
+            return result
+        except Exception as exc:  # noqa: BLE001 - 模型/工具/超时任何问题都退回旧路径
+            _LAST.update({"at": int(time.time()), "provider": "",
+                          "ok": False, "error": ("agent: " + str(exc or exc.__class__.__name__))[:200],
+                          "tried": [p["name"] for p in chain]})
+    return _chat_legacy(store, message, history=history, limit=limit, exclude=exclude)
+
+
+def _chat_legacy(store, message: str, history: list[dict[str, str]] | None = None,
+                 limit: int = 12, exclude: list[str] | None = None) -> dict[str, Any]:
     pl = plan(message, history)
     kind = pl["kinds"][0] if pl["kinds"] else None
     fetch = min(100, max(limit * 3, 24))

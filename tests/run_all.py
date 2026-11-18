@@ -15,6 +15,12 @@ import sys
 import time
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 OFFLINE_SKIP = {"test_store_real.py", "test_e2e_feed.py"}
 ORDER = [
     "test_store.py",
@@ -26,6 +32,7 @@ ORDER = [
     "test_media.py",
     "test_preflight.py",
     "test_ai.py",
+    "test_agent.py",
     "test_summary.py",
     "test_ui_lint.py",
     "test_theme_reveal.py",

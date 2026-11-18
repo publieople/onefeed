@@ -150,6 +150,12 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-fade">
                               <span className="rounded-full border border-line px-2 py-0.5">{turn.data.understood}</span>
                               <span>{turn.data.count} 条</span>
+                              {turn.data.engine === "agent" && turn.data.steps ? (
+                                <span className="text-fade/80">
+                                  自己查了 {turn.data.steps} 次
+                                  {turn.data.ms ? ` · ${(turn.data.ms / 1000).toFixed(1)}s` : ""}
+                                </span>
+                              ) : null}
                             </div>
                           ) : null}
                         </div>
@@ -195,7 +201,7 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                 {busy ? (
                   <div className="flex items-center gap-2 text-[12px] text-fade">
                     <Loader2 size={14} className="animate-spin" />
-                    正在找…
+                    Agent 正在本地库里翻…
                   </div>
                 ) : null}
               </div>
