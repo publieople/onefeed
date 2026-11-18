@@ -31,7 +31,10 @@ interface ItemBox extends Box {
 }
 
 interface Run {
+  /** 段首平台 id，用来和上一帧的段对上号 */
   key: string;
+  /** 渲染身份：只有它变了，遮罩才会被卸载重挂（也就是丢掉动画） */
+  id: string;
   items: RailItem[];
   box: Box;
 }
@@ -80,16 +83,14 @@ function RunMask({
   boxes,
   railW,
   reduce,
-  seed,
 }: {
   run: Run;
   boxes: Record<string, ItemBox>;
   railW: number;
   reduce: boolean;
-  seed?: Box;
 }) {
-  const x = useMotionValue(seed ? seed.x : run.box.x);
-  const w = useMotionValue(seed ? seed.w : run.box.w);
+  const x = useMotionValue(run.box.x);
+  const w = useMotionValue(run.box.w);
   const counter = useTransform(x, (value) => -value);
 
   useEffect(() => {
@@ -237,7 +238,7 @@ export default function TabRail({ items, value, onChange, label }: Props) {
     if (last && last.items[last.items.length - 1].id && railAdjacent(last.items[last.items.length - 1].id, item.id)) {
       last.items.push(item);
     } else {
-      runs.push({ key: item.id, items: [item], box });
+      runs.push({ key: item.id, id: "", items: [item], box });
     }
   }
   for (const run of runs) {
@@ -246,31 +247,52 @@ export default function TabRail({ items, value, onChange, label }: Props) {
     run.box = { x: first.x, y: first.y, w: tail.x + tail.w - first.x, h: first.h };
   }
 
-  // 断点出来的新胶囊从旧胶囊的方向长出来；消失的那条原地淡出
-  const signature = runs.map((run) => run.key + ":" + run.items.length).join("|");
+  // 身份：只有同一段沿用同一个身份，遮罩组件才不会被卸载，动画才有起点
+  const prevRuns = seen.current;
+  const used = new Set<string>();
+  for (const run of runs) {
+    const old = prevRuns.find((each) => each.key === run.key && !used.has(each.id));
+    if (old) {
+      run.id = old.id;
+      used.add(old.id);
+    }
+  }
+  // 只剩一段时（全部 ↔ 单个平台、单个平台之间）：让同一个遮罩平移过去
+  if (runs.length === 1 && !runs[0].id) {
+    const free = prevRuns.find((each) => !used.has(each.id));
+    if (free) {
+      runs[0].id = free.id;
+      used.add(free.id);
+    }
+  }
+  // 其余按横向重叠继承（合并、拆分），没得继承才用段首 id
+  for (const run of runs) {
+    if (run.id) continue;
+    const old = prevRuns.find((each) => {
+      if (used.has(each.id)) return false;
+      const overlap = Math.min(each.box.x + each.box.w, run.box.x + run.box.w) - Math.max(each.box.x, run.box.x);
+      return overlap > 4;
+    });
+    run.id = old ? old.id : run.key;
+    used.add(run.id);
+  }
+
+  // 消失的那条原地淡出
+  const signature = runs.map((run) => run.id + ":" + run.items.length).join("|");
   useEffect(() => {
     const prev = seen.current;
-    const live = new Set(runs.map((run) => run.key));
-    const gone = prev.filter((run) => !live.has(run.key));
+    const live = new Set(runs.map((run) => run.id));
+    const gone = prev.filter((run) => !live.has(run.id));
     seen.current = runs;
     if (!gone.length) return;
     const stamp = Date.now();
-    setGhosts((old) => [...old, ...gone.map((run) => ({ gid: run.key + "@" + stamp, run, box: run.box }))]);
+    setGhosts((old) => [...old, ...gone.map((run) => ({ gid: run.id + "@" + stamp, run, box: run.box }))]);
     const timer = window.setTimeout(() => {
       setGhosts((old) => old.filter((each) => !each.gid.endsWith("@" + stamp)));
     }, 260);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
-
-  const seeds = (run: Run): Box | undefined => {
-    for (const old of seen.current) {
-      if (old.key === run.key) return undefined;
-      const overlap = Math.min(old.box.x + old.box.w, run.box.x + run.box.w) - Math.max(old.box.x, run.box.x);
-      if (overlap > 4) return old.box;
-    }
-    return undefined;
-  };
 
   const bring = (target: string) => {
     requestAnimationFrame(() => {
@@ -351,7 +373,7 @@ export default function TabRail({ items, value, onChange, label }: Props) {
         ))}
 
         {runs.map((run) => (
-          <RunMask key={run.key} run={run} boxes={boxes} railW={railW} reduce={reduce} seed={seeds(run)} />
+          <RunMask key={run.id} run={run} boxes={boxes} railW={railW} reduce={reduce} />
         ))}
 
         {ghosts.map((ghost) => (
