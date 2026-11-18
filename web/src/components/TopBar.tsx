@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { LayoutGrid, Moon, RefreshCw, Settings, Sun } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { Health, RunState } from "../api";
-import { applyTheme, currentTheme, type Theme } from "../theme";
+import { applyTheme, currentTheme, runThemeTransition, type Theme } from "../theme";
 
 interface Props {
   health: Health | null;
@@ -20,8 +21,11 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
 
   const flipTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    applyTheme(next);
+    // 换色和图标都要在同一帧里换掉，View Transition 抓到的「新页面」才是目标主题
+    runThemeTransition(() => {
+      applyTheme(next);
+      flushSync(() => setTheme(next));
+    });
   };
 
   return (

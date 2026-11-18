@@ -197,3 +197,59 @@ button:active:not(:disabled) {
   color: rgb(var(--c-ink));
   background: rgb(var(--c-wash));
 }
+
+/* 换主题：View Transitions 的对角扫过。
+   旧页面原地压在最底层，新页面以一条斜带从一侧扫进来；0.7s，expo-out。
+   扫入方向随目标主题镜像：去暗色从上方压下来，去亮色从右下角推上去。 */
+.theme-vt,
+.theme-vt *,
+.theme-vt *::before,
+.theme-vt *::after {
+  transition: none !important;
+}
+
+::view-transition-group(root) {
+  animation-duration: 0.7s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+::view-transition-old(root) {
+  z-index: -1;
+  animation: none;
+}
+
+::view-transition-new(root) {
+  animation-name: reveal-light;
+}
+
+html.dark::view-transition-old(root) {
+  z-index: -1;
+  animation: none;
+}
+
+html.dark::view-transition-new(root) {
+  animation-name: reveal-dark;
+}
+
+@keyframes reveal-light {
+  0% {
+    clip-path: polygon(171% 50%, 50% 171%, 50% 171%, 171% 50%);
+    opacity: 0.5;
+  }
+  100% {
+    clip-path: polygon(171% 50%, 50% 171%, -50% 71%, 50% -71%);
+    opacity: 1;
+  }
+}
+
+@keyframes reveal-dark {
+  0% {
+    clip-path: polygon(50% -71%, -50% 71%, -50% 71%, 50% -71%);
+    opacity: 0.5;
+  }
+  100% {
+    clip-path: polygon(50% -71%, -50% 71%, 50% 171%, 171% 50%);
+    opacity: 1;
+  }
+}
+

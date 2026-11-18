@@ -41,3 +41,50 @@
 - 亮/暗两套信息流、暗色设置页、暗色 B 站详情页截图存 `design/feed-light.png`、`design/feed-dark.png`、`design/settings-dark.png`、`design/detail-dark.png`。
 - 行为门禁覆盖：点主题按钮后 `html.dark` 出现、localStorage 写入、刷新后保留（`probes/check_interactions.py`）。
 - 浏览器实测细节：切换后 `color-scheme` 与 meta theme-color 同步；暗色下骨架 shimmer、AI 面板、保存条均正常。
+
+## 5. 切换动效：整页对角扫过（照 DeepWiki 的做法）
+
+DeepWiki 切主题不是淡入淡出，而是让**新主题以一条斜带扫进来**，旧画面静止压在下面。0.7 秒，去暗色从上往下压，去亮色从右下往左上推。
+
+### 5.1 它原本怎么写
+
+切换按钮（Next.js chunk `6375-7e0e75eb09fc9abe.js`，module 96375）就一行关键逻辑：
+
+```js
+onClick={() => { document.startViewTransition
+  ? document.startViewTransition(() => { setTheme("dark" === e ? "light" : "dark") })
+  : setTheme("dark" === e ? "light" : "dark") }}
+```
+
+扫过效果全部在 CSS 里：
+
+```css
+::view-transition-group(root) { animation-duration: .7s; animation-timing-function: var(--expo-out) }
+::view-transition-new(root) { animation-name: reveal-light }
+::view-transition-old(root) { z-index: -1; animation: none }
+.dark::view-transition-new(root) { animation-name: reveal-dark }
+
+@keyframes reveal-dark {           /* 去暗色：从左上方一条斜带压下来 */
+  0%   { clip-path: polygon(50% -71%, -50% 71%, -50% 71%, 50% -71%); opacity: .5 }
+  to   { clip-path: polygon(50% -71%, -50% 71%, 50% 171%, 171% 50%); opacity: 1 }
+}
+@keyframes reveal-light {          /* 去亮色：从右下角往左上推 */
+  0%   { clip-path: polygon(171% 50%, 50% 171%, 50% 171%, 171% 50%); opacity: .5 }
+  to   { clip-path: polygon(171% 50%, 50% 171%, -50% 71%, 50% -71%); opacity: 1 }
+}
+```
+
+一条它自己的小事：`--expo-out` 在整份 CSS 里只被引用、从没定义，浏览器实际回落到 `ease`。我们照它的本意取 expo-out（`cubic-bezier(.16, 1, .3, 1)`）。
+
+### 5.2 我们怎么接
+
+- `theme.ts` 的 `runThemeTransition(apply)`：系统开了「减少动态效果」或浏览器不支持 View Transition，直接 `apply()`；否则给 `<html>` 加 `theme-vt` 类 → `startViewTransition(apply)` → 动画结束清类。
+- `theme-vt` 的作用是**临时关掉所有元素自己的颜色过渡**。不关的话新快照抓到的是过渡起点色，扫进来的会是一片半旧不新的灰。
+- `TopBar.tsx` 里 `applyTheme(next)` 后跟 `flushSync(() => setTheme(next))`：换色和日/月图标必须在同一帧，否则图标会慢半拍、出现在扫过之后。
+- 动画只动 `clip-path` 与 `opacity`，不碰布局；旧画面 `z-index: -1` 固定不动，所以扫过时看不到任何元素位移。
+
+### 5.3 怎么验
+
+- `tests/test_theme_reveal.py`（5 项，静态回归）：CSS 里两组 keyframes 与 polygon 都在、`theme-vt` 抑制规则在、`runThemeTransition` 有降级分支、TopBar 用了 `flushSync`。已接进 `tests/run_all.py` 的 ORDER。
+- `probes/check_theme_reveal.py`（7 项，真浏览器）：包一层 `startViewTransition` 计数、点按钮、读 `::view-transition-group(root)` 的 `animationDuration` 必须是 0.7s、`html.dark` 与 localStorage 落位、来回都走 VT。中途截图 `design/theme-reveal-light-to-dark.png`、`design/theme-reveal-dark-to-light.png`。
+- 想调手感：时长在 `theme.css` 的 `::view-transition-group(root)`；曲线换 `cubic-bezier` 的最后两个数；两组 polygon 决定斜带的角度与方向，改坐标即可。

@@ -28,6 +28,7 @@ ORDER = [
     "test_ai.py",
     "test_summary.py",
     "test_ui_lint.py",
+    "test_theme_reveal.py",
     "test_entry.py",
     "test_e2e_feed.py",
 ]
