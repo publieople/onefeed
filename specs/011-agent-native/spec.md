@@ -1,6 +1,6 @@
 # 011 · Agent 原生应用：从「会搜」到「会做」
 
-状态：P0 已落地（2026-11-18，T50 68 项离线测试 + 真实模型 SSE 冒烟通过）；P1–P3 未开始
+状态：P0 + P1 已落地（2026-11-18；T50 71 项、T51 50 项离线测试 + 真实模型 SSE 冒烟通过）；P2–P3 未开始
 关联：006-ai（双引擎）、010-ai-agent（可回头的检索）、009-ai-summary（详情页总结）、003-host-app（刷新/进度）
 
 ## 1. 010 做完之后还差什么
@@ -154,8 +154,8 @@ CREATE TABLE item_marks (                                    -- 收藏/已读/�
 
 | 阶段 | 内容 | 工作量 | 可验收的样子 |
 | --- | --- | --- | --- |
-| P0 垂直切片 | actions.py（11 个动作）+ runtime SSE + AgentConsole 轨迹 + save_item 落库 | 1 天 | 一句话 → 切筛选/刷新/挑 3 条/存起来，全程可见 |
-| P1 长任务 | summarize_item/batch、export_markdown、确认条、撤销、run 回放 | 1.5 天 | 「把这 3 条总结成简报存成 md」能跑完 |
+| P0 垂直切片 ✅ | actions.py（11 个动作）+ runtime SSE + AgentConsole 轨迹 + save_item 落库 | 1 天 | 一句话 → 切筛选/刷新/挑 3 条/存起来，全程可见 |
+| P1 长任务 ✅ | summarize_item/batch、export_markdown、设置页撤销入口、检索硬上限 | 1.5 天 | 「把这 3 条总结成简报存成 md」能跑完 |
 | P2 记忆与主动 | item_marks 全量（已读/隐藏）+ prefs + 每日简报 + 收件箱 | 1 天 | 第二天早上有简报；「别给我看 X」生效 |
 | P3 增强 | 同题聚合视图（cluster_id）、语义检索（本地 embedding）、语音输入 | 2 天+ | 「同一件事六个平台怎么说」 |
 
@@ -193,17 +193,17 @@ P0 先做**垂直切片**而不是「先把 14 个动作全写完」：切片打
 | 层 | 文件 | 内容 |
 | --- | --- | --- |
 | 存储 | `onefeed/store.py` | SCHEMA v5：agent_threads / agent_runs / agent_steps / item_marks；`page()/search_items()/get_item()` LEFT JOIN 标记列，hidden 默认不进流；ensure_thread / start_agent_run / finish_agent_run / add_agent_step / get_agent_run / recent_agent_runs / get_mark / mark_item / saved_items |
-| 动作 | `onefeed/actions.py` | 11 个动作（L0 4 / L1 4 / L2 2 / L3 1）；call() 做类型归一化、L3 未确认抛 ConfirmRequired、结果带 _ms；apply_undo() 支持 mark / marks |
-| 运行器 | `onefeed/agent_runtime.py` | start/run 生命周期、预算（12 步 / 90s / 10 次工具）、need_confirm 等待与放行、取消、事件写库、SSE（首帧 retry + 15s 心跳 + Last-Event-ID）、_hints() 把 smart.parse_query 读出的条件贴进 prompt |
+| 动作 | `onefeed/actions.py` | P0 11 个动作（L0 4 / L1 4 / L2 2 / L3 1），P1 补齐 summarize_item / summarize_batch / export_markdown（共 14）；call() 做类型归一化、L3 未确认抛 ConfirmRequired、结果带 _ms；apply_undo() 支持 mark / marks / export |
+| 运行器 | `onefeed/agent_runtime.py` | start/run 生命周期、预算（12 步 / 120s / 10 次工具，其中检索类最多 4 次）、need_confirm 等待与放行（不超过本轮 deadline）、取消、事件写库、SSE（首帧 retry + 15s 心跳 + Last-Event-ID）、_hints() 把 smart.parse_query 读出的条件贴进 prompt |
 | API | `onefeed/api.py` | POST /agent/runs（202）、GET /agent/runs/{id}/events（SSE）、GET /agent/runs/{id}（回放）、confirm / cancel、GET /agent/runs、GET /agent/actions、POST /agent/undo、GET /agent/saved、POST /agent/mark |
 | 前端 | `web/src/api.ts`、`web/src/components/AgentConsole.tsx`、`AiDock.tsx` | agentStart/agentStream/agentConfirm/agentCancel/agentMark/agentSaved/agentUndo/agentReplay；轨迹（step/tool/action/need_confirm/error）；done 直接用 SSE 里的 items，不再二次请求；ui_filter/ui_open_item 驱动 feed 与详情；409 回落到旧 chat |
-| 测试 | `tests/test_agent_runtime.py` | T50 共 68 项：v5 迁移、11 动作 schema、归一化、undo、L3 确认、FakeRunner 刷新增量、脚本模型多步、幽灵 id 丢弃、预算、模型异常、HTTP 全路由、SSE 续传、回放一致、plan.since 透传 |
+| 测试 | `tests/test_agent_runtime.py`、`tests/test_agent_tasks.py` | T50 共 71 项（含检索硬上限）：v5 迁移、动作 schema、归一化、undo、L3 确认、FakeRunner 刷新增量、脚本模型多步、幽灵 id 丢弃、预算、模型异常、HTTP 全路由、SSE 续传、回放一致、plan.since 透传；T51 共 50 项：14 动作注册、总结缓存与 force、批量截断与跳过、导出 md 内容/撤销/越界保护、FunctionModel 三步、活动列表 events |
 
 真实模型冒烟（本地库 800+ 条，问题「今天 B 站有哪些 AI 相关内容值得看的」）：`202 → 20–25 个事件（run_start/think/feed_stats/3–5×search_items/get_item/ui_filter/delta/done）→ done 带 7–8 条与 plan → GET 回放事件数与实时一致`，单轮 18–29s。
 
 ### 与方案的差异
 
-- 动作是 11 个不是 14：summarize_item / summarize_batch / export_markdown 推到 P1。
+- P0 只上 11 个动作：summarize_item / summarize_batch / export_markdown 在 P1 补齐（现共 14 个）。
 - P0 就把 mark_read（已读/隐藏）一起做了；确认条只做了 L3 必需形态（允许 / 不用），「本次会话允许」与线程历史 UI 留 P1。
 - 预算默认值从 010 的 6 改为 10，与 §5 一致（010 spec 里的 6 是历史值）。
 - plan.since 取「最近一次带时间条件的检索」：模型中途放宽到不限时就是 0，不假装还在按今天筛；前端只在 since 落在 36h 内时显示「今天」。
@@ -212,17 +212,52 @@ P0 先做**垂直切片**而不是「先把 14 个动作全写完」：切片打
 ### 验收标准状态
 
 - AC-1 ✅ 真实一轮里出现检索 + UI 动作两类，轨迹每步可见。
-- AC-2 ✅ save_item / mark_read 都带 audit 行与 undo_token，T50 断言撤销后回原值。
+- AC-2 ✅ save_item / mark_read / export_markdown 都带 audit 行与 undo_token；T50 断言标记撤销后回原值，T51 断言导出撤销真删文件、越界 token 不删。
 - AC-3 ✅ 未确认 ConfirmRequired；确认后 FakeRunner 返回增量；拒绝路径由 T50 覆盖。
 - AC-4 ✅ start() 先落 run_start 再起线程（T50 断言返回前已落库）；断线重连按 Last-Event-ID。
 - AC-5 ✅ 预算用尽发 budget note + 部分结果 + done，不抛 500。
 - AC-6 ✅ 回放与实时同源（agent_steps），T50 断言事件数一致。
 - AC-7 ✅ 关开关走旧 chat，前端 409 回落，不 import pydantic_ai。
-- AC-8 ✅ T50 68 项 + test_ui_lint 通过；全量离线 17 组全过。
+- AC-8 ✅ T50 71 项 + T51 50 项 + test_ui_lint 通过；全量离线 18 组全过。
 
 ### 已知遗留（P1）
 
 - ~~每次超预算都会追加一条 budget note~~ 已修：模型连着重试也只提示一次。
-- 「本次会话允许」、确认超时文案、撤销入口（设置页 Agent 活动）未做。
-- 线程历史 / 每日简报 / 汇总动作未做（P1–P2）。
+- 「本次会话允许」（一次确认放行同类动作）与线程历史 UI 仍未做。
+- 每日简报、prefs、同题聚合、语义检索未做（P2–P3）。
 
+
+## 14. P1 实现记录（2026-11-18）
+
+### 新增动作（三个，动作表补齐到 14 个）
+
+| 动作 | 级别 | 参数 | 行为 |
+| --- | --- | --- | --- |
+| `summarize_item` | L0→缓存 | id / force | 先读 `summaries` 表，命中且 tldr 非空直接回；否则 `summary_mod.build()` 后写回。模型不可用时 summary.py 自身 `_rule_summary` 兜底，不抛。 |
+| `summarize_batch` | L0 | ids[]（≤6）/ style（brief/outline）/ budget_sec（5–70，默认 55） | 顺序逐条总结；过了 deadline 的条目进 `skipped[{id,error}]` 而不是让整批失败；返回 summaries / count / skipped。 |
+| `export_markdown` | L2 | ids[]（≤8）/ title / style / budget_sec | 逐条总结后渲染 md 写 `.onefeed/exports/<YYYYmmdd-HHMMSS>-<slug>.md`，返回 path / count / bytes / skipped；undo_token = `{kind:"export", path:…}`。 |
+
+导出目录取 `Path(store.path).parent / "exports"`（`Ctx.exports_dir` 由 runtime 注入）。`apply_undo` 的 export 分支会把目标 `resolve()` 后校验 `parent == exports root` 且后缀 `.md`，越界或非 md 一律拒绝——撤销接口不接任意路径删除。
+
+### 行为修复（真模型冒烟逼出来的）
+
+1. **确认等待吃穿总预算**：模型在总结完之后自作主张调 `refresh_feed`，need_confirm 干等 60s，撞 90s 上限整轮降级。→ `Deps.deadline` 记录本轮硬截止，`_await_confirm` 的等待取 `min(timeout, deadline - now - 10s)`。
+2. **检索把动作预算花光**：8 次 search/get 用掉 10 次额度，等要 export 时已无预算。→ 两道闸：instructions 里写死「检索类加起来最多 4 次」，`_run_action` 里 `MAX_SEARCHES = 4` 确定性拦截（第 5 次起回 ok=False 与「用已拿到的做正事」，轨迹里留一条「检索够了，先用手上这些」的 note）。
+3. **预算从 90s 提到 120s**：单条真实总结 15s 上下，两条 + 导出在 90s 里太紧。
+4. **steps 双计数**：P0 遗留在锁内锁外各加一次 `deps.calls`，轨迹上 2 次工具显示成 4。已删锁外那行。
+5. **`summary.build(host=None)` 崩**：`host.summary_source` 无条件调用，异常文本会写进 caveat。→ 先判 `host is not None`。
+
+### 撤销入口（设置页）
+
+`GET /api/agent/runs?events=1` 带回每轮的事件流水，设置页新增「Agent 活动」段：最近 8 轮的时间、输入、状态、回复，以及每个带 `undo_token` 的动作一条按钮（撤销收藏 / 撤销标记 / 删掉导出的文件）。点击走 `POST /api/agent/undo`，成功后刷新列表与全局数据。默认请求不带事件（一轮几十条），只有这个页面显式要。
+
+### 真模型冒烟（问题：「挑两条今天 B 站讲 AI 的视频，各写一句总结，然后导出成一份 md 简报」）
+
+`steps=7 · 29.6s · tokens 64955 · actions=[summarize_batch, export_markdown]`，产出 35 行 md（`#` 标题、生成时间、每条的小标题/平台/原链接/要点），action 事件带 export token，reply 里给出路径。同题前两轮分别以「确认超时」和「检索用满预算」失败，是本轮两处修复的来源。
+
+### 仍未做
+
+- 确认条「本次会话允许」一次放行同类动作（现在每次 L3 都要点一次）。
+- 线程历史 UI（多轮对话的左侧列表）；现在只有活动列表。
+- 每日简报、prefs 记忆、同题聚合、语义检索（P2–P3）。
+- 批量总结是串行的：6 条最坏约 90s，靠 budget_sec 截断而不是并发。并发会打满模型供应商的 RPM，暂不做。

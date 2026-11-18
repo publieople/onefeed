@@ -608,8 +608,9 @@ class Store:
             data["events"] = [self._decode_step(dict(r)) for r in rows]
         return data
 
-    def recent_agent_runs(self, thread_id: str | None = None,
-                          limit: int = 20) -> list[dict[str, Any]]:
+    def recent_agent_runs(self, thread_id: str | None = None, limit: int = 20,
+                          steps: bool = False) -> list[dict[str, Any]]:
+        """最近跑过的 run。steps=True 时顺带把每轮的事件读出来（设置页活动列表要拿 undo_token）。"""
         limit = max(1, min(int(limit), 100))
         if thread_id:
             rows = self.conn.execute(
@@ -618,7 +619,14 @@ class Store:
         else:
             rows = self.conn.execute(
                 "SELECT * FROM agent_runs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(r) for r in rows]
+        out = [dict(r) for r in rows]
+        if steps:
+            for run in out:
+                events = self.conn.execute(
+                    "SELECT seq, kind, name, payload, undo_token, at FROM agent_steps "
+                    "WHERE run_id = ? ORDER BY seq", (run["id"],)).fetchall()
+                run["events"] = [self._decode_step(dict(r)) for r in events]
+        return out
 
     def get_mark(self, item_id: str) -> dict[str, Any]:
         row = self.conn.execute("SELECT * FROM item_marks WHERE item_id = ?",

@@ -4,7 +4,7 @@
 
 五件事必须成立：
 1. store v5：迁移到 5、收藏/已读落库、hidden 条目默认不进流、saved 列表；
-2. 动作总线：11 个动作有 schema，参数被归一化（B站→bilibili、最热→engagement），
+2. 动作总线：动作都有 schema，参数被归一化（B站→bilibili、最热→engagement），
    L2 带 undo 且能撤销，L3 没确认时抛 ConfirmRequired；
 3. 运行器：脚本模型跑出「工具 → 动作 → 结论」，事件按 seq 落库，回放与 SSE 同源；
    模型编的 id 被丢掉；预算用尽返回部分结果；
@@ -128,7 +128,7 @@ def main() -> int:
 
     # ---------------------------------------------------------------- 2) 动作总线
     catalog = act_mod.catalog()
-    check(len(catalog) >= 11, "动作白名单 ≥ 11 个")
+    check(len(catalog) >= 14, "动作白名单 ≥ 14 个")
     check(all(a["params"] is not None for a in catalog), "每个动作都有参数 schema")
     ctx = act_mod.Ctx(store=store, run_id="probe")
     events: list[tuple] = []
@@ -257,6 +257,28 @@ def main() -> int:
     par_steps = [e for e in store.get_agent_run(res_par["run_id"])["events"]
                  if e["kind"] == "step" and e["name"] == "budget"]
     check(len(par_steps) <= 1, "并发超预算只提示一次")
+
+    # 检索上限：模型连搜 6 次，只放前 4 次过去，并留一条提示
+    def scripted_many(messages, info):
+        returned = [p for m in messages for p in getattr(m, "parts", [])
+                    if isinstance(p, ToolReturnPart)]
+        if len(returned) < 6:
+            return ModelResponse(parts=[ToolCallPart("search_items",
+                                                     {"terms": ["AI", "GPT", "LLM", "模型", "推理", "编程"]})])
+        return ModelResponse(parts=[answer_part(info, "搜够了。", [])])
+
+    res_many = rt.run(store, "一直搜", chain=CHAIN,
+                      model=FunctionModel(scripted_many), timeout=30)
+    many_events = store.get_agent_run(res_many["run_id"])["events"]
+    blocked = [e for e in many_events
+               if e["kind"] == "tool" and e["name"] == "search_items"
+               and e["data"].get("ok") is False]
+    check(len(blocked) >= 1, "超过检索上限的调用被挡下")
+    check(any(e["kind"] == "step" and e["name"] == "search_cap" for e in many_events),
+          "挡下时留一条「检索够了」的提示")
+    check(sum(1 for e in many_events if e["kind"] == "tool"
+              and e["name"] == "search_items") == 6,
+          "每次调用都有 tool 事件（挡下的也记）")
 
     # 模型抛错 → error 事件 + 兜底，不抛
     def boom(messages, info):

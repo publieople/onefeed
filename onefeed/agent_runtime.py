@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterator
 
 from pydantic_ai import Agent, RunContext
@@ -22,20 +23,28 @@ from . import smart
 from .agent import Answer, Pick, _messages, _models, _previous, _with_timeout
 
 MAX_STEPS = 12
-MAX_SECONDS = 90.0
+MAX_SECONDS = 120.0
 MAX_TOOL_CALLS = 10
 
 INSTRUCTIONS = """你是 OneFeed 的助手，能操作这个应用，不只是查库。
 
 规矩：
 1. 先想清楚要做几件事，再动手：找内容用 search_items，看细节用 get_item，
-   要改界面用 ui_*，要存起来用 save_item。
-2. 一次 run 最多 10 次动作、12 步、90 秒。别为了凑满预算反复搜同样的词。
+   要改界面用 ui_*，要存起来用 save_item，要总结用 summarize_item / summarize_batch，
+   要成文件用 export_markdown。
+2. 一次 run 最多 10 次动作、12 步、120 秒。检索类动作（search/get/similar/feed_stats）
+   加起来最多 4 次：拿到 3-5 条能用的就停下来做正事，不要反复换词搜同一个东西。
+   单次总结可能要十几秒：一次只总结你真正要用的几条（批量上限 6），把时间留给 summarize 和 export。
 3. 只能挑检索结果里出现过的 id，原样抄，不许编。宁可少给，不许凑数。
 4. 用户提到平台/时间/时长/点赞，要么真的生效，要么在 reply 里说清没做到哪条。
 5. 结果少（≤2 条）就说明为什么少：是库里没有、条件太窄，还是时间太新。
 6. reply 是给人看的一句话（≤60 字），不要复述步骤；picks 按相关度排，最多 8 条。
-7. 用户让你「存起来 / 收藏」就直接调 save_item；让你「切到某平台看」就调 ui_filter。"""
+7. 用户让你「存起来 / 收藏」就直接调 save_item；让你「切到某平台看」就调 ui_filter。
+8. 用户要「简报 / 总结成 md / 导出」是两步活：summarize_item（1 条）或 summarize_batch（多条）
+   → 紧接着 export_markdown。中间不要再搜一遍、不要再刷新采集；回报里给出文件路径即可，
+   别把正文念一遍。总结失败或某条没正文时，说清是哪条没成，不要编内容。
+9. 用户没明说「刷新 / 更新 / 再抓一次」，就不要调 refresh_feed：它会等确认、耽误几十秒。
+   检索结果不够时，先换词、放宽条件，或在 reply 里说明。"""
 
 
 # ---------------------------------------------------------------- 运行状态
@@ -94,6 +103,9 @@ class Deps:
     looked: list[str] = field(default_factory=list)
     query: dict[str, Any] = field(default_factory=dict)
     budget_hit: bool = False
+    deadline: float = 0.0  # 本轮整段的硬截止（time.time() 基准），确认等待不能吃穿它
+    searches: int = 0  # 检索类动作已用次数；上限固定，避免模型把预算全花在反复搜
+    search_hit: bool = False
 
     def remember(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
@@ -165,6 +177,10 @@ def _budget_error(deps: Deps, why: str) -> dict[str, Any]:
 
 _ACTION_LOCK = threading.Lock()
 
+# 翻库类动作单轮上限：总结/导出才是正事，别让模型把 10 次预算全用来换词重搜
+SEARCH_FAMILY = ("search_items", "get_item", "similar_items", "feed_stats")
+MAX_SEARCHES = 4
+
 
 def _run_action(deps: Deps, writer: EventWriter, name: str,
                 args: dict[str, Any]) -> dict[str, Any]:
@@ -177,11 +193,26 @@ def _run_action(deps: Deps, writer: EventWriter, name: str,
             deps.budget_hit = True
         else:
             deps.calls += 1
+        search_over = (not over and name in SEARCH_FAMILY
+                       and deps.searches >= MAX_SEARCHES)
+        first_search_note = search_over and not deps.search_hit
+        if search_over:
+            deps.search_hit = True
+        elif not over and name in SEARCH_FAMILY:
+            deps.searches += 1
     if over:
         if first_note:
             writer.emit("step", "budget", {"title": "动作次数用满", "kind": "note"})
         return _budget_error(deps, "动作次数")
-    deps.calls += 1
+    if search_over:
+        if first_search_note:
+            writer.emit("step", "search_cap", {"title": "检索够了，先用手上这些", "kind": "note"})
+        writer.emit("tool", name, {"ok": False, "ms": 0,
+                                   "args": json.dumps(args, ensure_ascii=False)[:300],
+                                   "result": f"检索次数用满（{MAX_SEARCHES} 次）"})
+        return {"ok": False,
+                "error": f"检索类动作已经用了 {MAX_SEARCHES} 次，够用了："
+                         f"直接用已拿到的条目做 summarize/export/回答。"}
     started = time.time()
     preview = json.dumps(args, ensure_ascii=False)[:300]
     writer.emit("step", name, {"title": _title_for(name, args), "kind": "tool",
@@ -201,7 +232,7 @@ def _run_action(deps: Deps, writer: EventWriter, name: str,
         deps.remember(rows)
         if name == "search_items" and result.get("query"):
             deps.query = result["query"]
-    if name.startswith("ui_") or name in ("save_item", "mark_read"):
+    if name.startswith("ui_") or name in ("save_item", "mark_read", "export_markdown"):
         deps.applied.append({"name": name, "ms": ms, "ok": bool(result.get("ok", True))})
     writer.emit("tool", name, {"ok": bool(result.get("ok", True)), "ms": ms,
                                "args": preview,
@@ -234,6 +265,14 @@ def _title_for(name: str, args: dict[str, Any]) -> str:
         return f"标记 {args.get('state')}"
     if name == "refresh_feed":
         return "触发采集刷新"
+    if name == "summarize_item":
+        return f"总结 {args.get('id')}"
+    if name == "summarize_batch":
+        count = len(args.get("ids") or [])
+        return f"批量总结 {count} 条"
+    if name == "export_markdown":
+        title = str(args.get("title") or "").strip()
+        return f"导出 md{('「' + title + '」') if title else ''}"
     return name
 
 
@@ -248,7 +287,11 @@ def _await_confirm(deps: Deps, writer: EventWriter, need: act_mod.ConfirmRequire
                                              "action": need.action,
                                              "summary": need.summary,
                                              "risk": need.risk})
-    event.wait(timeout)
+    # 等人点确认不能把整轮预算吃光：最多等到「硬截止前 10 秒」，没算截止就用原值
+    wait = timeout
+    if deps.deadline:
+        wait = max(5.0, min(timeout, deps.deadline - time.time() - 10.0))
+    event.wait(wait)
     state.pending.pop(confirm_id, None)
     allowed = bool(state.decisions.pop(confirm_id, False))
     if allowed:
@@ -330,6 +373,24 @@ def build_agent(model: Any, deps: Deps, writer: EventWriter, max_tools: int) -> 
     def refresh_feed(ctx: RunContext[Deps], platforms: list[str] | None = None) -> dict[str, Any]:
         """触发一次采集并等它跑完（几十秒）。会打外网，需要用户确认。"""
         return _run_action(deps, writer, "refresh_feed", {"platforms": platforms})
+
+    @agent.tool
+    def summarize_item(ctx: RunContext[Deps], id: str, force: bool = False) -> dict[str, Any]:
+        """总结一条（一句话 + 要点）；有缓存先读缓存，force=true 重算。"""
+        return _run_action(deps, writer, "summarize_item", {"id": id, "force": force})
+
+    @agent.tool
+    def summarize_batch(ctx: RunContext[Deps], ids: list[str],
+                        style: str = "brief") -> dict[str, Any]:
+        """一次总结多条（≤6），style=brief/outline；没跑完的看 skipped。"""
+        return _run_action(deps, writer, "summarize_batch", {"ids": ids, "style": style})
+
+    @agent.tool
+    def export_markdown(ctx: RunContext[Deps], ids: list[str], title: str = "",
+                        style: str = "brief") -> dict[str, Any]:
+        """把几条的总结写成 md 文件（≤8 条），返回路径。撤销=删文件。"""
+        return _run_action(deps, writer, "export_markdown",
+                           {"ids": ids, "title": title, "style": style})
 
     return agent
 
@@ -423,10 +484,12 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
         writer.emit("run_start", "run_start",
                     {"run_id": state.run_id, "input": message, "model": model_name})
     deps = Deps(ctx=act_mod.Ctx(store=store, run_id=state.run_id, thread_id=state.thread_id,
-                                runner=runner),
+                                runner=runner,
+                                exports_dir=Path(store.path).parent / act_mod.EXPORT_DIR_NAME),
                 store=store, limit=max(1, int(limit)), exclude=tuple(exclude or ()))
     deps.max_tool_calls = max(1, min(int(max_tools), 20))
     deps.ctx.emit = writer.emit
+    deps.deadline = started + float(timeout)
     answer: Answer | None = None
     error_text = ""
     try:

@@ -393,6 +393,28 @@ export function agentReplay(runId: string): Promise<AgentReplay> {
   return getJSON("/api/agent/runs/" + encodeURIComponent(runId));
 }
 
+/** 设置页「Agent 活动」用的一行：跑过什么、结果如何、哪些动作还能撤销 */
+export interface AgentRunRow {
+  id: string;
+  thread_id: string;
+  status: string;
+  input: string;
+  model: string;
+  reply: string;
+  error: string;
+  steps: number;
+  ms: number;
+  tokens: number;
+  created_at: number;
+  finished_at: number;
+  events?: AgentEvent[];
+}
+
+/** 最近几轮；events=1 才会带回事件（撤销按钮要拿 undo_token）。 */
+export function agentRuns(limit = 8): Promise<{ runs: AgentRunRow[]; count: number }> {
+  return getJSON("/api/agent/runs?limit=" + limit + "&events=1");
+}
+
 
 export function aiStatus(signal?: AbortSignal): Promise<AiStatus> {
   return getJSON<AiStatus>("/api/ai/status", signal);

@@ -304,8 +304,10 @@ def agent_run_cancel(request: Request, run_id: str) -> dict:
 
 @router.get("/agent/runs")
 def agent_run_list(request: Request, thread_id: str | None = Query(None),
-                   limit: int = Query(20, ge=1, le=100)) -> dict:
-    runs = _store(request).recent_agent_runs(thread_id=thread_id, limit=limit)
+                   limit: int = Query(20, ge=1, le=100),
+                   events: bool = Query(False)) -> dict:
+    """事件流水默认不带上（一轮几十条）；设置页活动列表要撤销按钮时才加 ?events=1。"""
+    runs = _store(request).recent_agent_runs(thread_id=thread_id, limit=limit, steps=events)
     return {"runs": runs, "count": len(runs)}
 
 

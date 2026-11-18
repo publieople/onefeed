@@ -214,7 +214,8 @@ def build(store: Any, host: Any, row: dict[str, Any]) -> dict[str, Any]:
     src: dict[str, Any] | None = None
     plugin_note = ""
     try:
-        src = host.summary_source(plugin_id, row) if plugin_id else None
+        # host 可能为 None（助手动作没有 runner）：没有宿主不算插件出错，直接走详情正文兜底
+        src = host.summary_source(plugin_id, row) if (plugin_id and host is not None) else None
     except Exception as exc:  # noqa: BLE001 - 插件不给素材不算错误，换兜底
         plugin_note = str(exc)[:160]
 

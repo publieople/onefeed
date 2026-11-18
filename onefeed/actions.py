@@ -13,12 +13,14 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 from . import smart
+from . import summary as summary_mod
 
 L0, L1, L2, L3 = "L0", "L1", "L2", "L3"
 
@@ -401,6 +403,213 @@ def act_refresh_feed(ctx: Ctx, platforms=None) -> dict[str, Any]:
     return {"ok": True, "added": added, "progress": snap}
 
 
+# ---------------------------------------------------------------- L2 长任务
+# 总结与导出都要等模型（单个 provider 最多 20 秒），一次批量很容易吃掉整轮 90s。
+# 所以这里给「一次动作」自己的预算：到点就把没跑完的列进 skipped，不假装成功。
+SUMMARY_STYLES = ("brief", "outline")
+BATCH_MAX = 6
+EXPORT_MAX = 8
+EXPORT_DIR_NAME = "exports"
+TASK_BUDGET = 55.0
+
+
+def _style(value: Any) -> str:
+    mode = str(value or "brief").strip().lower()
+    return mode if mode in SUMMARY_STYLES else "brief"
+
+
+def _budget(value: Any) -> float:
+    try:
+        seconds = float(value or TASK_BUDGET)
+    except (TypeError, ValueError):
+        seconds = TASK_BUDGET
+    return max(5.0, min(70.0, seconds))
+
+
+def _host(ctx: Ctx) -> Any:
+    """插件宿主：有就用它拿字幕/平台总结，没有 summary.build 会退到详情正文。"""
+    return getattr(ctx.runner, "host", None)
+
+
+def _summarize(ctx: Ctx, item_id: str, force: bool = False) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    """返回 (条目, 总结 payload, 是否命中缓存)。缓存策略与 /item/{id}/summary 一致。"""
+    row = ctx.store.get_item(item_id)
+    if row is None:
+        raise ActionError(f"库里没有这个 id：{item_id}")
+    if not force:
+        cached = ctx.store.get_summary(item_id)
+        payload = cached.get("payload") if isinstance(cached, dict) else None
+        if isinstance(payload, dict) and payload.get("tldr") is not None:
+            return row, payload, True
+    try:
+        payload = summary_mod.build(ctx.store, _host(ctx), row)
+    except Exception as exc:  # noqa: BLE001 - 正文为空/模型全挂都归成一句话
+        raise ActionError(str(exc)[:160] or "总结失败") from exc
+    ctx.store.save_summary(item_id, payload)
+    return row, payload, False
+
+
+def _pack_summary(row: dict[str, Any], payload: dict[str, Any], cached: bool) -> dict[str, Any]:
+    points = []
+    for point in (payload.get("points") or [])[:6]:
+        if isinstance(point, dict) and str(point.get("text") or "").strip():
+            points.append({"t": point.get("t"), "text": str(point["text"])[:120]})
+    return {
+        "id": row.get("id"),
+        "title": str(row.get("title") or "")[:90],
+        "platform": row.get("platform"),
+        "url": row.get("url") or "",
+        "tldr": str(payload.get("tldr") or "")[:200],
+        "points": points,
+        "caveat": str(payload.get("caveat") or "")[:160],
+        "basis": payload.get("basis") or "",
+        "cached": bool(cached),
+    }
+
+
+def _slug(title: str) -> str:
+    text = re.sub(r'[\\/:*?"<>|\s]+', "-", str(title or "")).strip("-")
+    return (text[:40].strip("-") or "brief")
+
+
+def _exports_root(ctx: Ctx) -> Path:
+    root = Path(ctx.exports_dir) if ctx.exports_dir else Path(ctx.store.path).parent / EXPORT_DIR_NAME
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _render_markdown(title: str, style: str, summaries: list[dict[str, Any]],
+                     skipped: list[dict[str, Any]]) -> str:
+    lines = [f"# {title}", "", f"> 由 OneFeed 助手生成 · {time.strftime('%Y-%m-%d %H:%M')}", ""]
+    for index, item in enumerate(summaries, 1):
+        lines.append(f"## {index}. {item['title']}")
+        meta = " · ".join(x for x in (item.get("platform") or "", "有缓存" if item.get("cached") else "新总结") if x)
+        if meta:
+            lines.append(f"*{meta}*")
+        if item.get("url"):
+            lines.append("")
+            lines.append(f"[原链接]({item['url']})")
+        if style != "outline" and item.get("tldr"):
+            lines.append("")
+            lines.append(f"**{item['tldr']}**")
+        points = item.get("points") or []
+        if points:
+            lines.append("")
+            for point in points:
+                stamp = f"[{_mmss(point['t'])}] " if isinstance(point.get("t"), (int, float)) else ""
+                lines.append(f"- {stamp}{point['text']}")
+        if item.get("caveat"):
+            lines.append("")
+            lines.append(f"> {item['caveat']}")
+        lines.append("")
+    if skipped:
+        lines.append("## 没跑完的")
+        lines.append("")
+        for miss in skipped:
+            lines.append(f"- {miss.get('id')}：{miss.get('error')}")
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+def _write_export(ctx: Ctx, title: str, text: str) -> Path:
+    root = _exports_root(ctx)
+    base = f"{time.strftime('%Y%m%d-%H%M%S')}-{_slug(title)}"
+    path = root / f"{base}.md"
+    suffix = 2
+    while path.exists():
+        path = root / f"{base}-{suffix}.md"
+        suffix += 1
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
+
+
+def _mmss(sec: Any) -> str:
+    try:
+        value = max(0, int(float(sec)))
+    except (TypeError, ValueError):
+        return "00:00"
+    return f"{value // 60:02d}:{value % 60:02d}"
+
+
+@action("summarize_item", L0, "把一条内容总结成「一句话 + 要点」，有缓存先用缓存。",
+        {"id": _p("str", "条目 id，必须来自检索结果"),
+         "force": _p("bool", "true=忽略缓存重算")})
+def act_summarize_item(ctx: Ctx, id: str = "", force=False) -> dict[str, Any]:
+    item_id = str(id or "").strip()
+    if not item_id:
+        raise ActionError("summarize_item: 缺 id")
+    row, payload, cached = _summarize(ctx, item_id, bool(force))
+    out = _pack_summary(row, payload, cached)
+    ctx.send("action", "summarize_item",
+             {"id": item_id, "title": out["title"], "cached": cached})
+    return out
+
+
+@action("summarize_batch", L0, "一次总结多条（≤6），到预算还没跑完的列进 skipped。",
+        {"ids": _p("list", "条目 id 数组，最多 6 条"),
+         "style": _p("str", "brief=一句话+要点；outline=只要要点"),
+         "budget_sec": _p("int", "这次最多花多少秒，默认 55", min=5, max=70)})
+def act_summarize_batch(ctx: Ctx, ids=None, style: str = "brief", budget_sec=55) -> dict[str, Any]:
+    wanted = [str(x).strip() for x in (ids or []) if str(x or "").strip()][:BATCH_MAX]
+    if not wanted:
+        raise ActionError("summarize_batch: ids 为空")
+    mode = _style(style)
+    deadline = time.time() + _budget(budget_sec)
+    summaries: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for item_id in wanted:
+        if time.time() >= deadline:
+            skipped.append({"id": item_id, "error": "时间预算用完了，这条还没跑"})
+            continue
+        try:
+            row, payload, cached = _summarize(ctx, item_id)
+        except ActionError as exc:
+            skipped.append({"id": item_id, "error": str(exc)})
+            continue
+        summaries.append(_pack_summary(row, payload, cached))
+    ctx.send("action", "summarize_batch",
+             {"count": len(summaries), "skipped": len(skipped), "style": mode})
+    return {"ok": True, "summaries": summaries, "count": len(summaries),
+            "skipped": skipped, "style": mode, "budget_sec": int(_budget(budget_sec))}
+
+
+@action("export_markdown", L2, "把几条的总结写成一份 Markdown（撤销=删掉这个文件）。",
+        {"ids": _p("list", "条目 id 数组，最多 8 条"),
+         "title": _p("str", "文件标题，空=按日期起名"),
+         "style": _p("str", "brief=一句话+要点；outline=只要要点"),
+         "budget_sec": _p("int", "这次最多花多少秒，默认 55", min=5, max=70)})
+def act_export_markdown(ctx: Ctx, ids=None, title: str = "", style: str = "brief",
+                        budget_sec=55) -> dict[str, Any]:
+    wanted = [str(x).strip() for x in (ids or []) if str(x or "").strip()][:EXPORT_MAX]
+    if not wanted:
+        raise ActionError("export_markdown: ids 为空")
+    mode = _style(style)
+    heading = str(title or "").strip()[:60] or f"OneFeed 简报 {time.strftime('%Y-%m-%d')}"
+    deadline = time.time() + _budget(budget_sec)
+    summaries: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for item_id in wanted:
+        if time.time() >= deadline:
+            skipped.append({"id": item_id, "error": "时间预算用完了，这条没写进文件"})
+            continue
+        try:
+            row, payload, cached = _summarize(ctx, item_id)
+        except ActionError as exc:
+            skipped.append({"id": item_id, "error": str(exc)})
+            continue
+        summaries.append(_pack_summary(row, payload, cached))
+    if not summaries:
+        raise ActionError("这几次总结都没跑成，文件没生成：" +
+                          (skipped[0]["error"] if skipped else "没有可用条目"))
+    text = _render_markdown(heading, mode, summaries, skipped)
+    path = _write_export(ctx, heading, text)
+    token = _undo_token("export", path=str(path))
+    ctx.send("action", "export_markdown",
+             {"path": str(path), "count": len(summaries), "title": heading}, token)
+    return {"ok": True, "path": str(path), "count": len(summaries),
+            "bytes": len(text.encode("utf-8")), "skipped": skipped}
+
+
 # ---------------------------------------------------------------- 撤销
 def parse_undo(token: str) -> dict[str, Any]:
     try:
@@ -429,6 +638,19 @@ def apply_undo(store: Any, token: str) -> dict[str, Any]:
             elif state == "unhide":
                 store.mark_item(item_id, hidden=True)
         return {"ok": True, "reverted": ids, "state": state}
+    if kind == "export":
+        # 只删 exports 目录里自己写出来的 md：token 是前端可伪造的，不能顺着路径乱删
+        root = (Path(store.path).parent / EXPORT_DIR_NAME).resolve()
+        try:
+            target = Path(str(data.get("path") or "")).resolve()
+        except (OSError, ValueError):
+            return {"ok": False, "error": "撤销路径不对"}
+        if target.parent != root or target.suffix.lower() != ".md":
+            return {"ok": False, "error": "只能撤销 exports 目录里的 md 文件"}
+        if not target.exists():
+            return {"ok": True, "deleted": str(target), "note": "文件已经不在"}
+        target.unlink()
+        return {"ok": True, "deleted": str(target)}
     return {"ok": False, "error": "这个动作不可撤销"}
 
 

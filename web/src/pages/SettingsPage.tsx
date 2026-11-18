@@ -3,9 +3,12 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Copy, ExternalLink, LogIn, LogOut, RefreshCw, RotateCcw, Save } from "lucide-react";
 import type { OutletCtx } from "../App";
 import {
+  agentRuns,
+  agentUndo,
   getJSON,
   postJSON,
   putJSON,
+  type AgentRunRow,
   type AuthState,
   type Health,
   type LoginStatus,
@@ -13,6 +16,7 @@ import {
   type SettingsResponse,
   type SettingsValues,
 } from "../api";
+import { timeAgo } from "../format";
 import { platform } from "../platform";
 import SettingSection from "../components/SettingSection";
 import AiProviders from "../components/AiProviders";
@@ -24,6 +28,7 @@ const SECTIONS = [
   { id: "status", label: "运行状态" },
   { id: "collect", label: "采集与排序" },
   { id: "ai", label: "AI 助手" },
+  { id: "agent", label: "Agent 活动" },
   { id: "auth", label: "登录态" },
   { id: "plugins", label: "已装插件" },
 ];
@@ -44,6 +49,20 @@ const LOGIN_TEXT: Record<string, string> = {
   error: "登录流程出错",
 };
 
+const RUN_STATUS: Record<string, { label: string; tone: string }> = {
+  running: { label: "进行中", tone: "border-amber-200 text-amber-700 dark:border-amber-500/30 dark:text-amber-300" },
+  done: { label: "已完成", tone: "border-emerald-200 text-emerald-700 dark:border-emerald-500/30 dark:text-emerald-300" },
+  error: { label: "出错了", tone: "border-red-200 text-red-700 dark:border-red-500/30 dark:text-red-300" },
+  cancelled: { label: "已取消", tone: "border-line text-muted" },
+};
+
+/** 能撤销的动作；别的一律不显示按钮 */
+const UNDO_TEXT: Record<string, string> = {
+  save_item: "撤销收藏",
+  mark_read: "撤销标记",
+  export_markdown: "删掉导出的文件",
+};
+
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
@@ -55,8 +74,9 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const [form, setForm] = useState<SettingsValues | null>(null);
   const [baseline, setBaseline] = useState("");
   const [saving, setSaving] = useState(false);
-  const [open, setOpen] = useState<Record<string, boolean>>({ status: true, ai: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({ status: true, ai: true, agent: true });
   const [active, setActive] = useState("status");
+  const [runs, setRuns] = useState<AgentRunRow[]>([]);
   const reduce = useReducedMotion();
   const copyTimer = useRef(0);
 
@@ -106,10 +126,39 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  const loadRuns = useCallback(async () => {
+    try {
+      const data = await agentRuns(8);
+      setRuns(data.runs ?? []);
+    } catch {
+      // 后端没开 Agent 或读不到时不要把整页搞挂
+      setRuns([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRuns();
+  }, [loadRuns, ctx.reloadKey]);
+
   const flash = (text: string) => {
     setNote(text);
     window.clearTimeout(copyTimer.current);
     copyTimer.current = window.setTimeout(() => setNote(""), 3200);
+  };
+
+  const undo = async (token: string, text: string) => {
+    try {
+      const resp = await agentUndo(token);
+      if (resp.ok === false) {
+        flash(String(resp.error ?? "撤销失败"));
+        return;
+      }
+      flash(resp.note ? text + "：" + String(resp.note) : text);
+      await loadRuns();
+      ctx.bump();
+    } catch (err) {
+      flash((err as Error).message);
+    }
   };
 
   const toggle = async (id: string, enabled: boolean) => {
@@ -522,6 +571,63 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 </div>
               </div>
             ) : null}
+          </SettingSection>
+
+          <SettingSection
+            id="agent"
+            title="Agent 活动"
+            desc="最近跑过的指令与它们改过的东西；收藏、标记、导出的文件都能在这里撤回"
+            summary={
+              <>
+                <span>{runs.length ? "最近 " + runs.length + " 轮" : "还没有记录"}</span>
+                <span className="text-fade">·</span>
+                <span>留在本机，不上传</span>
+              </>
+            }
+            open={Boolean(open.agent)}
+            onToggle={() => setOpen((prev) => ({ ...prev, agent: !prev.agent }))}
+          >
+            {runs.length === 0 ? (
+              <p className="mt-3 text-[12px] text-fade">在右下角问一句，跑完这里会留下轨迹和撤销入口。</p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {runs.map((run) => {
+                  const status = RUN_STATUS[run.status] ?? RUN_STATUS.done;
+                  const undos = (run.events ?? []).filter(
+                    (e) => e.kind === "action" && e.undo_token && UNDO_TEXT[e.name],
+                  );
+                  return (
+                    <li key={run.id} className="rounded-lg border border-line px-3.5 py-3">
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="text-[11px] text-fade">{timeAgo(run.created_at)}</span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{run.input || "（空指令）"}</span>
+                        <span className={"rounded-full border px-1.5 py-0.5 text-[11px] " + status.tone}>{status.label}</span>
+                      </div>
+                      {run.status === "error" ? (
+                        <p className="mt-1 text-[12px] text-red-600 dark:text-red-400">{run.error || "没有留下错误信息"}</p>
+                      ) : run.reply ? (
+                        <p className="mt-1 line-clamp-2 text-[12px] text-muted">{run.reply}</p>
+                      ) : null}
+                      {undos.length ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {undos.map((e) => (
+                            <button
+                              key={e.seq}
+                              onClick={() => void undo(e.undo_token as string, UNDO_TEXT[e.name])}
+                              title={e.name === "export_markdown" ? String(e.data?.path ?? "") : undefined}
+                              className="flex h-7 items-center gap-1 rounded-md border border-line px-2 text-[12px] text-muted hover:text-red-600"
+                            >
+                              <RotateCcw size={11} />
+                              {UNDO_TEXT[e.name]}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </SettingSection>
 
           <SettingSection
