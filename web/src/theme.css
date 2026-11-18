@@ -255,9 +255,9 @@ html.theme-vt.dark::view-transition-new(root) {
 
 
 /* 卡片 → 详情：被点的那张卡片与详情页根部共用一个名字（of-card），
-   浏览器把两张快照的盒子从卡片矩形插值到整页矩形，看到的就是「这张卡片自己长大、铺满一屏」；
+   浏览器把盒子从卡片矩形插值到整页矩形，看到的就是「这张卡片自己长大、铺满一屏」；
    返回时同一段路倒着走，缩回它在列表里的位置。
-   曲线和换肤同一组：0.7s / cubic-bezier(0.16, 1, 0.3, 1)。 */
+   0.42s —— 再长就变成等动画了；曲线和换肤同一组 expo-out。 */
 .nav-vt,
 .nav-vt *,
 .nav-vt *::before,
@@ -266,7 +266,7 @@ html.theme-vt.dark::view-transition-new(root) {
 }
 
 html.nav-vt::view-transition-group(root) {
-  animation-duration: 0.7s;
+  animation-duration: 0.42s;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -274,7 +274,7 @@ html.nav-vt::view-transition-group(root) {
    这样看到的是「旧页退开、露出已经就位的新页」，文字不会重影。 */
 html.nav-vt::view-transition-old(root) {
   z-index: 2;
-  animation: nav-root-out 0.32s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both;
+  animation: nav-root-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) 0.04s both;
 }
 
 html.nav-vt::view-transition-new(root) {
@@ -295,33 +295,35 @@ html.nav-vt::view-transition-new(root) {
    于是看到的就是「这张卡片本身长大、铺满屏幕」，返回时同一段路倒着走。 */
 html.nav-vt::view-transition-group(of-card) {
   z-index: 3;
-  animation-duration: 0.7s;
+  animation-duration: 0.42s;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* 只让「详情页」那张快照参与插值。
+   旧卡片快照是从卡片原尺寸往上放大的位图，放大到整页宽就是一团糊——它是缩略图渲染出来的低分辨率画面；
+   新快照本来就是整页的高分辨率渲染，只把它按小盒子缩着画、再放到全尺寸，全程都清晰。 */
 html.nav-vt::view-transition-old(of-card) {
-  animation: nav-card-out 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: none;
+  opacity: 0;
 }
 
 html.nav-vt::view-transition-new(of-card) {
-  animation: nav-card-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: nav-card-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* 前 62% 让「卡片在长大」这件事看清楚，最后一段才把两层合成最终画面 */
-@keyframes nav-card-out {
-  0%,
-  62% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
+/* 返回时正好反过来：这次是详情页的高分辨率快照留在场上缩回卡片，卡片快照不显示 */
+html.nav-vt.nav-vt-back::view-transition-old(of-card) {
+  animation: nav-card-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html.nav-vt.nav-vt-back::view-transition-new(of-card) {
+  animation: none;
+  opacity: 0;
 }
 
 @keyframes nav-card-in {
-  0%,
-  62% {
-    opacity: 0;
+  0% {
+    opacity: 0.55;
   }
   100% {
     opacity: 1;

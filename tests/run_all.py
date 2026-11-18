@@ -31,6 +31,7 @@ ORDER = [
     "test_theme_reveal.py",
     "test_nav_motion.py",
     "test_feed_filters.py",
+    "test_lightbox.py",
     "test_entry.py",
     "test_e2e_feed.py",
 ]

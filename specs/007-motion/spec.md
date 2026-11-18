@@ -135,9 +135,27 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 
 消失的段只给没被继承的那些做 ghost 淡出，所以单击切换全程只有一条遮罩，不会出现「旧的没了、新的闪出来」。
 
-验收（`probes/check_tabrail_slide.py`）：点完的 520ms 内每 16ms 采一次遮罩几何。三次切换（全部→抖音、抖音→知乎、知乎→全部）都必须满足：起点与终点 x 相差 > 20px、存在严格落在两者之间的中间帧、全程遮罩条数恒为 1。实测三次都有 4–15 个中间帧（如抖音→知乎 420 → 528，中间采到 464 / 479 / 499 / 511 / 518）。截图 `design/tabrail-slide-mid.png`、`tabrail-slide-after.png`、`tabrail-slide-back.png`。
+验收（`probes/check_tabrail_slide.py`）：点完的 760ms 后一次性取页面内 `requestAnimationFrame` 记的帧序列。三次切换（全部→抖音、抖音→知乎、知乎→全部）都必须满足：起点与终点 x 相差 > 20px、存在严格落在两者之间的中间帧、全程遮罩条数恒为 1。实测三次都有 14–26 个中间帧（如抖音→知乎 270 → 534，中间采到 276 / 331 / 511 / 518 / 526）。截图 `design/tabrail-slide-mid.png`、`tabrail-slide-after.png`、`tabrail-slide-back.png`。
 
-包体：416.4 kB（gzip 134.1 kB）。
+采样方式注意：`page.evaluate` 的往返有几十毫秒，在 Python 里循环「等 16ms → 读一次几何」量到的是几十毫秒前的状态，动画早跑完了。必须把采样循环放进页面（`window.__frames`，rAF 里记 `performance.now()` 与几何），点完等 760ms 再一次性取回。
+
+### 7.7 中间插一项不再闪白（2026-11-18 补）
+
+先选中 B 站和抖音（两段），再 Ctrl 点中间的小红书，会出现几十毫秒的「白底浅字」抖动。原因有三层：
+
+1. 旧的两条胶囊走 GhostMask 淡出，新合成的那条还在按 spring 从 0 长出来；
+2. 新条的 `useMotionValue` 初值就是目标盒子，那一瞬间它只有「小红书」那么宽，左右两边是普通按钮的白底；
+3. GhostMask 的清理 `setTimeout` 写在 `useEffect` 的 cleanup 里——下一次选择会先 cleanup，把定时器取消掉，幽灵胶囊永久留在 DOM，还会盖在新胶囊上面。
+
+修法：
+
+- **seed 并集**：每个 run 除了目标盒子 `box`，再算一个 `seed` = 上一帧所有与它横向重叠 > 4px 的 run 的并集（`min(x)` 到 `max(x+w)`）。`RunMask` 用 seed 初始化 `useMotionValue`，再用 `animate` 走到 `box`。中间插一项时 seed 恰好是三枚芯片的总宽，遮罩一上来就盖满整段，没有露白；相邻追加时 seed 就是旧段本身，长过去的动画照旧。
+- **React key 带上 `items.length`**：`run.id + ":" + run.items.length`。合并 / 拆分必须重挂一次组件，新的 seed 才会被读取；「全部 ↔ 单个平台」两侧长度都是 1，不重挂，平移保留。
+- **GhostMask 增加 `absorbed`**：被新 run 的盒子完全包住（x ≤ +1、右边界 ≥、|y| ≤ 1、|h| ≤ 1）时直接 `opacity: 1`，等新遮罩接力；清理定时器改成 620ms（被吸收）/ 260ms，而且不再在 cleanup 里 `clearTimeout`——它会留在 DOM 里直到自己到期，但被新遮罩盖着看不见。
+
+验收（`probes/check_tabrail_merge.py`）：选 B 站 + 抖音 → Ctrl 加小红书后，遮罩必须并成一条、宽度等于三枚芯片宽度之和（281 vs 276，±10），且**只在 `aria-pressed=true` 的帧上检查覆盖**（点击到 React 提交之间的白底是正常的过渡态）。实测 55 帧无露白，连点三次后幽灵胶囊归零。
+
+包体：421.8 kB（gzip 136.0 kB）。
 
 ## 8. 跳页：卡片长大铺满整页（2026-11-18）
 
@@ -147,16 +165,17 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 
 - `of-card`：被点的卡片（`Card.tsx` 的 `motion.article`）与详情页根部的过渡载体 `Shell`（`ItemPage.tsx` 三个分支——错误态 / 骨架 / 正文——都包在里面）共用这个名字。浏览器把两张快照的盒子从卡片矩形插值到整页矩形，这就是「卡片长大」本身；不再写死 `scale()`。
 - `root`：其余部分。旧页压在**上面**（`z-index: 2` 对 `1`），延迟 0.18s、0.32s 淡出，让卡片先长大再退底页。
-- 两张 `of-card` 快照叠在 `z-index: 3`；旧快照前 62% 保持不透明、之后淡到 0，新快照反过来在 62% 后才开始出现。分界放在 62% 是为了把「长大」这一段看完整，又不至于最后一下子硬切。
+- 两张 `of-card` 快照叠在 `z-index: 3`。**进场时旧卡片快照直接 `opacity: 0`**——它只是 364px 的缩略图被放大到整页，1080p 铺开就是一团糊，看着像加载失败；进场只留几何插值，画面由新页面自己给（`nav-card-in` 从 0.55 淡到 1）。返回方向相反：留详情页那张高清快照缩回卡片，卡片快照不显示（`html.nav-vt.nav-vt-back` 两条规则对调）。
 
-### 8.2 时间表（0.7s / `cubic-bezier(0.16,1,0.3,1)`）
+### 8.2 时间表（0.42s / `cubic-bezier(0.16,1,0.3,1)`）
 
 | 时间 | 发生什么 |
 | --- | --- |
-| 0–62%（≈0–434ms） | 卡片从卡片矩形长到整页矩形，旧页不透明 |
-| 62%–100% | 卡片继续贴合最终矩形，同时旧快照淡出、详情页浮现 |
-| 180–500ms | 底页（root）淡出，被卡片盖着基本看不见 |
-| 返回 | 同一组关键帧反向：详情页从整页缩到卡片矩形，列表卡片在下面淡入 |
+| 0–420ms | 卡片从卡片矩形长到整页矩形，新页面同时从 55% 透明度浮到 100% |
+| 40–240ms | 底页（root）淡出，被卡片盖着基本看不见 |
+| 返回 | 同一段路倒着走：详情页快照从整页缩回卡片矩形（420ms），列表在下面直接可见 |
+
+0.7s 太长（用户反馈「切个页像慢动作」），压到 0.42s；expo-out 前 30% 就走完大半距离，观感是「一下就张开了，尾巴轻轻收住」。
 
 ### 8.3 返回要能落回原位
 
@@ -170,19 +189,20 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 
 不支持 `document.startViewTransition` 或 `prefers-reduced-motion: reduce` 时，`runNavTransition` 直接 `apply()`：路由照常跳，没有过渡，不留 `nav-vt` 类。
 
-### 8.5 五个坑
+### 8.5 六个坑
 
 1. **详情页必须有落点**。只在正文分支挂 `of-card` 时，跳转瞬间新 DOM 里没有这个元素，浏览器只会把旧卡片淡掉、没有几何变形（实测新快照 100×0）。
 2. **路由上不能留 `AnimatePresence mode="wait"`**：wait 会等旧页退场跑完才挂新页，快照拍到旧页，过渡变成「旧页动两下、新页凭空出现」。
 3. **`apply()` 必须 `flushSync`**：React 默认把更新放进微任务，View Transition 回调返回就拍新快照，可能拍到旧 DOM。
 4. **主题切换的 `::view-transition-*` 要收进 `html.theme-vt`**，否则换肤的斜带扫屏会套到跳页上。
 5. **截图会污染时间戳**：`page.screenshot` 单张 150–250ms，在采样循环里截图会把「320ms 的帧」推到过渡结束之后（量到宽 100）。探针改成页面内 `requestAnimationFrame` 逐帧记 `performance.now()` 与伪元素宽高/透明度，点完等 900ms 一次性取回；截图另跑一轮。
+6. **别拿缩略图当进场画面**：旧卡片快照只有列表里那么大（364px），浏览器把它拉到整页后是放大的低清图，糊得像加载失败。进场一律 `old(of-card){ animation: none; opacity: 0 }`，只保留几何插值。
 
 ### 8.6 验收
 
-- `tests/test_nav_motion.py`（8 项静态）：共享元素三件套、两个方向的关键帧、`of-page` 已清、`theme-vt` 作用域、`Shell` 覆盖三个分支、`feedCache` 与 `data-vt-item`、降级分支与接线。
-- `probes/check_card_morph.py`（18 项行为，真 Chrome）：起手宽度就是卡片宽（364px）、中途超过两倍、最终 1132px（整页宽）、前段旧页不透明、收尾旧页淡出新页到位、返回从 1132 缩回 364、无 VT / 减少动效照常跳、无 `pageerror`。
-- 截图：`design/morph-enter-120.png`、`morph-enter-260.png`、`morph-back-150.png`、`morph-back-300.png`。
+- `tests/test_nav_motion.py`（9 项静态）：共享元素三件套、`nav-card-in`、旧卡片快照被隐藏（`animation: none;\n  opacity: 0`）、`nav-vt-back` 两个方向、`of-page` 与 `nav-card-out` 已清、`theme-vt` 作用域、`Shell` 覆盖三个分支、`feedCache` 与 `data-vt-item`、降级分支与接线。
+- `probes/check_card_morph.py`（19 项行为，真 Chrome）：进场起手宽度误差 ≤ 15%、中途 > 1.8×卡片宽、末帧 ≥ 1080、每帧 `duration == '0.42s'`、**所有帧旧卡片快照 `opacity < 0.02`**、首帧新页面 `opacity > 0.3`；返回起点 ≥ 1080、最窄 ≤ 1.15×卡片宽、首帧旧快照 `opacity > 0.3`、所有帧卡片快照 `opacity < 0.02`；无 VT / 减少动效照常跳、无 `pageerror`。实测进场 364 → 1131.98、返回 1132 → 364。
+- 截图：`design/morph-enter-080.png`、`morph-enter-200.png`、`morph-back-110.png`、`morph-back-240.png`。
 
 ## 9. 筛选条件进出详情页（2026-11-18）
 

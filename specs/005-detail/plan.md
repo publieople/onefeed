@@ -178,3 +178,15 @@ P1 已落地并实测，T43 的小红书与 T44 的抖音按等价方案提前�
 - 前端文案跟着改准：「查看更多评论（共 N 条）」→「已取 N 条」，尾部同样说「已取 N 条」，因为插件能翻到的总数和首页 `count` 不是一回事。
 - 证据：`design/comments-douyin.png`（5 条 + 去原站）、`design/comments-xhs-collapsed.png`（折叠 5 条 + 查看更多（已取 20 条））、`design/comments-xhs-exhausted.png`（展开后滚到 36 条 + 提示）。
 
+## 13. 图文灯箱：贴视口、能缩放（2026-11-18）
+
+小红书图文笔记的图片点开后以前会「占满整个详情页」：图被拉到几千像素高，只能看到左上角一截，滚动也救不回来。
+
+- 根因：灯箱是 `fixed inset-0` 直接写在 `.page-shell` 里。路由的 `motion.div` 带 `transform`，会让后代的 `position: fixed` 以整页（而不是视口）为包含块，覆盖层高度变成文档高度，`img max-h-full` 自然按整页算。这与早前「AI 胶囊跑到页面最底下看不见」是同一个坑。
+- 修法：灯箱抽成 `Lightbox` 组件，用 `createPortal(..., document.body)` 挂到 `body`；容器 `fixed inset-0 z-[60] flex flex-col bg-black/90`；顶部一行「N / M · 点图看原尺寸」+ 关闭；内容区 `flex-1 overflow-auto` 居中放图，默认 `max-h-[calc(100dvh-96px)] max-w-full object-contain`（整张可见），点图切到原始尺寸 `w-[min(94vw,1200px)] max-w-none` 允许滚动看细节；多于一张时显左右箭头。
+- 键盘与滚动：`Esc` 关，`←`/`→` 翻页；打开时 `body.style.overflow = "hidden"`，关闭恢复原值（记录 prev，避免踩掉别处的锁）。
+- 同一类问题的全站排查：`.page-shell` 内不再有任何 `fixed` 子元素（探针数出来 0），AI 胶囊、设置页保存条、toast 早就都走了 `createPortal`。
+- 验收 `probes/check_lightbox.py`（12 项）：灯箱不在 `.page-shell` 里、overlay 尺寸等于视口 `[0,0,1440,900]`、图高 ≤ 900、body 锁滚动、放大后宽度 ≤ 视口且可滚、`Esc` 关闭并恢复滚动、左右键真的换图（`img-0` → `img-1`）、页壳内 fixed 元素为 0、390×844 手机视口下 overlay 贴视口且图 358×487 不出屏、无 `pageerror`。
+- 静态回归 `tests/test_lightbox.py`（8 项）：`createPortal` 到 `document.body`、`fixed inset-0 z-[60]`、锁滚动的两处赋值、`cursor-zoom-in/out`、`ArrowLeft/ArrowRight`、默认 `max-h-[70vh]` 兜底。
+- 证据：`design/lightbox-fit.png`（整张可见）、`lightbox-zoom.png`（原始尺寸）、`lightbox-phone.png`（手机视口）。
+

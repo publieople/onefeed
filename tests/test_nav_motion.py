@@ -36,14 +36,24 @@ def test_shared_element_css() -> None:
         "html.nav-vt::view-transition-group(of-card)",
         "html.nav-vt::view-transition-old(of-card)",
         "html.nav-vt::view-transition-new(of-card)",
-        "@keyframes nav-card-out",
         "@keyframes nav-card-in",
-        "0.7s",
+        "0.42s",
         "cubic-bezier(0.16, 1, 0.3, 1)",
     ):
         assert needle in CSS, "theme.css 缺 " + needle
     # 几何交给浏览器插值，不能再写死缩放倍数
     assert "scale(1.075)" not in CSS, "of-card 还在写死放大倍数，共享元素变形会被覆盖"
+
+
+@case
+def test_blurry_snapshot_is_hidden() -> None:
+    # 旧卡片快照是从卡片尺寸放大的位图，放大就是糊的：进场不画它，只留详情页那张
+    assert "html.nav-vt::view-transition-old(of-card) {" in CSS
+    assert "animation: none;\n  opacity: 0;" in CSS, "进场的旧卡片快照没被藏掉"
+    # 返回方向相反：留详情页快照，藏卡片快照
+    assert "html.nav-vt.nav-vt-back::view-transition-new(of-card)" in CSS
+    assert "html.nav-vt.nav-vt-back::view-transition-old(of-card)" in CSS
+    assert "nav-card-out" not in CSS, "nav-card-out 已废弃，旧快照不再做淡出"
 
 
 @case

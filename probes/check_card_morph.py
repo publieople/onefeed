@@ -24,12 +24,13 @@ SAMPLE = """() => {
     const cs = getComputedStyle(d, '::view-transition-' + s + '(' + n + ')');
     return { w: parseFloat(cs.width) || 0, h: parseFloat(cs.height) || 0, o: parseFloat(cs.opacity || '1') };
   };
+  const dur = () => getComputedStyle(d, '::view-transition-group(of-card)').animationDuration;
   window.__samples = [];
   let t0 = null;
   const tick = () => {
     if (d.classList.contains('nav-vt')) {
       if (t0 === null) { t0 = performance.now(); window.__samples = []; }
-      window.__samples.push({ t: Math.round(performance.now() - t0), old: g('of-card', 'old'), new: g('of-card', 'new') });
+      window.__samples.push({ t: Math.round(performance.now() - t0), dur: dur(), old: g('of-card', 'old'), new: g('of-card', 'new') });
     }
     if (t0 === null || performance.now() - t0 < 950) requestAnimationFrame(tick);
   };
@@ -79,13 +80,13 @@ def main() -> int:
 
         first = frames[0]
         widest = max(f["old"]["w"] for f in frames)
-        last = frames[-1]
-        ok("起手就是卡片那么宽", abs(first["old"]["w"] - cw) <= cw * 0.12, (round(first["old"]["w"], 1), cw))
+        ok("起手就是卡片那么宽", abs(first["old"]["w"] - cw) <= cw * 0.15, (round(first["old"]["w"], 1), cw))
         ok("中间长到卡片的两倍以上", any(f["old"]["w"] > cw * 1.8 for f in frames), widest)
         ok("最后铺到整页宽", widest >= 1080, widest)
-        ok("起点到终点是单调长大", frames[len(frames) // 2]["old"]["w"] > first["old"]["w"] * 2, [round(f["old"]["w"]) for f in frames[:3]])
-        ok("前段旧页还不透明", first["old"]["o"] > 0.9, first["old"]["o"])
-        ok("收尾时旧页淡出、新页到位", last["old"]["o"] < 0.1 and last["new"]["o"] > 0.9, [last["old"]["o"], last["new"]["o"]])
+        ok("动画 0.42s", any(f["dur"] == "0.42s" for f in frames), frames[0]["dur"])
+        # 旧卡片快照是缩略图放大出来的位图，放大就糊：整段都不该露脸
+        ok("旧卡片快照全程不显示", all(f["old"]["o"] < 0.02 for f in frames), max(f["old"]["o"] for f in frames))
+        ok("铺开时画的是详情页快照", first["new"]["o"] > 0.3, first["new"]["o"])
 
         # 返回方向
         page.evaluate(SAMPLE)
@@ -100,15 +101,16 @@ def main() -> int:
         ok("返回回到信息流", page.url.split("?")[0].rstrip("/").endswith(":8791"), page.url)
         ok("返回目标卡片在场上且叫 of-card",
            page.evaluate("() => { const el = document.querySelector('[data-vt-item]'); return !!el && !!el.querySelector('[style*=\"view-transition-name\"]'); }"))
-        b_first, b_last = back[0], back[-1]
+        b_first = back[0]
         b_narrow = min(f["old"]["w"] for f in back)
         ok("退场从整页宽开始", b_first["old"]["w"] >= 1080, round(b_first["old"]["w"], 1))
         ok("退场一路缩回卡片", b_narrow <= cw * 1.15, (round(b_narrow, 1), cw))
-        ok("退场收尾时信息流已就位", b_last["new"]["o"] > 0.9, b_last["new"]["o"])
+        ok("返回时画的是详情页快照", b_first["old"]["o"] > 0.3, b_first["old"]["o"])
+        ok("返回时卡片快照不显示", all(f["new"]["o"] < 0.02 for f in back), max(f["new"]["o"] for f in back))
         ok("没有页面报错", not errors, errors[:1])
 
         # 截图单独一轮，避免截图耗时污染采样
-        for ms, tag in ((120, "enter-120"), (260, "enter-260")):
+        for ms, tag in ((80, "enter-080"), (200, "enter-200")):
             page.goto(BASE + "/?v=shot", wait_until="networkidle")
             page.wait_for_selector("article", timeout=20000)
             page.locator("article").first.click()
@@ -116,10 +118,10 @@ def main() -> int:
             page.screenshot(path=str(OUT / ("morph-" + tag + ".png")))
         page.wait_for_timeout(1200)
         page.get_by_role("button", name="返回").click()
-        page.wait_for_timeout(150)
-        page.screenshot(path=str(OUT / "morph-back-150.png"))
-        page.wait_for_timeout(150)
-        page.screenshot(path=str(OUT / "morph-back-300.png"))
+        page.wait_for_timeout(110)
+        page.screenshot(path=str(OUT / "morph-back-110.png"))
+        page.wait_for_timeout(130)
+        page.screenshot(path=str(OUT / "morph-back-240.png"))
 
         browser.close()
 

@@ -38,11 +38,29 @@ def chips(page):
     }""")
 
 
-def sample(page, out, ms=520, step=16):
-    end = time.time() + ms / 1000
-    while time.time() < end:
-        out.append({"t": round((time.time() - start) * 1000), "masks": page.evaluate(RECTS)})
-        page.wait_for_timeout(step)
+SAMPLE_JS = """() => {
+  // 采样必须在页面里跑：python 侧每次 evaluate 往返要几十毫秒，弹簧动画早就跑完了
+  window.__frames = [];
+  const rail = document.querySelector('[role=group]');
+  const base = rail.getBoundingClientRect();
+  const t0 = performance.now();
+  const tick = () => {
+    const masks = [];
+    for (const node of rail.querySelectorAll(':scope > div[aria-hidden]')) {
+      const box = node.getBoundingClientRect();
+      if (getComputedStyle(node).backgroundColor === 'rgba(0, 0, 0, 0)') continue;
+      masks.push({ x: Math.round((box.left - base.left) * 100) / 100, w: Math.round(box.width * 100) / 100 });
+    }
+    window.__frames.push({ t: Math.round(performance.now() - t0), masks });
+    if (performance.now() - t0 < 760) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}"""
+
+
+def sample(page, out, ms=760):
+    page.wait_for_timeout(ms)
+    out.extend(page.evaluate("() => window.__frames"))
 
 
 def check_slide(label, path, out):
@@ -79,7 +97,7 @@ with sync_playwright() as p:
     page.wait_for_timeout(700)
 
     frames = []
-    start = time.time()
+    page.evaluate(SAMPLE_JS)
     page.locator('button[data-value="douyin"]').click()
     sample(page, frames)
     page.wait_for_timeout(200)
@@ -89,7 +107,7 @@ with sync_playwright() as p:
     page.screenshot(path=str(SHOTS / "tabrail-slide-after.png"))
 
     frames = []
-    start = time.time()
+    page.evaluate(SAMPLE_JS)
     page.locator('button[data-value="zhihu"]').click()
     sample(page, frames)
     page.wait_for_timeout(200)
@@ -98,7 +116,7 @@ with sync_playwright() as p:
         problems.append(bad)
 
     frames = []
-    start = time.time()
+    page.evaluate(SAMPLE_JS)
     page.locator('button[data-value="all"]').click()
     sample(page, frames)
     page.wait_for_timeout(200)

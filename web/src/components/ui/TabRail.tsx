@@ -37,6 +37,8 @@ interface Run {
   id: string;
   items: RailItem[];
   box: Box;
+  /** 动画起点：这一帧之前和它重叠的那几段的并集；不填就用 box */
+  seed?: { x: number; w: number };
 }
 
 const sameBox = (a: Box, b: Box) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
@@ -89,8 +91,11 @@ function RunMask({
   railW: number;
   reduce: boolean;
 }) {
-  const x = useMotionValue(run.box.x);
-  const w = useMotionValue(run.box.w);
+  // 起点用「被它并进来的那几段」的并集：中间插一个时，胶囊一上来就盖住整段，
+  // 否则会先从左边那段长过去，中间那个 chip 有几十毫秒还是白底，看着像抖了一下
+  const seed = run.seed ?? run.box;
+  const x = useMotionValue(seed.x);
+  const w = useMotionValue(seed.w);
   const counter = useTransform(x, (value) => -value);
 
   useEffect(() => {
@@ -99,6 +104,7 @@ function RunMask({
       w.set(run.box.w);
       return;
     }
+    // 合并/拆分后是新挂载的组件，起点已经在 useMotionValue 里设成 seed，直接往目标长
     const move = animate(x, run.box.x, SPRING);
     const grow = animate(w, run.box.w, SPRING);
     return () => {
@@ -135,16 +141,31 @@ function RunMask({
   );
 }
 
-/** 被合并 / 拆掉的那条胶囊：原地淡出，避免高亮凭空消失 */
-function GhostMask({ box, items, boxes }: { box: Box; items: RailItem[]; boxes: Record<string, ItemBox> }) {
+/**
+ * 被合并 / 拆掉的那条胶囊。
+ *
+ * 被别段整条盖住时要保持不透明，等覆盖它的新胶囊长到位再一次性消失：
+ * 否则它会先淡出、而新胶囊还没长到，那一段会先变回未选中（白底浅字），再重新变黑，看起来像抖了一下。
+ */
+function GhostMask({
+  box,
+  items,
+  boxes,
+  absorbed,
+}: {
+  box: Box;
+  items: RailItem[];
+  boxes: Record<string, ItemBox>;
+  absorbed: boolean;
+}) {
   return (
     <motion.div
       aria-hidden
       className="pointer-events-none absolute left-0 z-10 overflow-hidden rounded-full bg-solid shadow-sm"
       style={{ top: box.y, height: box.h }}
       initial={{ x: box.x, width: box.w, opacity: 1 }}
-      animate={{ opacity: 0 }}
-      transition={{ duration: DUR.base }}
+      animate={{ opacity: absorbed ? 1 : 0 }}
+      transition={absorbed ? { duration: 0 } : { duration: DUR.base }}
     >
       {items.map((item) => {
         const inner = boxes[item.id]?.inner;
@@ -170,7 +191,7 @@ export default function TabRail({ items, value, onChange, label }: Props) {
   const [primary, setPrimary] = useState<string>("all");
   const [boxes, setBoxes] = useState<Record<string, ItemBox>>({});
   const [focused, setFocused] = useState<string | null>(null);
-  const [ghosts, setGhosts] = useState<{ gid: string; run: Run; box: Box }[]>([]);
+  const [ghosts, setGhosts] = useState<{ gid: string; run: Run; box: Box; absorbed: boolean }[]>([]);
   const seen = useRef<Run[]>([]);
 
   const key = value.join(",");
@@ -277,7 +298,20 @@ export default function TabRail({ items, value, onChange, label }: Props) {
     used.add(run.id);
   }
 
-  // 消失的那条原地淡出
+  // 新一段的起点：所有和它横向重叠的旧段的并集（合并时一下就盖满，拆分时从整条缩回去）
+  for (const run of runs) {
+    let minX = run.box.x;
+    let maxR = run.box.x + run.box.w;
+    for (const old of prevRuns) {
+      const overlap = Math.min(old.box.x + old.box.w, run.box.x + run.box.w) - Math.max(old.box.x, run.box.x);
+      if (overlap <= 4) continue;
+      minX = Math.min(minX, old.box.x);
+      maxR = Math.max(maxR, old.box.x + old.box.w);
+    }
+    run.seed = { x: minX, w: maxR - minX };
+  }
+
+  // 消失的那条：被新胶囊整条盖住的保持不透明等接力，其余原地淡出
   const signature = runs.map((run) => run.id + ":" + run.items.length).join("|");
   useEffect(() => {
     const prev = seen.current;
@@ -285,12 +319,29 @@ export default function TabRail({ items, value, onChange, label }: Props) {
     const gone = prev.filter((run) => !live.has(run.id));
     seen.current = runs;
     if (!gone.length) return;
+    const covered = (target: Box) =>
+      runs.some((run) => {
+        const box = run.box;
+        return (
+          box.x <= target.x + 1 &&
+          box.x + box.w >= target.x + target.w - 1 &&
+          Math.abs(box.y - target.y) <= 1 &&
+          Math.abs(box.h - target.h) <= 1
+        );
+      });
     const stamp = Date.now();
-    setGhosts((old) => [...old, ...gone.map((run) => ({ gid: run.id + "@" + stamp, run, box: run.box }))]);
-    const timer = window.setTimeout(() => {
-      setGhosts((old) => old.filter((each) => !each.gid.endsWith("@" + stamp)));
-    }, 260);
-    return () => window.clearTimeout(timer);
+    const added = gone.map((run) => ({
+      gid: run.id + "@" + stamp,
+      run,
+      box: run.box,
+      absorbed: covered(run.box),
+    }));
+    setGhosts((old) => [...old, ...added]);
+    // 这里不能把定时器写进 cleanup：下一次选择会立刻清掉它，幽灵胶囊会永久留在页面上
+    window.setTimeout(
+      () => setGhosts((old) => old.filter((each) => !each.gid.endsWith("@" + stamp))),
+      added.some((each) => each.absorbed) ? 620 : 260,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
 
@@ -373,11 +424,12 @@ export default function TabRail({ items, value, onChange, label }: Props) {
         ))}
 
         {runs.map((run) => (
-          <RunMask key={run.id} run={run} boxes={boxes} railW={railW} reduce={reduce} />
+          // 段里 chip 数一变（合并 / 拆分）就重挂一次，让遮罩从 seed 长到目标几何
+          <RunMask key={run.id + ":" + run.items.length} run={run} boxes={boxes} railW={railW} reduce={reduce} />
         ))}
 
         {ghosts.map((ghost) => (
-          <GhostMask key={ghost.gid} box={ghost.box} items={ghost.run.items} boxes={boxes} />
+          <GhostMask key={ghost.gid} box={ghost.box} items={ghost.run.items} boxes={boxes} absorbed={ghost.absorbed} />
         ))}
 
         {focusBox ? (

@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, MessageCircle, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   getDetail,
@@ -169,6 +170,111 @@ function Media({ item, media, seek }: { item: FeedItem; media?: DetailMedia; see
   }
 
   return null;
+}
+
+// 灯箱永远是深色遮罩，所以这里的白字 / 白底是刻意的，不走主题 token
+/* ui-lint-ignore color-token */
+const OVERLAY_HINT = "ml-3 text-white/45";
+/* ui-lint-ignore color-token */
+const OVERLAY_BTN = "rounded-full bg-white/10 p-2 text-white transition-colors hover:bg-white/20";
+/* ui-lint-ignore color-token */
+const OVERLAY_ARROW =
+  "pointer-events-auto rounded-full bg-white/10 p-2.5 text-white transition-colors hover:bg-white/20";
+
+/** 灯箱：铺满视口而不是铺满整页。点图切换「适应屏幕 / 原尺寸可滚动」，长图也能看 */
+function Lightbox({
+  images,
+  index,
+  onClose,
+  onIndex,
+}: {
+  images: string[];
+  index: number;
+  onClose: () => void;
+  onIndex: (next: number) => void;
+}) {
+  const [zoom, setZoom] = useState(false);
+  useEffect(() => setZoom(false), [index]);
+  const step = (delta: number) => onIndex((index + delta + images.length) % images.length);
+
+  // 打开时锁住背后的页面滚动，并接上键盘：Esc 关、左右翻
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") step(-1);
+      else if (e.key === "ArrowRight") step(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [index, images.length]);
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[60] flex flex-col bg-black/90"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="flex shrink-0 items-center justify-between px-5 py-3 text-white/80">
+        <span className="text-[12px] tabular-nums">
+          {index + 1} / {images.length}
+          <span className={OVERLAY_HINT}>{zoom ? "点图回到适应屏幕" : "点图看原尺寸"}</span>
+        </span>
+        <button
+          aria-label="关闭"
+          onClick={onClose}
+          className={OVERLAY_BTN}
+        >
+          <X size={18} />
+        </button>
+      </div>
+      <div
+        className="flex-1 overflow-auto px-4 pb-6 md:px-10"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <img
+          key={images[index]}
+          src={images[index]}
+          alt=""
+          referrerPolicy="no-referrer"
+          onClick={(e) => {
+            e.stopPropagation();
+            setZoom((v) => !v);
+          }}
+          className={
+            zoom
+              ? "mx-auto block w-[min(94vw,1200px)] max-w-none cursor-zoom-out"
+              : "mx-auto block max-h-[calc(100dvh-96px)] max-w-full cursor-zoom-in object-contain"
+          }
+        />
+      </div>
+      {images.length > 1 ? (
+        <div className="pointer-events-none absolute inset-y-0 left-0 right-0 flex items-center justify-between">
+          <button
+            aria-label="上一张"
+            onClick={() => step(-1)}
+            className={"ml-3 " + OVERLAY_ARROW}
+          >
+            <ChevronDown size={18} className="rotate-90" />
+          </button>
+          <button
+            aria-label="下一张"
+            onClick={() => step(1)}
+            className={"mr-3 " + OVERLAY_ARROW}
+          >
+            <ChevronDown size={18} className="-rotate-90" />
+          </button>
+        </div>
+      ) : null}
+    </div>,
+    document.body,
+  );
 }
 
 function Gallery({ images, onOpen }: { images: string[]; onOpen: (index: number) => void }) {
@@ -836,12 +942,7 @@ export default function ItemPage() {
       </div>
 
       {lightbox !== null && images[lightbox] ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
-          <button className="absolute right-5 top-5 rounded-full bg-paper/10 p-2 text-white" onClick={() => setLightbox(null)}>
-            <X size={18} />
-          </button>
-          <img src={images[lightbox]} alt="" referrerPolicy="no-referrer" className="max-h-full max-w-full object-contain" />
-        </div>
+        <Lightbox images={images} index={lightbox} onClose={() => setLightbox(null)} onIndex={setLightbox} />
       ) : null}
     </div>
     </Shell>

@@ -95,4 +95,6 @@ onClick={() => { document.startViewTransition
 
 跳页这一侧 2026-11-18 晚改成共享元素变形（卡片与详情页根部共用 `of-card`，见 `007-motion` 第 8 节），原先给整页起名 `of-page` 的那套规则已删；两边的类名仍然严格分开。
 
+`of-card` 现在是双向的：进场只保留几何插值、把放大的低清卡片快照直接隐藏（`old(of-card){ animation: none; opacity: 0 }`），返回方向反过来隐藏卡片快照、留详情页快照缩回去。这层规则写在 `theme.css` 的 `html.nav-vt` 段里，和换肤的 `html.theme-vt` 段互不干扰。
+
 所以换肤的选择器全部收进 `html.theme-vt`：`html.theme-vt::view-transition-group(root)`、`html.theme-vt::view-transition-old(root)`、`html.theme-vt::view-transition-new(root)`、`html.theme-vt.dark::view-transition-new(root)`。跳页的规则挂在 `html.nav-vt`，两者互不可见。`tests/test_nav_motion.py` 里有一条断言专门守这个作用域，改 CSS 时不要把前缀删掉。
