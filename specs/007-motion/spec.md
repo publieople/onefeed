@@ -84,3 +84,16 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 
 - 详情页的骨架 / 内容切换还可以补一层交叉淡入，现在是骨架直接消失。
 - 列表筛选后重排没有 FLIP 位移动画，只有重新进场。
+
+## 7. 平台筛选：滑动胶囊（2026-11-18）
+
+平台 chips 原先是一排可多选的独立药丸，点击时只有背景色硬切。现在换成一排单选胶囊：整排包在一个圆角描边容器里，选中块是**同一个** `motion.span`，靠 `layoutId` 在两项之间滑过去，视觉上是「一个椭圆挪了位置」而不是两处背景同时闪。
+
+- 组件：`web/src/components/ui/TabRail.tsx`。底层用 `@radix-ui/react-toggle-group`（type="single"）——语义上是筛选器而不是 tabs，不需要配套 panel，同时白送 roving focus 与方向键切换。
+- 动画：复用 `SPRING`（stiffness 420 / damping 34 / mass 0.7），与分段控件同手感；`useReducedMotion()` 时退化为 `{duration: 0}`。
+- 选中项的计数用 `text-solid-fg/60`，未选中用 `text-fade`；选中项的圆点保留平台色，所以「黑胶囊 + 一个彩色点」仍然读得出是哪个平台。
+- 溢出：整排在窄屏横向滚动（隐藏滚动条），选中屏幕外的项时 `scrollIntoView({inline:"nearest"})` 把它带回可视区，避免胶囊滑丢。
+- 语义变化：平台筛选**由多选改为单选**，AI 返回多个平台时只取第一个；原来「再点一个平台并排比较」的提示已删除，同一件事的多平台对照保留在详情页的同题模块里。
+
+实测（1440×900）：默认胶囊 x=154 w=75.36；点「抖音」后 90ms 中间帧 x=417.57、稳定 x=417.64 w=88.36，证明是同一个元素在位移而非两块背景交替；再点同一项回到 x=154。截图见 `design/tabrail-light-all.png`、`tabrail-moving.png`、`tabrail-light-douyin.png`、`tabrail-dark.png`。
+

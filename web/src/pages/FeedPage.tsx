@@ -6,7 +6,6 @@ import { useFeed } from "../api";
 import AiDock from "../components/AiDock";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
-import { platform } from "../platform";
 
 interface Props {
   ctx: OutletCtx;
@@ -42,7 +41,8 @@ export default function FeedPage({ ctx }: Props) {
         platforms?: string[]; keyword?: string; range?: "today" | "all"; sort?: string;
       } | undefined;
       if (!detail) return;
-      setSelected(Array.isArray(detail.platforms) ? detail.platforms : []);
+      // 平台改成单选胶囊后只认第一个：AI 给出多个平台时先看第一个，其余在详情页对照
+      setSelected(Array.isArray(detail.platforms) ? detail.platforms.slice(0, 1) : []);
       setQ(typeof detail.keyword === "string" ? detail.keyword : "");
       setRange(detail.range === "today" ? "today" : "all");
       if (detail.sort) setSort(detail.sort);
@@ -73,11 +73,6 @@ export default function FeedPage({ ctx }: Props) {
     const d = new Date(ts * 1000);
     return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
   }, [ctx.summary]);
-
-  const toggle = (id: string) => {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-    setQ("");
-  };
 
   return (
     <div className="pb-24">
@@ -112,9 +107,8 @@ export default function FeedPage({ ctx }: Props) {
           selected={selected}
           counts={counts}
           total={ctx.summary?.total ?? 0}
-          onToggle={toggle}
-          onClear={() => {
-            setSelected([]);
+          onChange={(id) => {
+            setSelected(id ? [id] : []);
             setQ("");
           }}
         />
@@ -179,12 +173,6 @@ export default function FeedPage({ ctx }: Props) {
           >
             {feed.loading ? "加载中…" : "加载更多"}
           </button>
-        </div>
-      ) : null}
-
-      {selected.length === 1 ? (
-        <div className="mt-8 text-center text-[12px] text-fade">
-          正在看 {platform(selected[0]).label}，再点一个平台可以并排比较
         </div>
       ) : null}
 
