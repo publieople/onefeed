@@ -77,6 +77,27 @@ def main() -> int:
         ok("来回都走了 View Transition", page.evaluate("window.__vt") >= 2)
         ok("html 已切回 light", page.evaluate("!document.documentElement.classList.contains('dark')"))
 
+        # 系统开了「减少动态效果」时要直切：不许走 View Transition，但主题必须照样换
+        calm = browser.new_context(
+            viewport={"width": 1440, "height": 900}, reduced_motion="reduce"
+        )
+        cpage = calm.new_page()
+        cpage.goto(URL, wait_until="domcontentloaded")
+        cpage.evaluate("localStorage.setItem('onefeed.theme','light'); location.reload()")
+        cpage.wait_for_selector("article", timeout=20000)
+        cpage.evaluate(
+            """() => {
+            window.__vt = 0;
+            const orig = document.startViewTransition?.bind(document);
+            if (orig) document.startViewTransition = (cb) => { window.__vt += 1; return orig(cb); };
+        }"""
+        )
+        cpage.click('button[aria-label="切换到暗色"]')
+        cpage.wait_for_timeout(120)
+        ok("减少动效时不走 View Transition", cpage.evaluate("window.__vt") == 0)
+        ok("减少动效时主题照样切换", cpage.evaluate("document.documentElement.classList.contains('dark')"))
+        calm.close()
+
         browser.close()
 
     for c in checks:
