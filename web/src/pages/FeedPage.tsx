@@ -41,8 +41,8 @@ export default function FeedPage({ ctx }: Props) {
         platforms?: string[]; keyword?: string; range?: "today" | "all"; sort?: string;
       } | undefined;
       if (!detail) return;
-      // 平台改成单选胶囊后只认第一个：AI 给出多个平台时先看第一个，其余在详情页对照
-      setSelected(Array.isArray(detail.platforms) ? detail.platforms.slice(0, 1) : []);
+      // 胶囊支持多选后，AI 给出的平台可以原样落进来（同一件事在几个平台上都有时更好对照）
+      setSelected(Array.isArray(detail.platforms) ? detail.platforms : []);
       setQ(typeof detail.keyword === "string" ? detail.keyword : "");
       setRange(detail.range === "today" ? "today" : "all");
       if (detail.sort) setSort(detail.sort);
@@ -107,8 +107,8 @@ export default function FeedPage({ ctx }: Props) {
           selected={selected}
           counts={counts}
           total={ctx.summary?.total ?? 0}
-          onChange={(id) => {
-            setSelected(id ? [id] : []);
+          onChange={(ids) => {
+            setSelected(ids);
             setQ("");
           }}
         />

@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@radix-ui/react-toggle-group": "^1.2.1",
     "dompurify": "^3.4.18",
     "framer-motion": "^11.11.17",
     "lucide-react": "^0.468.0",

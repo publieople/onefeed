@@ -89,11 +89,15 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 
 平台 chips 原先是一排可多选的独立药丸，点击时只有背景色硬切。现在换成一排单选胶囊：整排包在一个圆角描边容器里，选中块是**同一个** `motion.span`，靠 `layoutId` 在两项之间滑过去，视觉上是「一个椭圆挪了位置」而不是两处背景同时闪。
 
-- 组件：`web/src/components/ui/TabRail.tsx`。底层用 `@radix-ui/react-toggle-group`（type="single"）——语义上是筛选器而不是 tabs，不需要配套 panel，同时白送 roving focus 与方向键切换。
-- 动画：复用 `SPRING`（stiffness 420 / damping 34 / mass 0.7），与分段控件同手感；`useReducedMotion()` 时退化为 `{duration: 0}`。
-- 选中项的计数用 `text-solid-fg/60`，未选中用 `text-fade`；选中项的圆点保留平台色，所以「黑胶囊 + 一个彩色点」仍然读得出是哪个平台。
-- 溢出：整排在窄屏横向滚动（隐藏滚动条），选中屏幕外的项时 `scrollIntoView({inline:"nearest"})` 把它带回可视区，避免胶囊滑丢。
-- 语义变化：平台筛选**由多选改为单选**，AI 返回多个平台时只取第一个；原来「再点一个平台并排比较」的提示已删除，同一件事的多平台对照保留在详情页的同题模块里。
+- 组件：`web/src/components/ui/TabRail.tsx`，手写多选逻辑（原生 button + `aria-pressed` + 手动 roving tabindex），不再依赖 `@radix-ui/react-toggle-group`——多选要读 Ctrl/Shift 修饰键，而 Radix 的 `onValueChange` 不携带事件对象。
+- 动画：高亮块是**同一个** `motion.span`，`layoutId` 跟着「最后点的那个」走；复用 `SPRING`（stiffness 420 / damping 34 / mass 0.7），`useReducedMotion()` 时退化为 `{duration: 0}`。
+- 多选表现：主项（最后点的）是黑胶囊 + 白字；其余被选中的项给一层 `bg-wash` 浅底 + 深字。所以多选时既看得出「一共选了哪几个」，又只有一个椭圆在移动。
+- 交互（照文件管理器）：单击只留这一项；`Ctrl`/`⌘` 点击加/减一项；`Shift` 点击从上一次的锚点选一段（`Shift+Ctrl` 把这段并入现有选择）；点「全部」或再点唯一选中项都回到全部；`←`/`→` 移动焦点并顺带选中。
+- 宽度：外层从 `flex` 改成 `w-fit max-w-full`，之前它作为块级 flex 被拉满整行，右边空出一大片。
+- 溢出：内层横向滚动（隐藏滚动条），选中屏幕外的项时 `scrollIntoView({inline:"nearest"})` 把它带回可视区。
+- 语义：平台筛选重新支持多选，AI 给出的多个平台原样落进来；同一件事的多平台对照仍在详情页的同题模块。
 
-实测（1440×900）：默认胶囊 x=154 w=75.36；点「抖音」后 90ms 中间帧 x=417.57、稳定 x=417.64 w=88.36，证明是同一个元素在位移而非两块背景交替；再点同一项回到 x=154。截图见 `design/tabrail-light-all.png`、`tabrail-moving.png`、`tabrail-light-douyin.png`、`tabrail-dark.png`。
+实测（1440×900，探针 `probes/check_tabrail_multi.py`，11 项全过）：胶囊外框宽 726px（内容宽），不再撑满 1440；单击 B 站 → 只有 B 站；Ctrl 点抖音 → 两个；再 Shift 点知乎 → `douyin/juejin/v2ex/zhihu` 四项且高亮在知乎；Ctrl 再点抖音 → 三项；普通点掘金 → 只剩掘金；再点掘金 → 回到全部；点「全部」→ 清空。截图 `design/tabrail-multi.png`（亮）、`tabrail-multi-dark.png`（暗），另有单选期的 `tabrail-light-all.png`、`tabrail-moving.png`、`tabrail-dark.png`。
+
+移掉 Radix 后包体从 426.67 kB 回落到 402.40 kB（gzip 129.28 kB）。
 
