@@ -85,19 +85,18 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 - 详情页的骨架 / 内容切换还可以补一层交叉淡入，现在是骨架直接消失。
 - 列表筛选后重排没有 FLIP 位移动画，只有重新进场。
 
-## 7. 平台筛选：滑动胶囊（2026-11-18）
+## 7. 平台筛选：按连续段合并的胶囊（2026-11-18）
 
-平台 chips 原先是一排可多选的独立药丸，点击时只有背景色硬切。现在换成一排单选胶囊：整排包在一个圆角描边容器里，选中块是**同一个** `motion.span`，靠 `layoutId` 在两项之间滑过去，视觉上是「一个椭圆挪了位置」而不是两处背景同时闪。
+平台 chips 走过三版：独立药丸（背景硬切）→ 单选胶囊（同一个 `motion.span` 在两项之间滑动）→ 现在的多选分段胶囊。多选之后「一个椭圆到处挪」不再成立：选中的项可能连成一段，也可能分成几段，所以高亮改成**每个连续段一个黑胶囊**。
 
-- 组件：`web/src/components/ui/TabRail.tsx`，手写多选逻辑（原生 button + `aria-pressed` + 手动 roving tabindex），不再依赖 `@radix-ui/react-toggle-group`——多选要读 Ctrl/Shift 修饰键，而 Radix 的 `onValueChange` 不携带事件对象。
-- 动画：高亮块是**同一个** `motion.span`，`layoutId` 跟着「最后点的那个」走；复用 `SPRING`（stiffness 420 / damping 34 / mass 0.7），`useReducedMotion()` 时退化为 `{duration: 0}`。
-- 多选表现：主项（最后点的）是黑胶囊 + 白字；其余被选中的项给一层 `bg-wash` 浅底 + 深字。所以多选时既看得出「一共选了哪几个」，又只有一个椭圆在移动。
-- 交互（照文件管理器）：单击只留这一项；`Ctrl`/`⌘` 点击加/减一项；`Shift` 点击从上一次的锚点选一段（`Shift+Ctrl` 把这段并入现有选择）；点「全部」或再点唯一选中项都回到全部；`←`/`→` 移动焦点并顺带选中。
-- 宽度：外层从 `flex` 改成 `w-fit max-w-full`，之前它作为块级 flex 被拉满整行，右边空出一大片。
-- 溢出：内层横向滚动（隐藏滚动条），选中屏幕外的项时 `scrollIntoView({inline:"nearest"})` 把它带回可视区。
-- 语义：平台筛选重新支持多选，AI 给出的多个平台原样落进来；同一件事的多平台对照仍在详情页的同题模块。
+- 分段判据：按 `PLATFORMS` 顺序扫一遍选中集合，相邻的归为一段；「全部」永远独占一段。
+- 视觉：段内是一个整体黑胶囊，段与段之间保持原来的间隙；段内每项保留自己的内边距与圆点，不再加内边框，避免「胶囊里还有缝」。
+- 动画：每段一个 `motion.span`，`layoutId={"rail-"+id+"-"+段首 id}` 让段在合并/拆分/拖动时是同一个元素在变形；宽度靠 `layout` 自动补间。新出现的段用 `initial={{opacity: 0, scaleX: .86}}`，`transformOrigin` 朝向已选区域那一侧（新段位于已有段之后 → `left`，之前 → `right`），复用 `SPRING`（stiffness 420 / damping 34 / mass 0.7）；`useReducedMotion()` 退化为 `{duration: 0}`。
+- 合并与拆分：往段边上 Ctrl 加一项 → 两段并成一段，宽度朝那一侧长出去；挖掉段中间一项 → 一段劈成两段；Shift 选一段 → 直接生成一整段。
+- 交互（照文件管理器）：单击只留这一项；`Ctrl`/`⌘` 点击加/减一项；`Shift` 点击从锚点选一段（`Shift+Ctrl` 并入现有选择）；点「全部」或再点唯一选中项回全部；`←`/`→` 移动焦点并顺带选中。
+- 宽度与溢出：外层 `w-fit max-w-full`；内层横向滚动（隐藏滚动条），选中屏幕外的项时 `scrollIntoView({inline: "nearest"})` 带回可视区。
 
-实测（1440×900，探针 `probes/check_tabrail_multi.py`，11 项全过）：胶囊外框宽 726px（内容宽），不再撑满 1440；单击 B 站 → 只有 B 站；Ctrl 点抖音 → 两个；再 Shift 点知乎 → `douyin/juejin/v2ex/zhihu` 四项且高亮在知乎；Ctrl 再点抖音 → 三项；普通点掘金 → 只剩掘金；再点掘金 → 回到全部；点「全部」→ 清空。截图 `design/tabrail-multi.png`（亮）、`tabrail-multi-dark.png`（暗），另有单选期的 `tabrail-light-all.png`、`tabrail-moving.png`、`tabrail-dark.png`。
+实测（1440×900，`probes/check_tabrail_multi.py` 13 项全过）：B 站 + 小红书（相邻）合成一条，宽度等于两枚胶囊之和（误差 ≤8px）；再 Ctrl 加抖音、掘金，四项仍是一条；Ctrl 挖掉中间的小红书 → 劈成 `[B 站]` 与 `[抖音, 掘金]` 两条；Shift 从 B 站到 V2EX 一次成条；段内 Ctrl 取消掘金 → 劈成 `[B 站, 小红书, 抖音]` 与 `[V2EX]`。`probes/check_tabrail_runs.py` 另测合并宽度、断开与扩散中间帧。截图：`design/tabrail-run-merged.png`（合并成条）、`tabrail-run-split.png`（断开成两条）、`tabrail-run-split-growing.png`（新段长出来的中间帧）、`tabrail-run-shift.png`（Shift 整段）、`tabrail-multi.png`（亮）、`tabrail-multi-dark.png`（暗）。
 
-移掉 Radix 后包体从 426.67 kB 回落到 402.40 kB（gzip 129.28 kB）。
+包体：移掉 Radix 时从 426.67 kB 回落到 402.40 kB；分段胶囊这一版为 407.41 kB（gzip 130.6 kB），多段 `layout` 的代价。
 
