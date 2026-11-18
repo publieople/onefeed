@@ -1,5 +1,6 @@
-import type { CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
 import { motion } from "framer-motion";
+import { prefetchItem } from "../api";
 import { FileText, Heart, Image as ImageIcon, MessageCircle, Play, Quote } from "lucide-react";
 import type { FeedItem } from "../api";
 import { KIND_LABEL, platform } from "../platform";
@@ -7,10 +8,10 @@ import { duration, num, timeAgo } from "../format";
 
 interface Props {
   item: FeedItem;
-  /** 一起把被点的卡片元素交出去：跳页时要给它一个 view-transition-name */
+  /** 一起把被点的卡片元素交出去：跳页时要给里面的媒体框和标题挂共享元素名字 */
   onOpen: (id: string, el: HTMLElement) => void;
-  /** 从详情页返回时，给目标卡片挂上 of-card，让详情页缩回它的位置 */
-  vtName?: string;
+  /** 从详情页返回时，给目标卡片的媒体框和标题挂上 of-media / of-title，让详情页缩回它的位置 */
+  vtNames?: { media?: string | null; title?: string | null };
 }
 
 function hexAlpha(hex: string, alpha: number): string {
@@ -209,28 +210,40 @@ function MetaLine({ item, body }: { item: FeedItem; body: string }) {
   );
 }
 
-export default function Card({ item, onOpen, vtName }: Props) {
+export default function Card({ item, onOpen, vtNames }: Props) {
   const p = platform(item.platform);
   const body = excerpt(item);
   const kindLabel = KIND_LABEL[item.kind] ?? item.kind;
+  const hoverTimer = useRef<number | null>(null);
+
+  /* 指针停一下就开始预取：转场结束时数据大概率已经就位，不会飞进去撞见骨架屏 */
+  const schedulePrefetch = () => {
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => prefetchItem(item.id), 260);
+  };
+  const cancelPrefetch = () => {
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  };
 
   return (
-    <motion.article
-      role="button"
-      tabIndex={0}
+    <motion.a
+      href={"/item/" + encodeURIComponent(item.id)}
       aria-label={p.label + " · " + kindLabel + " · " + item.title}
-      onClick={(e) => onOpen(item.id, e.currentTarget)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen(item.id, e.currentTarget);
-        }
+      onClick={(e) => {
+        // 只接管「普通左键单击」这一种。中键、⌘/Ctrl+单击、Shift+单击仍旧交给浏览器：
+        // 聚合器的核心用法就是一次开一堆标签页，不能因为做了转场就把这条路堵死。
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        onOpen(item.id, e.currentTarget);
       }}
-      style={vtName ? { viewTransitionName: vtName } : undefined}
+      onPointerEnter={schedulePrefetch}
+      onPointerLeave={cancelPrefetch}
+      onFocus={schedulePrefetch}
       whileHover={{ y: -2 }}
       whileTap={{ scale: 0.985 }}
       transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.7 }}
-      className="group flex h-full min-h-[16rem] cursor-pointer flex-col rounded-card border border-line bg-paper p-3 text-left transition-colors hover:border-ink/25 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+      className="group flex h-full min-h-[16rem] flex-col rounded-card border border-line bg-paper p-3 text-left no-underline transition-colors hover:border-ink/25 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
     >
       <header className="flex h-5 shrink-0 items-center gap-2 text-[11px]">
         <PlatformBadge item={item} />
@@ -238,11 +251,22 @@ export default function Card({ item, onOpen, vtName }: Props) {
         {item.published_at ? <span className="ml-auto tabular-nums text-fade">{timeAgo(item.published_at)}</span> : null}
       </header>
 
-      <div className="mt-2.5 shrink-0">
+      {/* 这两块是共享元素的两端：点开时它们从卡片里长大成详情页的媒体区和标题 */}
+      <div
+        data-vt="media"
+        className="mt-2.5 shrink-0"
+        style={vtNames?.media ? { viewTransitionName: vtNames.media } : undefined}
+      >
         <Media item={item} />
       </div>
 
-      <h3 className="clamp-2 mt-2.5 h-[46px] shrink-0 text-[16px] font-semibold leading-[1.42] tracking-tight">{item.title}</h3>
+      <h3
+        data-vt="title"
+        className="clamp-2 mt-2.5 h-[46px] shrink-0 text-[16px] font-semibold leading-[1.42] tracking-tight"
+        style={vtNames?.title ? { viewTransitionName: vtNames.title } : undefined}
+      >
+        {item.title}
+      </h3>
 
       <MetaLine item={item} body={body} />
 
@@ -279,6 +303,6 @@ export default function Card({ item, onOpen, vtName }: Props) {
           ) : null}
         </span>
       </footer>
-    </motion.article>
+    </motion.a>
   );
 }

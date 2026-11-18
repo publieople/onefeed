@@ -14,6 +14,8 @@ export default {
         wash: "rgb(var(--c-wash) / <alpha-value>)",
         solid: "rgb(var(--c-solid) / <alpha-value>)",
         "solid-fg": "rgb(var(--c-solid-fg) / <alpha-value>)",
+        danger: "rgb(var(--c-danger) / <alpha-value>)",
+        "danger-fg": "rgb(var(--c-danger-fg) / <alpha-value>)",
       },
       fontFamily: {
         sans: ['"PingFang SC"', '"Microsoft YaHei"', "system-ui", "-apple-system", "sans-serif"],

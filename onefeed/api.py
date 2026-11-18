@@ -61,6 +61,11 @@ def _runner(request: Request) -> RefreshRunner:
     return request.app.state.refresher
 
 
+def _sse(event: dict[str, Any]) -> str:
+    """一条 SSE 事件。ensure_ascii=False 是必须的：中文别被转义成六字符，白白多占带宽。"""
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
 def _apply_settings(request: Request, conf: dict[str, Any],
                     touched: set[str] | None = None) -> list[str]:
     """把设置落到活着的对象上，返回"这次真正生效了什么"给前端显示。"""
@@ -296,10 +301,13 @@ def agent_run_confirm(request: Request, run_id: str,
 
 @router.post("/agent/runs/{run_id}/cancel")
 def agent_run_cancel(request: Request, run_id: str) -> dict:
+    """置停止位，交给跑着的那条线程自己收尾（它会写 cancelled 事件并落库）。
+
+    以前这里直接把 run 标成 cancelled：库先变了、线程还在跑工具，SSE 立刻收流，
+    前端只能看到「事件流断了」，模型却可能继续发动作。
+    """
     ok = _agent_runtime().cancel(run_id)
-    if ok:
-        _store(request).finish_agent_run(run_id, "cancelled", reply="已取消")
-    return {"ok": ok}
+    return {"ok": ok, "cancelling": ok}
 
 
 @router.get("/agent/runs")
@@ -484,6 +492,48 @@ def item_summary(request: Request, item_id: str, refresh: bool = Query(False)) -
     store.save_summary(item_id, payload)
     return {"ok": True, "summary": payload, "from_cache": False,
             "fetched_at": int(time.time())}
+
+
+@router.get("/item/{item_id}/summary/stream")
+def item_summary_stream(request: Request, item_id: str,
+                        refresh: bool = Query(False)) -> StreamingResponse:
+    """AI 总结（流式）：一行行吐，用户不用干等十几秒盯一块骨架屏。
+
+    事件协议：meta → delta* → done（或 error），每条都是 data: {json}\n\n。
+    """
+    store = _store(request)
+    row = store.get_item(item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "item_not_found", "message": f"没有这条内容：{item_id}",
+            "hint": "从 /api/feed 的返回里取 id"})
+    host = _runner(request).host
+
+    def events() -> Any:
+        # 先发一个注释行：浏览器收到首块才会把状态从「连接中」切过来
+        yield ": open\n\n"
+        if not refresh:
+            cached = store.get_summary(item_id)
+            if cached and isinstance(cached.get("payload"), dict) \
+                    and cached["payload"].get("tldr") is not None:
+                yield _sse({"type": "done", "from_cache": True, "summary": cached["payload"]})
+                return
+        try:
+            for event in summary_mod.stream_build(store, host, row):
+                if event.get("type") == "done" and isinstance(event.get("summary"), dict):
+                    try:
+                        store.save_summary(item_id, event["summary"])
+                    except Exception:  # noqa: BLE001 - 存不进缓存也别让流断在半路
+                        pass
+                yield _sse(event)
+        except Exception as exc:  # noqa: BLE001 - 前端只要一句原因
+            yield _sse({"type": "error", "message": str(exc)[:300]})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"})
 
 
 @router.get("/item/{item_id}/detail")

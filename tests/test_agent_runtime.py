@@ -306,6 +306,39 @@ def main() -> int:
     check(store.get_agent_run(started["run_id"], steps=False)["status"] == "done",
           "异步运行最终做完")
 
+    # 叫停：模型还在调工具时置停止位，这一轮必须真的停在半路（不是假装 done/error）
+    def scripted_slow(messages, info):
+        returned = [p for m in messages for p in getattr(m, "parts", [])
+                    if isinstance(p, ToolReturnPart)]
+        if len(returned) < 8:
+            time.sleep(0.12)
+            return ModelResponse(parts=[ToolCallPart("search_items", {"terms": ["AI"]})])
+        return ModelResponse(parts=[answer_part(info, "搜完了。", [])])
+
+    started_c = rt.start(store, "慢慢搜", chain=CHAIN,
+                         model=FunctionModel(scripted_slow), timeout=30)
+    time.sleep(0.25)
+    check(rt.cancel(started_c["run_id"]) is True, "cancel 能置上停止位")
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        row_c = store.get_agent_run(started_c["run_id"], steps=False)
+        if row_c and row_c["status"] != "running":
+            break
+        time.sleep(0.05)
+    row_c = store.get_agent_run(started_c["run_id"])
+    check(row_c["status"] == "cancelled", "叫停后落库为 cancelled（不是 done/error）")
+    kinds_c = [e["kind"] for e in row_c["events"]]
+    check(kinds_c[-1] == "cancelled", "cancelled 是最后一帧，后面不再有动作")
+    check(any(e["kind"] == "step" and e["name"] == "stop" for e in row_c["events"]),
+          "留一帧「已按你的要求停下」")
+    n_tool = sum(1 for k in kinds_c if k == "tool")
+    time.sleep(0.3)
+    check(sum(1 for e in store.get_agent_run(started_c["run_id"])["events"]
+              if e["kind"] == "tool") == n_tool, "叫停之后不再执行新的动作")
+    frames = list(rt.sse_stream(store, started_c["run_id"]))
+    check(any('"cancelled"' in f for f in frames), "SSE 收尾把 cancelled 帧发出去")
+    check(rt.cancel("no-such-run") is False, "不存在的 run 叫停返回 False")
+
     # ---------------------------------------------------------------- 4) HTTP
     settings_mod.save({"ai_agent": True})
     client = TestClient(create_app(store))

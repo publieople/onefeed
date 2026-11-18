@@ -1,10 +1,12 @@
-import { ArrowUp, Loader2, Sparkles, Wand2, X } from "lucide-react";
+import { ArrowUp, Loader2, Sparkles, Square, Wand2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { AgentEvent, AiResponse, FeedItem } from "../api";
 import { agentCancel, agentConfirm, agentStart, agentStream, aiChat, ApiError } from "../api";
 import { platform } from "../platform";
+import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
+import { DUR, EASE, SPRING_SOFT } from "../motion/tokens";
 import AgentConsole from "./AgentConsole";
 import FilterBox from "./FilterBox";
 
@@ -14,7 +16,12 @@ interface Turn {
   data?: AiResponse;
   /** Agent 这轮留下的轨迹（回放同一份） */
   trace?: AgentEvent[];
+  /** 这轮是用户叫停的：文案与「正常答完」区分开 */
+  stopped?: boolean;
 }
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
 
 const HINTS = [
   "今天 B 站有什么 AI 的",
@@ -31,13 +38,105 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
   const [manual, setManual] = useState(false);
   const [live, setLive] = useState<{ run_id: string; events: AgentEvent[] } | null>(null);
   const [answered, setAnswered] = useState<Record<string, boolean>>({});
+  const [stopping, setStopping] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [hintIndex, setHintIndex] = useState(0);
   const streamRef = useRef<null | (() => void)>(null);
   const settledRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const stopTimerRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
 
-  useEffect(() => () => streamRef.current?.(), []);
+  const clearStopTimer = () => {
+    if (stopTimerRef.current) {
+      window.clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+  };
+
+  /** 关面板：焦点若在面板里就还给输入框，否则键盘用户会掉到 body 上 */
+  const close = () => {
+    if (panelRef.current?.contains(document.activeElement)) inputRef.current?.focus();
+    setOpen(false);
+  };
+
+  useEffect(
+    () => () => {
+      streamRef.current?.();
+      clearStopTimer();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    pushScope("dialog");
+    return () => popScope("dialog");
+  }, [open]);
+
+  useHotkeys("dialog", { escape: () => close() }, open);
+
+  // 桌面端没有遮罩，点面板外要能关；用 pointerdown 而不是 click，避免拖选文字时误关
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const root = dockRef.current;
+      if (!root) return;
+      if (!root.contains(e.target as Node)) close();
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  // 占位文案每 4s 换一条：静态 placeholder 教不会用户该怎么问
+  useEffect(() => {
+    if (focused || text) return;
+    const timer = window.setInterval(() => setHintIndex((i) => (i + 1) % HINTS.length), 4000);
+    return () => window.clearInterval(timer);
+  }, [focused, text]);
+
+  // 全局 ⌘K / "/" 由 App 派发，这里只负责展开并聚焦
+  useEffect(() => {
+    const onAsk = () => {
+      setOpen(true);
+      inputRef.current?.focus();
+    };
+    window.addEventListener("onefeed:ask", onAsk);
+    return () => window.removeEventListener("onefeed:ask", onAsk);
+  }, []);
+
+  // Tab 只在这一组（面板 + 输入框）里循环：不放行的话焦点会跑到浏览器 UI 上
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
+      const root = dockRef.current;
+      if (!root) return;
+      const nodes = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (n) => n.offsetParent !== null || n === document.activeElement,
+      );
+      if (!nodes.length) return;
+      const first = nodes[0];
+      const lastNode = nodes[nodes.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!root.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      } else if (!e.shiftKey && active === lastNode) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        lastNode.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
@@ -63,9 +162,54 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
     }
   };
 
+  /** 收尾：done 与 cancelled 共用一份 payload 组装，只差一句文案与标记 */
+  const settle = (event: AgentEvent, stopped: boolean, trace: AgentEvent[]) => {
+    settledRef.current = true;
+    streamRef.current?.();
+    streamRef.current = null;
+    clearStopTimer();
+    const d = (event.data ?? {}) as Record<string, any>;
+    const items: FeedItem[] = Array.isArray(d.items) ? d.items : [];
+    const data: AiResponse = {
+      engine: "agent",
+      provider: typeof d.provider === "string" ? d.provider : "",
+      plan:
+        (d.plan as AiResponse["plan"]) ?? {
+          mode: "agent",
+          platforms: [],
+          kinds: [],
+          since: null,
+          keyword: "",
+          sort: "freshness",
+        },
+      reply: String(d.reply ?? ""),
+      items,
+      count: items.length,
+      suggestions: Array.isArray(d.suggestions) ? d.suggestions : [],
+      understood: String(d.understood ?? ""),
+      steps: Number(d.usage?.steps ?? 0),
+      ms: Number(d.usage?.ms ?? 0),
+    };
+    setTurns((prev) => [
+      ...prev,
+      {
+        role: "ai",
+        text: data.reply || (stopped ? "停下了。" : `翻到 ${items.length} 条。`),
+        data,
+        trace,
+        stopped,
+      },
+    ]);
+    setLive(null);
+    setBusy(false);
+    setStopping(false);
+    cancelledRef.current = false;
+  };
+
   const listen = (runId: string) => {
     const events: AgentEvent[] = [];
     settledRef.current = false;
+    cancelledRef.current = false;
     setAnswered({});
     setLive({ run_id: runId, events: [] });
     streamRef.current?.();
@@ -75,46 +219,23 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
         events.push(event);
         setLive({ run_id: runId, events: [...events] });
         if (event.kind === "action") applyUi(event);
-        if (event.kind === "done") {
-          settledRef.current = true;
-          streamRef.current?.();
-          streamRef.current = null;
-          const d = event.data as Record<string, any>;
-          const items: FeedItem[] = Array.isArray(d.items) ? d.items : [];
-          const data: AiResponse = {
-            engine: "agent",
-            provider: typeof d.provider === "string" ? d.provider : "",
-            plan:
-              (d.plan as AiResponse["plan"]) ?? {
-                mode: "agent",
-                platforms: [],
-                kinds: [],
-                since: null,
-                keyword: "",
-                sort: "freshness",
-              },
-            reply: String(d.reply ?? ""),
-            items,
-            count: items.length,
-            suggestions: Array.isArray(d.suggestions) ? d.suggestions : [],
-            understood: String(d.understood ?? ""),
-            steps: Number(d.usage?.steps ?? 0),
-            ms: Number(d.usage?.ms ?? 0),
-          };
-          setTurns((prev) => [
-            ...prev,
-            { role: "ai", text: data.reply || `翻到 ${items.length} 条。`, data, trace: events.slice() },
-          ]);
-          setLive(null);
-          setBusy(false);
-        }
+        if (event.kind === "done") settle(event, false, events.slice());
+        else if (event.kind === "cancelled") settle(event, true, events.slice());
       },
       (msg) => {
         if (settledRef.current) return;
         settledRef.current = true;
         streamRef.current = null;
+        clearStopTimer();
         setLive(null);
         setBusy(false);
+        setStopping(false);
+        if (cancelledRef.current) {
+          // 叫停时后端本来就会关流：这是预期，不该报「事件流断了」
+          cancelledRef.current = false;
+          setTurns((prev) => [...prev, { role: "ai", text: "停下了。", stopped: true }]);
+          return;
+        }
         say(`${msg}，稍后再试。`);
       },
     );
@@ -136,6 +257,9 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
     if (!said || busy) return;
     setText("");
     setOpen(true);
+    clearStopTimer();
+    cancelledRef.current = false;
+    setStopping(false);
     setBusy(true);
     setTurns((prev) => [...prev, { role: "user", text: said }]);
     const history = turns.slice(-4).map((t) => ({
@@ -169,11 +293,37 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
   };
 
   const stop = async () => {
-    if (!live) return;
+    if (!live || stopping) return;
+    cancelledRef.current = true;
+    setStopping(true);
+    // 兜底：后端线程可能正卡在一次模型请求里，SSE 迟迟不关时不至于让按钮一直转
+    clearStopTimer();
+    stopTimerRef.current = window.setTimeout(() => {
+      settledRef.current = true;
+      streamRef.current?.();
+      streamRef.current = null;
+      setLive(null);
+      setBusy(false);
+      setStopping(false);
+      cancelledRef.current = false;
+      say("停下了。");
+    }, 8000);
     try {
-      await agentCancel(live.run_id);
+      const res = await agentCancel(live.run_id);
+      if (!res.ok) {
+        // 停止位没置上 = 这轮早结束了
+        clearStopTimer();
+        cancelledRef.current = false;
+        setStopping(false);
+        setBusy(false);
+        setLive(null);
+        say("这轮已经结束了。");
+      }
     } catch {
-      /* 已经结束了 */
+      clearStopTimer();
+      cancelledRef.current = false;
+      setStopping(false);
+      say("没能叫停，稍后再试。");
     }
   };
 
@@ -202,8 +352,9 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: reduce ? 0 : 0.18 }}
-            className="fixed inset-0 z-30 bg-solid/10 md:bg-transparent"
-            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30 bg-solid/10 md:hidden"
+            onClick={close}
+            aria-hidden
           />
         ) : null}
       </AnimatePresence>
@@ -211,30 +362,41 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
       {/* 挂到 body：切页动画会给页面容器加 transform，fixed 元素留在里面会跟着跑 */}
       {createPortal(
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4">
-        <div className="pointer-events-auto w-full max-w-[760px]">
-          <AnimatePresence initial={false}>
+        {/* DOM 顺序：面板在前、输入框在后（面板在视觉上方）。Tab 用下面的焦点陷阱在两者之间循环 */}
+        <div ref={dockRef} className="pointer-events-auto flex w-full max-w-[760px] flex-col gap-3">
+          {/* 不用 AnimatePresence：退出动画在动画帧被节流的环境（隐藏标签页 / reduce）里可能永远不结束，
+              面板会卡在 DOM 里关不掉。关闭要即时，入场动画保留。 */}
           {open ? (
             <motion.div
               key="panel"
-              initial={{ opacity: 0, y: 12, scale: 0.985 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.99 }}
-              transition={{ duration: reduce ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
-              className="mb-3 flex max-h-[62vh] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
+              ref={panelRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="找内容"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={reduce ? { duration: 0 } : { type: "tween", duration: DUR.base, ease: EASE }}
+              className="flex max-h-[62vh] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
             >
               <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
                 <Sparkles size={14} className="text-ink" />
                 <span className="text-[13px] font-medium">找内容</span>
                 <button
-                  onClick={() => setOpen(false)}
+                  onClick={close}
                   className="ml-auto rounded p-1 text-fade transition hover:bg-wash hover:text-ink"
                   aria-label="收起"
+                  title="收起（Esc）"
                 >
                   <X size={15} />
                 </button>
               </div>
 
-              <div ref={listRef} className="min-h-[180px] flex-1 space-y-4 overflow-y-auto px-4 py-4">
+              <div
+                ref={listRef}
+                aria-live="polite"
+                aria-relevant="additions text"
+                className="min-h-[180px] flex-1 space-y-4 overflow-y-auto px-4 py-4"
+              >
                 {turns.length === 0 ? (
                   <div className="space-y-2">
                     <p className="text-[13px] text-muted">你可以直接说要什么，平台、时间、类型都算数。</p>
@@ -267,6 +429,12 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                         </span>
                         <div className="min-w-0">
                           <p className="text-[13px] leading-relaxed">{turn.text}</p>
+                          {turn.stopped ? (
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11px] text-fade">
+                              <Square size={8} fill="currentColor" />
+                              按你点的停止收的尾
+                            </span>
+                          ) : null}
                           {turn.data ? (
                             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-fade">
                               <span className="rounded-full border border-line px-2 py-0.5">{turn.data.understood}</span>
@@ -336,9 +504,16 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                     <div className="flex items-center gap-2 pl-1">
                       <button
                         onClick={() => void stop()}
-                        className="rounded-full border border-line px-2.5 py-1 text-[11px] text-fade transition hover:border-ink/25 hover:text-ink"
+                        disabled={stopping}
+                        aria-label={stopping ? "正在停止" : "停止这一轮"}
+                        className="flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[11px] text-fade transition hover:border-ink/25 hover:text-ink disabled:opacity-60"
                       >
-                        停止
+                        {stopping ? (
+                          <Loader2 size={11} className="animate-spin" />
+                        ) : (
+                          <Square size={9} fill="currentColor" />
+                        )}
+                        {stopping ? "正在停止" : "停止"}
                       </button>
                     </div>
                   </div>
@@ -383,24 +558,42 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
               </div>
             </motion.div>
           ) : null}
-          </AnimatePresence>
 
-          <form
+          <motion.form
             onSubmit={(e) => {
               e.preventDefault();
               void ask(text);
             }}
-            className="flex h-12 items-center gap-2 rounded-full border border-line bg-paper/95 px-3 shadow-[0_10px_30px_rgba(20,20,20,0.12)] backdrop-blur transition focus-within:border-ink/30"
+            animate={reduce ? undefined : { scale: focused ? 1.012 : 1, y: focused ? -1 : 0 }}
+            transition={SPRING_SOFT}
+            className={`flex h-12 items-center gap-2 border bg-paper/95 px-3 backdrop-blur transition-[border-color,box-shadow,border-radius] duration-200 ${open ? "rounded-[22px]" : "rounded-full"} ${
+              focused
+                ? "border-ink/35 shadow-[0_12px_34px_rgba(20,20,20,0.16)]"
+                : "border-line shadow-[0_10px_30px_rgba(20,20,20,0.12)]"
+            }`}
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-solid text-solid-fg">
+            <motion.span
+              animate={reduce ? undefined : { rotate: focused ? -10 : 0, scale: focused ? 1.06 : 1 }}
+              transition={SPRING_SOFT}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-solid text-solid-fg"
+            >
               <Wand2 size={14} />
-            </span>
+            </motion.span>
             <input
               ref={inputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              onFocus={() => setOpen(true)}
-              placeholder="问 OneFeed：帮我把今天 B 站和知乎的 AI 内容挑出来"
+              onFocus={() => setFocused(true)}
+              onClick={() => setOpen(true)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+                  e.preventDefault();
+                  setOpen(true);
+                }
+              }}
+              onBlur={() => setFocused(false)}
+              aria-label="向 OneFeed 提问"
+              placeholder={"问 OneFeed：" + HINTS[hintIndex]}
               className="h-full flex-1 bg-transparent text-[13px] outline-none placeholder:text-fade"
             />
             {last ? (
@@ -412,15 +605,52 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                 刷一刷
               </button>
             ) : null}
-            <button
-              type="submit"
-              disabled={busy || !text.trim()}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-solid text-solid-fg transition disabled:opacity-30"
-              aria-label="发送"
-            >
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={15} />}
-            </button>
-          </form>
+            {/* 同一个位置：不忙时是「发送」，忙时变「停止」——不用去面板里找那颗按钮 */}
+            {busy ? (
+              <motion.button
+                key="stop"
+                type="button"
+                onClick={() => void stop()}
+                disabled={stopping}
+                whileTap={stopping ? undefined : { scale: 0.9 }}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-solid text-solid-fg transition disabled:opacity-60"
+                aria-label={stopping ? "正在停止" : "停止这一轮"}
+                title={stopping ? "正在停止…" : "停止这一轮"}
+              >
+                {stopping ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <motion.span
+                    key="square"
+                    initial={reduce ? undefined : { scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: reduce ? 0 : 0.14 }}
+                    className="flex"
+                  >
+                    <Square size={11} fill="currentColor" />
+                  </motion.span>
+                )}
+              </motion.button>
+            ) : (
+              <motion.button
+                key="send"
+                type="submit"
+                disabled={!text.trim()}
+                whileTap={text.trim() ? { scale: 0.9 } : undefined}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-solid text-solid-fg transition disabled:opacity-30"
+                aria-label="发送"
+              >
+                <motion.span
+                  initial={reduce ? undefined : { y: 6, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: reduce ? 0 : 0.16 }}
+                  className="flex"
+                >
+                  <ArrowUp size={15} />
+                </motion.span>
+              </motion.button>
+            )}
+          </motion.form>
         </div>
       </div>,
       document.body,

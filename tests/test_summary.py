@@ -160,6 +160,86 @@ def test_build_llm_and_fallback() -> None:
         raise AssertionError("空素材应当报错")
 
 
+class _PatchedStream:
+    """把 ai.stream_complete 换成假的流式函数，退出时还原。"""
+
+    def __init__(self, fn):
+        self.fn = fn
+        self.before = None
+
+    def __enter__(self):
+        self.before = ai_mod.stream_complete
+        ai_mod.stream_complete = self.fn
+        return self
+
+    def __exit__(self, *exc):
+        ai_mod.stream_complete = self.before
+        return False
+
+
+def test_parse_lines() -> None:
+    raw = ("TLDR: 平台涨价引发不满\n"
+           "- [00:12] 会员价上调 30%\n"
+           "- [01:05] 用户吐槽自动续费\n"
+           "· 结尾提到下月补偿\n"
+           "注: 素材只覆盖一半")
+    parsed = summary_mod.parse_lines(raw, 600)
+    check(parsed is not None and parsed["tldr"] == "平台涨价引发不满", "行协议解析出 TLDR")
+    check([p.get("t") for p in parsed["points"]] == [12, 65, None], "行协议时间点与圆点都收")
+    check(parsed["caveat"] == "素材只覆盖一半", "行协议解析出备注")
+
+    check(summary_mod.parse_lines("TLDR: 只有结论", 0)["points"] == [], "只有 TLDR 也算解析成功")
+    check(summary_mod.parse_lines("", 0) is None, "空文本返回 None")
+    lost = summary_mod.parse_lines("这句话没写前缀\n- 一条要点", 100)
+    check(lost["tldr"] == "这句话没写前缀", "忘写前缀时拿第一句正文顶结论")
+    big = summary_mod.parse_lines("\n".join(f"- p{i}" for i in range(9)), 0)
+    check(len(big["points"]) == summary_mod.POINT_MAX, "行协议要点也封顶")
+
+
+def test_stream_build() -> None:
+    src = timed((0, "开场"), (60, "中段"), (600, "结尾"))
+    host = SimpleNamespace(summary_source=lambda pid, row: src)
+    row = {"id": "bilibili:video:1", "platform": "bilibili", "title": "标题",
+           "text": "", "duration": 600}
+    store = SimpleNamespace(get_detail=lambda item_id, max_age=0: None)
+
+    def fake_stream(messages, max_tokens=900, temperature=0.3):
+        yield "thinking", "", {"name": "MiniMax", "model": "MiniMax-M3.1-Flash"}
+        for piece in ["TLDR: 看懂了\n", "- [01:00] 中段\n", "- 结尾"]:
+            yield "content", piece, {"name": "MiniMax", "model": "MiniMax-M3.1-Flash"}
+
+    with _PatchedStream(fake_stream):
+        events = list(summary_mod.stream_build(store, host, row))
+    kinds = [e["type"] for e in events]
+    check(kinds[0] == "meta" and kinds[-1] == "done", "先发 meta 再发 done")
+    check(kinds.count("delta") == 3, "三块都转发成 delta")
+    check(kinds.count("status") == 1, "思维链只报一次「在想」，不重复刷屏")
+    check("".join(e["text"] for e in events if e["type"] == "delta").startswith("TLDR: 看懂了"),
+          "delta 拼起来就是模型原文")
+    done = events[-1]["summary"]
+    check(done["engine"] == "llm" and done["provider"] == "MiniMax", "流式收尾记 provider")
+    check(done["tldr"] == "看懂了" and done["points"][0]["t"] == 60, "流式结果解析出结论与时间点")
+    check(events[0]["basis_text"] == "完整字幕", "meta 带素材档位")
+
+    def boom_now(messages, max_tokens=900, temperature=0.3):
+        raise RuntimeError("401 unauthorized")
+        yield  # pragma: no cover - 让函数保持生成器
+
+    with _PatchedStream(boom_now):
+        fallback = list(summary_mod.stream_build(store, host, row))[-1]
+    check(fallback["type"] == "done" and fallback.get("fallback") is True, "模型没开张就退回规则")
+    check(fallback["summary"]["engine"] == "rules", "兜底结果标 rules")
+
+    def boom_late(messages, max_tokens=900, temperature=0.3):
+        yield "content", "TLDR: 说到一半\n", {"name": "MiniMax", "model": "MiniMax-M3.1-Flash"}
+        raise RuntimeError("连接被重置")
+
+    with _PatchedStream(boom_late):
+        partial = list(summary_mod.stream_build(store, host, row))[-1]
+    check(partial["summary"]["engine"] == "llm", "断流时保留已生成的部分")
+    check("中途断了" in partial["summary"]["caveat"], "断流会在注意里说清楚")
+
+
 def test_store_and_api() -> None:
     tmp = Path(__file__).resolve().parents[1] / ".onefeed" / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)
@@ -218,6 +298,8 @@ def main() -> int:
     test_material()
     test_rule_summary()
     test_build_llm_and_fallback()
+    test_parse_lines()
+    test_stream_build()
     test_store_and_api()
     print(f"✅ test_summary: {CHECKS} 项通过")
     return 0

@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Loader2, Plus, Trash2, Zap } from "lucide-react";
 import { useState } from "react";
 import { aiTest, type AiProvider, type AiStatus, type AiTestResult } from "../api";
+import { confirmDialog } from "./ui/Confirm";
 
 const PRESETS = [
   { name: "MiniMax", base_url: "https://api.minimaxi.com/v1", model: "MiniMax-M3.1-Flash" },
@@ -125,9 +126,22 @@ export default function AiProviders({ value, onChange, status }: Props) {
                 <ArrowDown size={13} />
               </button>
               <button
-                onClick={() => onChange(value.filter((p) => p.id !== row.id))}
-                className="rounded p-1 text-fade hover:text-red-600"
-                title="删掉"
+                onClick={async () => {
+                  // 删一行本身不落盘，但这台模型已存的 key 会在保存后一起丢掉，所以要问一句
+                  const saved = status?.providers?.some((s) => s.id === row.id && s.key_set);
+                  if (saved) {
+                    const ok = await confirmDialog({
+                      title: "删掉 " + (row.name || "这台模型") + "？",
+                      body: "保存设置后，这一行填过的 key 也会一起删掉，之后要用得重新填。",
+                      confirmText: "删掉",
+                      tone: "danger",
+                    });
+                    if (!ok) return;
+                  }
+                  onChange(value.filter((p) => p.id !== row.id));
+                }}
+                className="rounded p-1 text-fade hover:text-danger"
+                title={status?.providers?.some((s) => s.id === row.id && s.key_set) ? "删掉（含已存的 key）" : "删掉"}
               >
                 <Trash2 size={13} />
               </button>

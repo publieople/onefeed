@@ -213,6 +213,7 @@ export default function TabRail({ items, value, onChange, label }: Props) {
   const [primary, setPrimary] = useState<string>("all");
   const [boxes, setBoxes] = useState<Record<string, ItemBox>>({});
   const [focused, setFocused] = useState<string | null>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
   const [ghosts, setGhosts] = useState<{ gid: string; run: Run; box: Box; absorbed: boolean }[]>([]);
   const [blooms, setBlooms] = useState<{ bid: string; box: Box }[]>([]);
   const seen = useRef<Run[]>([]);
@@ -255,6 +256,25 @@ export default function TabRail({ items, value, onChange, label }: Props) {
   useLayoutEffect(() => {
     measure();
   }, [measure, items, value]);
+
+  // 轨道横向溢出时给两侧加渐隐，否则用户不知道右边还有平台（滚动条是被藏掉的）
+  useEffect(() => {
+    const root = rail.current;
+    if (!root) return;
+    const sync = () =>
+      setEdges({
+        left: root.scrollLeft > 4,
+        right: root.scrollLeft + root.clientWidth < root.scrollWidth - 4,
+      });
+    sync();
+    root.addEventListener("scroll", sync, { passive: true });
+    const observer = new ResizeObserver(sync);
+    observer.observe(root);
+    return () => {
+      root.removeEventListener("scroll", sync);
+      observer.disconnect();
+    };
+  }, [items.length]);
 
   useEffect(() => {
     const root = rail.current;
@@ -467,22 +487,40 @@ export default function TabRail({ items, value, onChange, label }: Props) {
     bring(target);
   };
 
+  // 方向键只挪焦点，不选：以前挪一格就发一次 /api/feed，键盘用户没法先看一眼再决定。
+  // 选中交给 Enter / Space（button 原生行为）。
   const step = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    // Esc 一键退回「全部」：多选状态被键盘困住时总得有条出路
+    if (event.key === "Escape") {
+      if (!value.length) return;
+      event.preventDefault();
+      choose("all", { ctrl: false, shift: false });
+      rail.current?.querySelector<HTMLElement>('[data-value="all"]')?.focus();
+      return;
+    }
+    const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!keys.includes(event.key)) return;
     event.preventDefault();
     const order = ["all", ...platforms];
-    const at = Math.max(0, order.indexOf(primary));
-    const nextAt = event.key === "ArrowRight" ? Math.min(order.length - 1, at + 1) : Math.max(0, at - 1);
+    const at = Math.max(0, order.indexOf(focused ?? primary));
+    const nextAt =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? order.length - 1
+          : event.key === "ArrowRight"
+            ? Math.min(order.length - 1, at + 1)
+            : Math.max(0, at - 1);
     const target = order[nextAt];
-    choose(target, { ctrl: false, shift: false });
     rail.current?.querySelector<HTMLElement>('[data-value="' + target + '"]')?.focus();
+    bring(target);
   };
 
   const focusBox = focused ? boxes[focused] : undefined;
   const railW = Object.values(boxes).reduce((max, box) => Math.max(max, box.x + box.w), 0);
 
   return (
-    <div className="w-fit max-w-full rounded-full border border-line bg-paper p-1">
+    <div className="relative w-fit max-w-full rounded-full border border-line bg-paper p-1">
       <div
         ref={rail}
         role="group"
@@ -496,7 +534,7 @@ export default function TabRail({ items, value, onChange, label }: Props) {
             type="button"
             data-value={item.id}
             aria-pressed={isOn(item)}
-            tabIndex={primary === item.id ? 0 : -1}
+            tabIndex={(focused ?? primary) === item.id ? 0 : -1}
             onClick={(event) => choose(item.id, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey })}
             onFocus={() => setFocused(item.id)}
             onBlur={() => setFocused((prev) => (prev === item.id ? null : prev))}
@@ -531,6 +569,13 @@ export default function TabRail({ items, value, onChange, label }: Props) {
           />
         ) : null}
       </div>
+
+      {edges.left ? (
+        <span aria-hidden className="pointer-events-none absolute inset-y-1 left-1 z-30 w-7 rounded-l-full bg-gradient-to-r from-paper via-paper/80 to-transparent" />
+      ) : null}
+      {edges.right ? (
+        <span aria-hidden className="pointer-events-none absolute inset-y-1 right-1 z-30 w-7 rounded-r-full bg-gradient-to-l from-paper via-paper/80 to-transparent" />
+      ) : null}
     </div>
   );
 }

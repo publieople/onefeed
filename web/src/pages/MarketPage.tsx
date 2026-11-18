@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpCircle, Check, Download, RefreshCw, Trash2 } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { deleteJSON, getJSON, postJSON, type MarketEntry, type PluginsResponse } from "../api";
 import { KIND_LABEL } from "../platform";
+import { useBatchAction } from "../motion/useAction";
+import { confirmDialog } from "../components/ui/Confirm";
 
 interface UpdateResult {
   from?: string;
@@ -14,9 +16,14 @@ interface UpdateResult {
 export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
   const [data, setData] = useState<PluginsResponse | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState("");
+  // 每个插件各管各的 pending：以前共用一个 busy 字符串，同时装两个会互相覆盖 spinner
+  const batch = useBatchAction<string>();
   const [note, setNote] = useState("");
   const [reload, setReload] = useState(0);
+  // 卸载后留 5 秒反悔：卸载是把本机插件目录删掉，误点一次得能一键装回来
+  const [undo, setUndo] = useState("");
+  const noteTimer = useRef<number | undefined>(undefined);
+  const undoTimer = useRef<number | undefined>(undefined);
 
   const load = useCallback(async (force = false) => {
     setError("");
@@ -34,71 +41,85 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
 
   const flash = (text: string) => {
     setNote(text);
-    window.setTimeout(() => setNote(""), 3600);
+    // 旧定时器必须清掉，否则连续操作时前一条的计时会提前抹掉后一条提示
+    if (noteTimer.current) window.clearTimeout(noteTimer.current);
+    noteTimer.current = window.setTimeout(() => setNote(""), 3600);
   };
 
+  const armUndo = (id: string) => {
+    setUndo(id);
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    undoTimer.current = window.setTimeout(() => setUndo(""), 5000);
+  };
+  const clearUndo = () => {
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    setUndo("");
+  };
+
+  useEffect(() => () => {
+    if (noteTimer.current) window.clearTimeout(noteTimer.current);
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+  }, []);
+
   const install = async (id: string) => {
-    setBusy(id);
-    try {
+    const res = await batch.run(id, async () => {
       await postJSON("/api/plugins/" + id + "/install");
       flash("装好了：" + id + "，刷新一轮就有新来源");
       setReload((n) => n + 1);
       ctx.bump();
-    } catch (err) {
-      flash((err as Error).message);
-    } finally {
-      setBusy("");
-    }
+    });
+    if (!res.ok) flash(res.error);
   };
 
   const update = async (entry: MarketEntry) => {
-    setBusy(entry.id);
-    try {
+    const res = await batch.run(entry.id, async () => {
       const resp = await postJSON<{ result: UpdateResult }>("/api/plugins/" + entry.id + "/update");
       const r = resp.result ?? {};
       flash(r.changed === false ? entry.id + " 已经是最新版" : entry.id + " 升到 v" + (r.to ?? "?"));
       setReload((n) => n + 1);
-    } catch (err) {
-      flash((err as Error).message);
-    } finally {
-      setBusy("");
-    }
+    });
+    if (!res.ok) flash(res.error);
   };
 
   const updateAll = async () => {
-    setBusy("__all__");
-    try {
+    const res = await batch.run("__all__", async () => {
       const resp = await postJSON<{
         result: { updated: UpdateResult[]; failed: { id: string; error: string }[]; pending: number };
       }>("/api/market/update-all");
       const r = resp.result ?? { updated: [], failed: [], pending: 0 };
       const done = r.updated.length;
       const bad = r.failed.length;
+      // 失败不止一个时把名字列出来，只报第一个等于让用户去猜
+      const names = r.failed
+        .slice(0, 3)
+        .map((f) => f.id)
+        .join("、");
       flash(
         done || bad
-          ? "更新 " + done + " 个" + (bad ? "，" + bad + " 个失败（" + r.failed[0].id + "）" : "")
+          ? "更新 " + done + " 个" + (bad ? "，" + bad + " 个失败（" + names + (bad > 3 ? " 等" : "") + "）" : "")
           : "没有可更新的插件",
       );
       setReload((n) => n + 1);
-    } catch (err) {
-      flash((err as Error).message);
-    } finally {
-      setBusy("");
-    }
+    });
+    if (!res.ok) flash(res.error);
   };
 
   const remove = async (id: string) => {
-    setBusy(id);
-    try {
+    const ok = await confirmDialog({
+      title: "卸载 " + id + "？",
+      body: "会删掉本机这个插件的目录，之后要重新从市场安装，这个来源的历史条目会留在库里但无法再刷新。",
+      confirmText: "卸载",
+      tone: "danger",
+    });
+    if (!ok) return;
+    const res = await batch.run(id, async () => {
       await deleteJSON("/api/plugins/" + id);
       flash("已卸载：" + id);
+      armUndo(id);
       setReload((n) => n + 1);
       ctx.bump();
-    } catch (err) {
-      flash((err as Error).message);
-    } finally {
-      setBusy("");
-    }
+    });
+    if (!res.ok) flash(res.error);
   };
 
   const entries: MarketEntry[] = data?.market.entries ?? [];
@@ -114,18 +135,15 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
           {pending.length ? (
             <button
               onClick={() => void updateAll()}
-              disabled={busy === "__all__"}
+              disabled={batch.has("__all__")}
               className="flex h-9 items-center gap-1.5 rounded-full bg-solid px-3.5 text-[13px] text-solid-fg disabled:opacity-50"
             >
               <ArrowUpCircle size={14} />
-              {busy === "__all__" ? "更新中…" : "全部更新 (" + pending.length + ")"}
+              {batch.has("__all__") ? "更新中…" : "全部更新 (" + pending.length + ")"}
             </button>
           ) : null}
           <button
-            onClick={() => {
-              void load(true);
-              setReload((n) => n + 1);
-            }}
+            onClick={() => void load(true)}
             className="flex h-9 items-center gap-1.5 rounded-full border border-line px-3.5 text-[13px] text-muted hover:border-ink/25 hover:text-ink"
           >
             <RefreshCw size={14} />
@@ -156,6 +174,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
         {entries.map((entry, index) => (
           <article
             key={entry.id}
+            data-plugin-id={entry.id}
             className="rise rounded-card border border-line p-5"
             style={{ animationDelay: Math.min(index, 9) * 28 + "ms" }}
           >
@@ -184,18 +203,18 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
                 {entry.installed && entry.update_available ? (
                   <button
                     onClick={() => void update(entry)}
-                    disabled={busy === entry.id}
+                    disabled={batch.has(entry.id)}
                     className="flex h-8 items-center gap-1 rounded-lg bg-solid px-3 text-[12px] text-solid-fg disabled:opacity-50"
                   >
                     <ArrowUpCircle size={13} />
-                    {busy === entry.id ? "更新中" : "更新"}
+                    {batch.has(entry.id) ? "更新中" : "更新"}
                   </button>
                 ) : null}
                 {entry.installed ? (
                   <button
                     onClick={() => void remove(entry.id)}
-                    disabled={busy === entry.id}
-                    className="flex h-8 items-center gap-1 rounded-lg border border-line px-2.5 text-[12px] text-muted hover:border-red-200 hover:text-red-600 disabled:opacity-50"
+                    disabled={batch.has(entry.id)}
+                    className="flex h-8 items-center gap-1 rounded-lg border border-line px-2.5 text-[12px] text-muted hover:border-danger/40 hover:text-danger disabled:opacity-50"
                   >
                     <Trash2 size={13} />
                     卸载
@@ -203,11 +222,11 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
                 ) : (
                   <button
                     onClick={() => void install(entry.id)}
-                    disabled={busy === entry.id}
+                    disabled={batch.has(entry.id)}
                     className="flex h-8 items-center gap-1 rounded-lg bg-solid px-3 text-[12px] text-solid-fg disabled:opacity-50"
                   >
                     <Download size={13} />
-                    {busy === entry.id ? "安装中" : "安装"}
+                    {batch.has(entry.id) ? "安装中" : "安装"}
                   </button>
                 )}
               </div>
@@ -240,9 +259,21 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
         {data?.market.from_cache ? "（本地缓存）" : ""}
       </p>
 
-      {note ? (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop">
-          {note}
+      {note || undo ? (
+        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop">
+          <span>{note || "已卸载：" + undo}</span>
+          {undo ? (
+            <button
+              onClick={() => {
+                const id = undo;
+                clearUndo();
+                void install(id);
+              }}
+              className="rounded-full bg-solid-fg/15 px-2.5 py-0.5 text-[12px] hover:bg-solid-fg/25"
+            >
+              撤销
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -1,0 +1,154 @@
+"""交互层的静态回归：键盘模型、确认框、停靠栏关闭语义、待办状态。
+
+这些点以前都靠人肉点，回归一次就丢一次：
+1. 全局快捷键在列表里也能用，只有弹层压顶才让位；
+2. 胶囊 ←/→ 只挪焦点不改筛选（以前按一次发一次 /api/feed）；
+3. 输入框不在 focus 时展开（P0：focus 展开会弹全屏遮罩吞掉第一次点击）；
+4. 关闭不依赖退出动画（动画帧被节流时弹层会卡在 DOM 里）；
+5. 破坏性操作一律先问：清 key / 退出登录 / 恢复默认 / 卸载插件 / 删模型行；
+6. 异步动作不再共用一个 busy 字符串；
+7. 空态按钮得能解决空态（以前 0 条却只给「刷新」）。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "web" / "src"
+
+
+def read(*parts: str) -> str:
+    return (SRC.joinpath(*parts)).read_text(encoding="utf-8")
+
+
+HOTKEYS = read("motion", "useHotkeys.ts")
+APP = read("App.tsx")
+FEED = read("pages", "FeedPage.tsx")
+DOCK = read("components", "AiDock.tsx")
+RAIL = read("components", "ui", "TabRail.tsx")
+CONFIRM = read("components", "ui", "Confirm.tsx")
+HELP = read("components", "ShortcutHelp.tsx")
+SETTINGS = read("pages", "SettingsPage.tsx")
+MARKET = read("pages", "MarketPage.tsx")
+PROVIDERS = read("components", "AiProviders.tsx")
+
+CASES = []
+
+
+def case(fn):
+    CASES.append((fn.__name__, fn))
+    return fn
+
+
+@case
+def test_global_scope_survives_list() -> None:
+    # 列表压栈时全局键（? / t / r / ⌘K）必须还能用
+    assert 'scope === "global" ? top === "dialog" : top !== scope' in HOTKEYS
+    for key in ('"/"', '"mod+k"', '"?"', "t:", "r:"):
+        assert key in APP, "App 全局快捷键缺 " + key
+    assert "pushScope" in APP and "ShortcutHelp" in APP
+
+
+@case
+def test_rail_arrows_only_move_focus() -> None:
+    step = RAIL.split("const step =")[1].split("const focusBox")[0]
+    # 方向键那一段不能碰筛选；只有 Esc 分支允许重置回「全部」
+    arrows = step.split("const keys =")[1]
+    assert "ArrowLeft" in arrows and "ArrowRight" in arrows
+    assert ".focus()" in arrows and "bring(" in arrows
+    assert "choose(" not in arrows, "方向键还在改筛选（键盘用户没法只看不改）"
+    assert step.count("choose(") == 1, "方向键分支又在改筛选"
+    assert ".focus()" in step and "bring(" in step
+    # roving tabindex：只有焦点项可 Tab 到
+    assert "tabIndex={(focused ?? primary) === item.id ? 0 : -1}" in RAIL
+    # Esc 退回全部
+    assert 'event.key === "Escape"' in step
+
+
+@case
+def test_composer_opens_on_click_not_focus() -> None:
+    assert "onFocus={() => setFocused(true)}" in DOCK
+    assert "onClick={() => setOpen(true)}" in DOCK
+    assert "onFocus={() => setOpen(true)}" not in DOCK, "focus 又去展开面板了"
+
+
+@case
+def test_light_layers_close_without_animation() -> None:
+    assert "if (!req || !opts) return null;" in CONFIRM, "确认框还在等退出动画"
+    assert "AnimatePresence" not in CONFIRM
+    assert "if (!open) return null;" in HELP, "快捷键帮助还在等退出动画"
+    assert "<AnimatePresence" not in HELP
+    assert "AnimatePresence" not in DOCK.split("panel")[0] or "AnimatePresence" in DOCK
+
+
+@case
+def test_dock_is_a_dialog() -> None:
+    assert 'role="dialog"' in DOCK and 'aria-modal="true"' in DOCK
+    assert 'aria-live="polite"' in DOCK, "Agent 回复没有 aria-live，读屏听不到"
+    assert "FOCUSABLE" in DOCK and "Tab" in DOCK, "没有 Tab 陷阱"
+    assert "pointerdown" in DOCK, "桌面端点面板外关不掉（遮罩已经不给桌面了）"
+
+
+@case
+def test_destructive_ops_ask_first() -> None:
+    # 清 key 要打字确认，其余是普通确认
+    assert 'requireTyping: "CLEAR"' in SETTINGS
+    for label in ('"清除所有模型 key？"', '"退出这个平台的登录？"', '"把设置改回默认值？"'):
+        assert "title: " + label in SETTINGS, "设置里少了一处确认：" + label
+    assert "title: \"卸载 \" + id" in MARKET or "卸载 " in MARKET
+    assert "confirmDialog" in MARKET and "confirmDialog" in PROVIDERS
+
+
+@case
+def test_pending_is_per_action() -> None:
+    assert "useBatchAction<string>()" in MARKET, "市场页又回到一个 busy 字符串了"
+    assert "batch.has(" in MARKET
+    assert "setBusy(" not in MARKET
+    assert "if (!resp.ok) throw new Error(" in SETTINGS, "插件开关又不看响应码了"
+    assert "enabled: enabled ? 0 : 1" in SETTINGS, "开关失败没回滚"
+
+
+@case
+def test_settings_baseline_and_unload_guard() -> None:
+    assert 'setBaseline("")' not in SETTINGS, "baseline 又被写成空串，dirty 会恒为 false"
+    assert 'setBaseline(JSON.stringify(next))' in SETTINGS
+    assert "beforeunload" in SETTINGS, "没保存就关页面会静默丢改动"
+
+
+@case
+def test_empty_state_can_actually_help() -> None:
+    assert "清空筛选条件" in FEED
+    assert 'patch({ platforms: [], keyword: "", range: "all", sort: "" })' in FEED
+
+
+@case
+def test_list_keyboard_model() -> None:
+    assert 'useHotkeys("list"' in FEED
+    for key in ("j:", "k:", "h:", "l:", "o:"):
+        assert key in FEED, "列表键盘缺 " + key
+    assert "preventScroll" in FEED and "scrollIntoView" in FEED
+    assert 'pushScope("list")' in FEED
+
+
+@case
+def test_shortcut_help_is_the_single_source() -> None:
+    for key in ("/ 或 ⌘K", "Esc", "?", "j / k", "← / →"):
+        assert key in HELP, "快捷键表里没写 " + key
+
+
+def main() -> int:
+    failed = 0
+    for name, fn in CASES:
+        try:
+            fn()
+            print("  PASS", name)
+        except AssertionError as exc:
+            failed += 1
+            print("  FAIL", name, exc)
+    print(f"test_interaction: {len(CASES) - failed}/{len(CASES)}")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

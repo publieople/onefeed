@@ -6,24 +6,23 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   getDetail,
   getJSON,
-  getSummary,
+  peekItem,
+  streamSummary,
+  type ItemResponse,
   type CommentItem,
   type CommentsResponse,
   type DetailMedia,
   type DetailPayload,
   type DetailResponse,
   type FeedItem,
+  type SummaryPoint,
   type SummaryResponse,
 } from "../api";
+import { parseStreamText } from "../streamText";
 import { CommentBody } from "../components/CommentBody";
-import { runNavTransition } from "../navTransition";
+import { runNav } from "../motion/nav";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
-
-interface ItemResponse {
-  item: FeedItem;
-  siblings: { id: string; platform: string; title: string; author: string; url: string; published_at: number }[];
-}
 
 /** 评论区折叠时先放几条，剩下的点了「查看全部」再展开，滚到底继续翻页 */
 const COLLAPSED_COMMENTS = 5;
@@ -105,7 +104,7 @@ function Media({ item, media, seek }: { item: FeedItem; media?: DetailMedia; see
     const canFallback = Boolean(media.fallbackUrl);
     const poster = media.poster ? base + "/poster" : undefined;
     return (
-      <div className="mt-5">
+      <div>
         <div className="aspect-video overflow-hidden rounded-xl border border-line bg-black">
           {direct && canFallback ? (
             <video
@@ -149,7 +148,7 @@ function Media({ item, media, seek }: { item: FeedItem; media?: DetailMedia; see
   if (media.type === "file" && media.url) {
     const sidecar = Boolean(media.referer);
     return (
-      <div className="mt-5">
+      <div>
         <div className="overflow-hidden rounded-xl border border-line bg-black">
           <video
             key={tick}
@@ -243,6 +242,7 @@ function Lightbox({
           src={images[index]}
           alt=""
           referrerPolicy="no-referrer"
+          style={{ viewTransitionName: "of-lb" }}
           onClick={(e) => {
             e.stopPropagation();
             setZoom((v) => !v);
@@ -277,13 +277,25 @@ function Lightbox({
   );
 }
 
-function Gallery({ images, onOpen }: { images: string[]; onOpen: (index: number) => void }) {
+function Gallery({
+  images,
+  onOpen,
+}: {
+  images: string[];
+  onOpen: (index: number, el?: HTMLElement) => void;
+}) {
   if (!images.length) return null;
   // 单图不要占三列网格的第一格，居中给一张原比例大图
   if (images.length === 1) {
     return (
       <div className="mt-5">
-        <button onClick={() => onOpen(0)} className="block overflow-hidden rounded-lg border border-line bg-wash">
+        <button
+          type="button"
+          data-lb-index={0}
+          aria-label="看大图"
+          onClick={(e) => onOpen(0, e.currentTarget)}
+          className="block overflow-hidden rounded-lg border border-line bg-wash"
+        >
           <img
             src={images[0]}
             alt=""
@@ -300,7 +312,10 @@ function Gallery({ images, onOpen }: { images: string[]; onOpen: (index: number)
       {images.map((src, index) => (
         <button
           key={src + index}
-          onClick={() => onOpen(index)}
+          type="button"
+          data-lb-index={index}
+          aria-label={"看第 " + (index + 1) + " 张大图"}
+          onClick={(e) => onOpen(index, e.currentTarget)}
           className="relative aspect-[4/5] overflow-hidden rounded-lg border border-line bg-wash"
         >
           <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
@@ -329,6 +344,14 @@ interface SummaryPanelProps {
   data: SummaryResponse | null;
   loading: boolean;
   error: string;
+  /** 流式生成时已经收到的原始行协议文本 */
+  streamRaw: string;
+  /** 还在流：先渲染半成品，别让人盯着骨架屏 */
+  streaming: boolean;
+  /** thinking = 模型在通读素材，还没出正文 */
+  phase: "thinking" | "writing" | "";
+  /** 已经等了几秒 */
+  seconds: number;
   /** 播放器能不能按秒跳（目前只有 B 站官方播放器认 t= 参数） */
   canSeek: boolean;
   onJump: (sec: number) => void;
@@ -336,50 +359,30 @@ interface SummaryPanelProps {
   url: string;
 }
 
-/** 详情页的默认视图：Agent 看完给的结论、要点和依据。 */
-function SummaryPanel({ data, loading, error, canSeek, onJump, onRetry, url }: SummaryPanelProps) {
-  if (loading) {
-    return (
-      <div className="mt-5 rounded-xl border border-line p-5">
-        <div className="flex items-center gap-2 text-[12px] text-muted">
-          <Sparkles size={13} />
-          Agent 正在看这条内容…（大概十几秒）
-        </div>
-        <div className="mt-4 space-y-2.5">
-          <div className="h-4 w-3/4 skeleton rounded" />
-          <div className="h-3 w-full skeleton rounded" />
-          <div className="h-3 w-11/12 skeleton rounded" />
-          <div className="h-3 w-4/5 skeleton rounded" />
-        </div>
-      </div>
-    );
-  }
+interface SummaryBodyProps {
+  tldr: string;
+  points: SummaryPoint[];
+  caveat: string;
+  canSeek: boolean;
+  onJump: (sec: number) => void;
+  /** 还在打字：末尾加一根闪烁光标 */
+  live?: boolean;
+}
 
-  const s = data?.summary;
-  if (error || !data?.ok || !s) {
-    return (
-      <div className="mt-5 rounded-lg bg-wash px-3 py-2.5 text-[12px] leading-relaxed text-muted">
-        {error || data?.error || "这条暂时总结不出来。"}
-        <span className="mt-1.5 flex flex-wrap items-center gap-3">
-          <button onClick={onRetry} className="underline underline-offset-2 hover:text-ink">再试一次</button>
-          <a href={url} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2 hover:text-ink">
-            去原站看
-          </a>
-        </span>
-      </div>
-    );
-  }
-
-  const basis = BASIS_LABEL[s.basis] || s.basis_text || "素材";
-  const meta = [s.provider, s.model, s.ms ? (s.ms / 1000).toFixed(1) + "s" : ""].filter(Boolean).join(" · ");
-
+/** 结论 + 要点 + 提醒。流式和非流式共用一套排版，收尾时不会发生「换了个长相」的跳动。 */
+function SummaryBody({ tldr, points, caveat, canSeek, onJump, live }: SummaryBodyProps) {
   return (
-    <div className="fade-in mt-5 rounded-xl border border-line p-5">
-      <p className="text-[16px] font-medium leading-[1.7] tracking-tight">{s.tldr}</p>
+    <>
+      <p className="text-[16px] font-medium leading-[1.7] tracking-tight">
+        {tldr}
+        {live ? (
+          <span className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[2px] animate-pulse bg-ink/40 align-baseline" />
+        ) : null}
+      </p>
 
-      {s.points?.length ? (
+      {points.length ? (
         <ul className="mt-4 space-y-2.5">
-          {s.points.map((point, index) => (
+          {points.map((point, index) => (
             <li key={index} className="flex gap-2.5 text-[14px] leading-[1.8] text-ink/90">
               {point.t != null && canSeek ? (
                 <button
@@ -400,9 +403,103 @@ function SummaryPanel({ data, loading, error, canSeek, onJump, onRetry, url }: S
         </ul>
       ) : null}
 
-      {s.caveat ? (
-        <p className="mt-4 text-[12px] leading-relaxed text-muted">注意：{s.caveat}</p>
-      ) : null}
+      {caveat ? <p className="mt-4 text-[12px] leading-relaxed text-muted">注意：{caveat}</p> : null}
+    </>
+  );
+}
+
+/** 详情页的默认视图：Agent 看完给的结论、要点和依据。 */
+function SummaryPanel({
+  data,
+  loading,
+  error,
+  streamRaw,
+  streaming,
+  phase,
+  seconds,
+  canSeek,
+  onJump,
+  onRetry,
+  url,
+}: SummaryPanelProps) {
+  const live = useMemo(() => parseStreamText(streamRaw), [streamRaw]);
+  const s = data?.ok ? data.summary : undefined;
+  const hasWords = Boolean(live.tldr || live.points.length);
+
+  if (!s && streaming) {
+    return (
+      <div className="fade-in mt-5 min-h-[164px] rounded-xl border border-line p-5">
+        <div className="mb-3 flex items-center gap-2 text-[12px] text-muted">
+          <Sparkles size={13} className="animate-pulse" />
+          <span>{phase === "thinking" ? "Agent 正在通读素材…" : "Agent 正在看这条内容…"}</span>
+          {seconds >= 1 ? (
+            <span className="tabular-nums text-fade">{seconds.toFixed(0)}s</span>
+          ) : null}
+        </div>
+        {hasWords ? (
+          <SummaryBody
+            tldr={live.tldr}
+            points={live.points}
+            caveat={live.caveat}
+            canSeek={canSeek}
+            onJump={onJump}
+            live
+          />
+        ) : (
+          <div className="space-y-2.5">
+            <div className="h-4 w-3/4 skeleton rounded" />
+            <div className="h-3 w-full skeleton rounded" />
+            <div className="h-3 w-11/12 skeleton rounded" />
+            <div className="h-3 w-4/5 skeleton rounded" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!s) {
+    if (loading) {
+      return (
+        <div className="mt-5 rounded-xl border border-line p-5">
+          <div className="flex items-center gap-2 text-[12px] text-muted">
+            <Sparkles size={13} />
+            Agent 正在看这条内容…（大概十几秒）
+          </div>
+          <div className="mt-4 space-y-2.5">
+            <div className="h-4 w-3/4 skeleton rounded" />
+            <div className="h-3 w-full skeleton rounded" />
+            <div className="h-3 w-11/12 skeleton rounded" />
+            <div className="h-3 w-4/5 skeleton rounded" />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="mt-5 rounded-lg bg-wash px-3 py-2.5 text-[12px] leading-relaxed text-muted">
+        {error || data?.error || "这条暂时总结不出来。"}
+        <span className="mt-1.5 flex flex-wrap items-center gap-3">
+          <button onClick={onRetry} className="underline underline-offset-2 hover:text-ink">再试一次</button>
+          <a href={url} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2 hover:text-ink">
+            去原站看
+          </a>
+        </span>
+      </div>
+    );
+  }
+
+  const basis = BASIS_LABEL[s.basis] || s.basis_text || "素材";
+  const meta = [s.provider, s.model, s.ms ? (s.ms / 1000).toFixed(1) + "s" : ""].filter(Boolean).join(" · ");
+
+  return (
+    <div className="fade-in mt-5 rounded-xl border border-line p-5">
+      <SummaryBody
+        tldr={s.tldr}
+        points={s.points ?? []}
+        caveat={s.caveat ?? ""}
+        canSeek={canSeek}
+        onJump={onJump}
+      />
+
       {s.note ? <p className="mt-1.5 text-[12px] leading-relaxed text-fade">{s.note}</p> : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-[11px] text-fade">
@@ -419,13 +516,9 @@ function SummaryPanel({ data, loading, error, canSeek, onJump, onRetry, url }: S
   );
 }
 
-/** 详情页的过渡载体：铺满整页宽，卡片就是长大到它这里。 */
+/** 详情页的容器。转场不再是「整张卡片放大成整页」，而是媒体框和标题各自长大，所以这里不挂名字。 */
 function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-[70vh] w-full" style={{ viewTransitionName: "of-card" }}>
-      {children}
-    </div>
-  );
+  return <div className="min-h-[70vh] w-full">{children}</div>;
 }
 
 export default function ItemPage() {
@@ -436,16 +529,14 @@ export default function ItemPage() {
   // 回到进来时那一屏（带着筛选条件），而不是无条件回首页。
   const goBack = () => {
     const from = (location.state as { from?: string } | null)?.from || "/";
-    runNavTransition(
-      () => navigate(from, { state: { vt: true, back: 1, fromId: item?.id } }),
-      null,
-      true,
-    );
+    runNav("back", () => navigate(from, { state: { vt: true, back: 1, fromId: item?.id } }));
   };
-  const [data, setData] = useState<ItemResponse | null>(null);
+  // 悬停预取过就直接拿它垫首屏：转场把卡片放大成页面的那 0.42s 里，
+  // 页面已经是有内容的了，而不是一张正在转圈的骨架屏。
+  const [data, setData] = useState<ItemResponse | null>(() => peekItem(id)?.item ?? null);
   const [itemError, setItemError] = useState("");
-  const [detail, setDetail] = useState<DetailResponse | null>(null);
-  const [detailLoading, setDetailLoading] = useState(true);
+  const [detail, setDetail] = useState<DetailResponse | null>(() => peekItem(id)?.detail ?? null);
+  const [detailLoading, setDetailLoading] = useState(() => !peekItem(id)?.detail);
   const [comments, setComments] = useState<CommentsResponse | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [commentNext, setCommentNext] = useState<string | null>(null);
@@ -464,7 +555,7 @@ export default function ItemPage() {
   useEffect(() => {
     if (!id) return;
     let alive = true;
-    setData(null);
+    setData(peekItem(id)?.item ?? null);
     setItemError("");
     getJSON<ItemResponse>("/api/item/" + encodeURIComponent(id))
       .then((d) => {
@@ -481,8 +572,9 @@ export default function ItemPage() {
   useEffect(() => {
     if (!id) return;
     let alive = true;
-    setDetail(null);
-    setDetailLoading(true);
+    const cached = peekItem(id)?.detail ?? null;
+    setDetail(cached);
+    setDetailLoading(!cached);
     getDetail(id)
       .then((d) => {
         if (alive) setDetail(d);
@@ -522,36 +614,75 @@ export default function ItemPage() {
     };
   }, [id]);
 
-  useEffect(() => {
-    if (!id) return;
-    let alive = true;
+  /* 总结走流式：先出 TLDR，再一条条出要点，比干等十几秒好受得多 */
+  const summaryAlive = useRef(true);
+  const summaryStop = useRef<(() => void) | null>(null);
+  const streamStart = useRef(0);
+  const [streamRaw, setStreamRaw] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  /** thinking = 模型在通读素材还没吐正文；writing = 已经在出字 */
+  const [streamPhase, setStreamPhase] = useState<"thinking" | "writing" | "">("");
+  const [streamSeconds, setStreamSeconds] = useState(0);
+
+  const loadSummary = useCallback((targetId: string, refresh: boolean) => {
+    summaryStop.current?.();
     setSummary(null);
     setSummaryError("");
     setSummaryLoading(true);
-    getSummary(id)
-      .then((d) => {
-        if (alive) setSummary(d);
-      })
-      .catch((err: Error) => {
-        if (alive) setSummaryError(err.message);
-      })
-      .finally(() => {
-        if (alive) setSummaryLoading(false);
-      });
+    setStreamRaw("");
+    setStreamPhase("");
+    setStreamSeconds(0);
+    setStreaming(true);
+    streamStart.current = typeof performance !== "undefined" ? performance.now() : Date.now();
+    summaryStop.current = streamSummary(targetId, refresh, {
+      onStatus: (phase) => {
+        if (summaryAlive.current && phase === "thinking") setStreamPhase("thinking");
+      },
+      onDelta: (text) => {
+        if (!summaryAlive.current) return;
+        setStreamPhase("writing");
+        setStreamRaw((prev) => prev + text);
+      },
+      onDone: (payload) => {
+        if (!summaryAlive.current) return;
+        setSummary({ ok: true, summary: payload });
+        setSummaryLoading(false);
+        setStreaming(false);
+      },
+      onError: (message) => {
+        if (!summaryAlive.current) return;
+        setSummaryError(message);
+        setSummaryLoading(false);
+        setStreaming(false);
+      },
+    });
+  }, []);
+
+  useEffect(() => {
+    summaryAlive.current = true;
+    if (id) loadSummary(id, false);
     return () => {
-      alive = false;
+      summaryAlive.current = false;
+      summaryStop.current?.();
+      summaryStop.current = null;
     };
-  }, [id]);
+  }, [id, loadSummary]);
 
   const retrySummary = useCallback(() => {
     if (!id) return;
-    setSummaryLoading(true);
-    setSummaryError("");
-    getSummary(id, true)
-      .then((d) => setSummary(d))
-      .catch((err: Error) => setSummaryError(err.message))
-      .finally(() => setSummaryLoading(false));
-  }, [id]);
+    summaryAlive.current = true;
+    loadSummary(id, true);
+  }, [id, loadSummary]);
+
+  /* 等待秒数要走字：模型先想七八秒才开口，有个数字在动，用户才知道没卡死 */
+  useEffect(() => {
+    if (!streaming) return;
+    const timer = window.setInterval(() => {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      setStreamSeconds((now - streamStart.current) / 1000);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [streaming]);
 
   const loadMoreComments = useCallback(() => {
     if (!id || !commentNext || commentLoadingMore) return;
@@ -594,12 +725,17 @@ export default function ItemPage() {
     if (item) document.title = item.title + " · OneFeed";
   }, [item]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLightbox(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+  // 点缩略图：图从缩略图的位置长成整屏大图，关掉时再缩回去
+  const openLightbox = useCallback((index: number, el?: HTMLElement) => {
+    if (!el) {
+      setLightbox(index);
+      return;
+    }
+    runNav("lightbox", () => setLightbox(index), { names: [{ el, name: "of-lb" }] });
+  }, []);
+  const closeLightbox = useCallback((index: number) => {
+    const thumb = document.querySelector<HTMLElement>('[data-lb-index="' + index + '"]');
+    runNav("lightbox", () => setLightbox(null), { names: thumb ? [{ el: thumb, name: "of-lb" }] : [] });
   }, []);
 
   const stats = useMemo(() => (item ? statCards(item, detail?.detail ?? null) : []), [item, detail]);
@@ -677,6 +813,12 @@ export default function ItemPage() {
     : item.images;
   const p = platform(item.platform);
 
+  // hero 里的那一块就是共享元素的落点。列表里只有图文的卡片没有视频位，
+  // 图文（kind=images）继续走下面的画廊，不额外顶一块 hero，免得同一张图出现两次。
+  const heroMedia = payload?.media ?? null;
+  const heroCover = !heroMedia && item.kind !== "images" ? item.cover ?? null : null;
+  const showHero = Boolean(heroMedia) || Boolean(heroCover) || item.kind === "video";
+
   return (
     <Shell>
     <div className="mx-auto max-w-[860px] pb-24 pt-6">
@@ -702,7 +844,14 @@ export default function ItemPage() {
         ) : null}
       </div>
 
-      <h1 className="rise mt-3 text-[26px] font-semibold leading-[1.35] tracking-tight">{item.title}</h1>
+      {/* 标题是第二块共享元素：从卡片里那两行小标题长成正文标题 */}
+      <h1
+        data-vt="title"
+        style={{ viewTransitionName: "of-title" }}
+        className="mt-3 text-[26px] font-semibold leading-[1.35] tracking-tight"
+      >
+        {item.title}
+      </h1>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted">
         {item.author ? <span>{item.author}</span> : null}
         {item.author && item.published_at ? <span className="text-fade">·</span> : null}
@@ -726,6 +875,28 @@ export default function ItemPage() {
               <div className="text-[11px] text-fade">{s.label}</div>
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {/* 媒体区常驻在 tab 之上：既是共享元素「长大」的落点，也避免每次切 tab 都重新挂载播放器把进度清零 */}
+      {showHero ? (
+        <div data-vt="media" style={{ viewTransitionName: "of-media" }} className="mt-5">
+          {heroMedia ? (
+            <Media item={item} media={heroMedia} seek={seek} />
+          ) : detailLoading ? (
+            <div className="aspect-video skeleton rounded-xl" />
+          ) : heroCover ? (
+            <img
+              src={heroCover}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="max-h-[70vh] w-full rounded-xl border border-line bg-wash object-contain"
+            />
+          ) : (
+            <div className="flex aspect-video items-center justify-center rounded-xl bg-wash text-[12px] text-fade">
+              这个平台暂时没法内嵌播放，用下面的按钮去原站看
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -753,6 +924,10 @@ export default function ItemPage() {
           data={summary}
           loading={summaryLoading}
           error={summaryError}
+          streamRaw={streamRaw}
+          streaming={streaming}
+          phase={streamPhase}
+          seconds={streamSeconds}
           canSeek={Boolean(payload?.media?.embedUrl?.includes("player.bilibili.com"))}
           onJump={(sec) => {
             setSeek(sec);
@@ -766,20 +941,8 @@ export default function ItemPage() {
       {tab === "source" ? (
       <>
       {detailLoading ? (
-        <div className="mt-5">
-          {/* 只有真会有媒体（视频/图文/有封面）才占 16:9，文章类用小骨架，避免正文被推来推去 */}
-          {item.kind === "video" || item.kind === "images" || item.cover ? (
-            <div className="aspect-video skeleton rounded-xl" />
-          ) : (
-            <div className="h-16 skeleton rounded-xl" />
-          )}
-          <p className="mt-2 text-[12px] text-fade">正在取详情…（可能要十几秒）</p>
-        </div>
-      ) : (
-        <div className="fade-in">
-          <Media item={item} media={payload?.media} seek={seek} />
-        </div>
-      )}
+        <p className="mt-5 text-[12px] text-fade">正在取正文与评论…（可能要十几秒）</p>
+      ) : null}
 
       {detail?.supported === false ? (
         <p className="mt-5 rounded-lg bg-wash px-3 py-2.5 text-[12px] leading-relaxed text-muted">
@@ -801,7 +964,7 @@ export default function ItemPage() {
       ) : null}
 
       {/* 视频笔记的 imageList 就是封面，已经在播放器里了，再铺一遍图会重复 */}
-      {payload?.media && images.length <= 1 ? null : <Gallery images={images} onOpen={setLightbox} />}
+      {payload?.media && images.length <= 1 ? null : <Gallery images={images} onOpen={openLightbox} />}
 
       {body && body.value ? (
         body.kind === "html" ? (
@@ -836,7 +999,11 @@ export default function ItemPage() {
           <ul className="mt-2 space-y-2">
             {data.siblings.map((s) => (
               <li key={s.id}>
-                <Link to={"/item/" + encodeURIComponent(s.id)} className="flex items-center gap-2 text-[13px] hover:underline">
+                <Link
+                  to={"/item/" + encodeURIComponent(s.id)}
+                  state={{ from: (location.state as { from?: string } | null)?.from || "/" }}
+                  className="flex items-center gap-2 text-[13px] hover:underline"
+                >
                   <span className="h-[6px] w-[6px] rounded-full" style={{ background: platform(s.platform).tint }} />
                   <span className="text-muted">{platform(s.platform).label}</span>
                   <span className="clamp-2 flex-1">{s.title}</span>
@@ -942,7 +1109,12 @@ export default function ItemPage() {
       </div>
 
       {lightbox !== null && images[lightbox] ? (
-        <Lightbox images={images} index={lightbox} onClose={() => setLightbox(null)} onIndex={setLightbox} />
+        <Lightbox
+          images={images}
+          index={lightbox}
+          onClose={() => closeLightbox(lightbox)}
+          onIndex={setLightbox}
+        />
       ) : null}
     </div>
     </Shell>

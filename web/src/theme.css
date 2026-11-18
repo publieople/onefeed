@@ -12,6 +12,9 @@
   --c-wash: 247 248 249;
   --c-solid: 20 22 26;
   --c-solid-fg: 255 255 255;
+  /* 危险动作（删插件、清 key）：亮色下压深一点，别用刺眼的纯红 */
+  --c-danger: 185 40 46;
+  --c-danger-fg: 255 255 255;
   --shadow-card: 0 1px 2px rgba(20, 22, 26, 0.04);
   --shadow-pop: 0 12px 40px rgba(20, 22, 26, 0.1);
   color-scheme: light;
@@ -27,6 +30,9 @@ html.dark {
   --c-wash: 24 27 32;
   --c-solid: 238 240 243;
   --c-solid-fg: 18 20 24;
+  /* 暗色下加深底反而看不清，往上提一档 */
+  --c-danger: 214 66 74;
+  --c-danger-fg: 255 255 255;
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-pop: 0 16px 44px rgba(0, 0, 0, 0.55);
   color-scheme: dark;
@@ -253,16 +259,22 @@ html.theme-vt.dark::view-transition-new(root) {
   }
 }
 
-
-/* 卡片 → 详情：被点的那张卡片与详情页根部共用一个名字（of-card），
-   浏览器把盒子从卡片矩形插值到整页矩形，看到的就是「这张卡片自己长大、铺满一屏」；
-   返回时同一段路倒着走，缩回它在列表里的位置。
-   0.42s —— 再长就变成等动画了；曲线和换肤同一组 expo-out。 */
-.nav-vt,
-.nav-vt *,
-.nav-vt *::before,
-.nav-vt *::after {
+/* 共享元素转场：卡片与详情页里各有一个「媒体框」和「标题」，名字固定为 of-media / of-title。
+   浏览器把两张快照的盒子从卡片里的矩形插值到详情页里的矩形，看到的就是这一个区块自己长大；
+   标题同理从一行 46px 的卡片标题长成 40px 的正文标题，位置和字号一起插值，读起来像同一个东西变了形。
+   不引入 id 后缀：view-transition-name 是 custom-ident，item.id 里的 : 和 % 都是非法字符。 */
+html.nav-vt,
+html.nav-vt *,
+html.nav-vt *::before,
+html.nav-vt *::after {
   transition: none !important;
+}
+
+/* 转场期间锁页面滚动：否则动画跑到一半用户一滚，冻结的旧快照和已经就位的新页面就错位了。
+   scrollbar-gutter 保住那条滚轮的宽度，锁与不锁之间内容不会横跳。 */
+html.vt-running {
+  overflow: hidden;
+  scrollbar-gutter: stable;
 }
 
 html.nav-vt::view-transition-group(root) {
@@ -291,37 +303,47 @@ html.nav-vt::view-transition-new(root) {
   }
 }
 
-/* 卡片与详情页根部共用 of-card：浏览器把两张快照的盒子从卡片矩形插值到整页矩形，
-   于是看到的就是「这张卡片本身长大、铺满屏幕」，返回时同一段路倒着走。 */
-html.nav-vt::view-transition-group(of-card) {
+/* 顶栏独立成层、原地不动：整页在飞，导航不能跟着抖。 */
+html.nav-vt::view-transition-group(of-topbar) {
+  animation: none;
+  z-index: 4;
+}
+
+/* 媒体与标题这两块参与「长大／缩回」。 */
+html.nav-vt::view-transition-group(of-media),
+html.nav-vt::view-transition-group(of-title) {
   z-index: 3;
   animation-duration: 0.42s;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* 只让「详情页」那张快照参与插值。
-   旧卡片快照是从卡片原尺寸往上放大的位图，放大到整页宽就是一团糊——它是缩略图渲染出来的低分辨率画面；
-   新快照本来就是整页的高分辨率渲染，只把它按小盒子缩着画、再放到全尺寸，全程都清晰。 */
-html.nav-vt::view-transition-old(of-card) {
+/* 只让「目标页」那张快照参与插值。
+   另一侧只是一张小缩略图（或一行小字），放大到整页尺寸就是一团糊，露出来反而脏。
+   目标页本来就是整页的高分辨率渲染，只把它按小盒子缩着画、再放回全尺寸，全程都清晰。 */
+html.nav-vt::view-transition-old(of-media),
+html.nav-vt::view-transition-old(of-title) {
   animation: none;
   opacity: 0;
 }
 
-html.nav-vt::view-transition-new(of-card) {
-  animation: nav-card-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+html.nav-vt::view-transition-new(of-media),
+html.nav-vt::view-transition-new(of-title) {
+  animation: nav-el-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* 返回时正好反过来：这次是详情页的高分辨率快照留在场上缩回卡片，卡片快照不显示 */
-html.nav-vt.nav-vt-back::view-transition-old(of-card) {
-  animation: nav-card-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+/* 返回时反过来：这次是详情页的高分辨率快照留在场上缩回卡片，卡片侧的快照不显示。 */
+html.nav-vt.nav-vt-back::view-transition-old(of-media),
+html.nav-vt.nav-vt-back::view-transition-old(of-title) {
+  animation: nav-el-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-html.nav-vt.nav-vt-back::view-transition-new(of-card) {
+html.nav-vt.nav-vt-back::view-transition-new(of-media),
+html.nav-vt.nav-vt-back::view-transition-new(of-title) {
   animation: none;
   opacity: 0;
 }
 
-@keyframes nav-card-in {
+@keyframes nav-el-in {
   0% {
     opacity: 0.55;
   }
@@ -329,4 +351,3 @@ html.nav-vt.nav-vt-back::view-transition-new(of-card) {
     opacity: 1;
   }
 }
-

@@ -59,6 +59,10 @@ class RunState:
     decisions: dict[str, bool] = field(default_factory=dict)
 
 
+class Cancelled(Exception):
+    """用户点了停止：从任意动作 / 确认等待里抛出，直接把这一轮打住。"""
+
+
 _STATES: dict[str, RunState] = {}
 _STATES_LOCK = threading.Lock()
 
@@ -158,6 +162,13 @@ def sse_stream(store: Any, run_id: str, after: int = 0,
             yield f"event: error\ndata: {json.dumps({'message': 'run 不存在'}, ensure_ascii=False)}\n\n"
             return
         if run.get("status") != "running":
+            # 收尾再多读一次：done/cancelled 可能刚好写在「读完事件」与「读状态」之间，
+            # 直接 return 会让前端收不到那一帧，误判成「事件流断了」
+            for step in events_after(store, run_id, last):
+                last = int(step["seq"])
+                body = {"seq": last, "kind": step["kind"], "name": step["name"],
+                        "data": step["data"], "undo_token": step["undo_token"], "at": step["at"]}
+                yield f"id: {last}\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
             return
         if time.time() > deadline:
             return
@@ -185,6 +196,9 @@ MAX_SEARCHES = 4
 def _run_action(deps: Deps, writer: EventWriter, name: str,
                 args: dict[str, Any]) -> dict[str, Any]:
     """一次动作调用：预算 → 执行 → tool 事件（含耗时与结果预览）。"""
+    # 每次动作前看一眼停止位：模型一次会连发好几个工具调用，这里是最密的检查点
+    if writer.state.cancel:
+        raise Cancelled("cancelled")
     # 模型会并发发多个工具调用；预算判断与计数必须在锁里，否则会同时超限、提示两遍
     with _ACTION_LOCK:
         over = deps.calls >= deps.max_tool_calls
@@ -280,6 +294,8 @@ def _await_confirm(deps: Deps, writer: EventWriter, need: act_mod.ConfirmRequire
                    timeout: float = 60.0) -> str:
     """L3 动作：发 need_confirm，等前端点允许/拒绝。超时按拒绝处理。"""
     state = writer.state
+    if state.cancel:
+        raise Cancelled("cancelled")
     confirm_id = uuid.uuid4().hex[:12]
     event = threading.Event()
     state.pending[confirm_id] = event
@@ -293,6 +309,9 @@ def _await_confirm(deps: Deps, writer: EventWriter, need: act_mod.ConfirmRequire
         wait = max(5.0, min(timeout, deps.deadline - time.time() - 10.0))
     event.wait(wait)
     state.pending.pop(confirm_id, None)
+    if state.cancel:
+        # cancel() 会把等待中的 confirm 一起 set 掉，这里靠停止位区分「超时」与「叫停」
+        raise Cancelled("cancelled")
     allowed = bool(state.decisions.pop(confirm_id, False))
     if allowed:
         state_allowed = getattr(state, "confirmed", None)
@@ -492,6 +511,7 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
     deps.deadline = started + float(timeout)
     answer: Answer | None = None
     error_text = ""
+    cancelled = False
     try:
         if built is None:
             raise RuntimeError("没有可用的模型")
@@ -510,12 +530,22 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
             answer = output
         usage = getattr(result, "usage", None)
         tokens = int(getattr(usage, "total_tokens", 0) or 0)
+    except Cancelled:
+        cancelled = True
+        error_text = "已按用户要求停止"
+        tokens = 0
     except Exception as exc:
         error_text = f"{type(exc).__name__}: {exc}"[:300]
         tokens = 0
+        # 抛的是别的异常但停止位已置：算叫停，别把 "CancelledError" 之类甩给用户看
+        cancelled = state.cancel
     ms = int((time.time() - started) * 1000)
 
-    if answer is None:
+    if cancelled:
+        answer = None
+        items = _final_items(deps, [], deps.limit)
+        reply = (f"停下了，先把翻到的 {len(items)} 条留给你。" if items else "停下了。")
+    elif answer is None:
         # 模型失败 / 超时 / 预算用尽：用看过的条目兜底，并说明发生了什么
         items = _final_items(deps, [], deps.limit)
         reason = "超时" if "Timeout" in error_text or "超" in error_text else "模型没答完"
@@ -533,15 +563,20 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
     understood = _understood(deps, items)
     suggestions = _suggestions(items)
     provider = (chain or [{}])[0].get("name", "")
-    if reply:
-        writer.emit("delta", "delta", {"text": reply})
-    # done 带齐渲染所需的一切：前端不必再补一次请求，回放与实时也是同一份
-    writer.emit("done", "done", {"reply": reply, "items": items, "plan": plan,
-                                 "suggestions": suggestions, "understood": understood,
-                                 "provider": provider, "actions": deps.applied,
-                                 "usage": {"steps": deps.calls, "ms": ms,
-                                           "tokens": tokens}})
-    status = "done" if answer is not None else "error"
+    # done 带齐渲染所需的一切：前端不必再补一次请求，回放与实时也是同一份。
+    # 叫停也走同一个 payload 形状，只把 kind 换成 cancelled —— 前端两处渲染只差一句提示。
+    payload = {"reply": reply, "items": items, "plan": plan,
+               "suggestions": suggestions, "understood": understood,
+               "provider": provider, "actions": deps.applied,
+               "usage": {"steps": deps.calls, "ms": ms, "tokens": tokens}}
+    if cancelled:
+        writer.emit("step", "stop", {"title": "已按你的要求停下", "kind": "note"})
+        writer.emit("cancelled", "cancelled", {**payload, "cancelled": True})
+    else:
+        if reply:
+            writer.emit("delta", "delta", {"text": reply})
+        writer.emit("done", "done", payload)
+    status = "cancelled" if cancelled else ("done" if answer is not None else "error")
     store.finish_agent_run(state.run_id, status, reply=reply, error=error_text,
                            steps=deps.calls, ms=ms, tokens=tokens)
     with _STATES_LOCK:

@@ -20,6 +20,7 @@ import { timeAgo } from "../format";
 import { platform } from "../platform";
 import SettingSection from "../components/SettingSection";
 import AiProviders from "../components/AiProviders";
+import { confirmDialog } from "../components/ui/Confirm";
 
 const AUTH_PLUGINS = ["xiaohongshu", "douyin"];
 const ALL_AUTH_ROWS = [...AUTH_PLUGINS, "bilibili"];
@@ -162,17 +163,42 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   };
 
   const toggle = async (id: string, enabled: boolean) => {
-    await fetch("/api/plugins/" + id, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled }),
-    });
-    flash(enabled ? "已启用 " + id : "已停用 " + id);
-    void load();
-    ctx.bump();
+    // 先本地翻一次：开关要跟手，失败再翻回去并说明原因
+    setPlugins((prev) =>
+      prev ? { ...prev, installed: prev.installed.map((p) => (p.id === id ? { ...p, enabled: enabled ? 1 : 0 } : p)) } : prev,
+    );
+    try {
+      const resp = await fetch("/api/plugins/" + id, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!resp.ok) throw new Error("后端拒绝了这次切换（HTTP " + resp.status + "）");
+      flash(enabled ? "已启用 " + id : "已停用 " + id);
+      void load();
+      ctx.bump();
+    } catch (err) {
+      setPlugins((prev) =>
+        prev
+          ? { ...prev, installed: prev.installed.map((p) => (p.id === id ? { ...p, enabled: enabled ? 0 : 1 } : p)) }
+          : prev,
+      );
+      flash((err as Error).message);
+    }
   };
 
   const dirty = Boolean(form && baseline && JSON.stringify(form) !== baseline);
+
+  // 关标签页 / 刷新时别把没保存的改动悄悄丢掉
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   const saveSettings = async () => {
     if (!form) return;
@@ -198,11 +224,28 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   };
 
   const clearKeys = async () => {
-    await putJSON("/api/settings", { ai_api_key: "", ai_providers: [] });
-    setForm((prev) => (prev ? { ...prev, ai_api_key: "", ai_providers: [] } : prev));
-    setBaseline("");
-    await ctx.reloadSettings();
-    flash("已清除所有模型 key，AI 退回本地解析");
+    const ok = await confirmDialog({
+      title: "清除所有模型 key？",
+      body: "AI 会退回本地关键词解析，摘要与 Agent 功能将不可用。key 不会留在本机，只能重新填写。",
+      confirmText: "清除",
+      tone: "danger",
+      requireTyping: "CLEAR",
+    });
+    if (!ok) return;
+    try {
+      await putJSON("/api/settings", { ai_api_key: "", ai_providers: [] });
+      // baseline 必须跟着新值走：写成空字符串会让 dirty 恒为 false，之后改任何设置都不再提示保存
+      setForm((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, ai_api_key: "", ai_providers: [] };
+        setBaseline(JSON.stringify(next));
+        return next;
+      });
+      await ctx.reloadSettings();
+      flash("已清除所有模型 key，AI 退回本地解析");
+    } catch (err) {
+      flash((err as Error).message);
+    }
   };
 
   const startLogin = async (id: string) => {
@@ -232,6 +275,13 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   };
 
   const logout = async (id: string) => {
+    const ok = await confirmDialog({
+      title: "退出这个平台的登录？",
+      body: "本机保存的 cookie 会被删除，之后刷新这个平台要重新扫码。",
+      confirmText: "退出登录",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await postJSON("/api/auth/" + id + "/logout");
       setLogin((prev) => ({ ...prev, [id]: { plugin: id, state: "idle" } }));
@@ -519,7 +569,15 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                     {saving ? "保存中…" : "保存设置"}
                   </button>
                   <button
-                    onClick={() => defaults && setForm({ ...defaults })}
+                    onClick={async () => {
+                      if (!defaults) return;
+                      const ok = await confirmDialog({
+                        title: "把设置改回默认值？",
+                        body: "表单会重置，包括刚才改了还没保存的内容。",
+                        confirmText: "恢复默认",
+                      });
+                      if (ok) setForm({ ...defaults });
+                    }}
                     className="h-9 rounded-lg border border-line px-3.5 text-[13px] text-muted hover:text-ink"
                   >
                     恢复默认值

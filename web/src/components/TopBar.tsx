@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { LayoutGrid, Moon, RefreshCw, Settings, Sun } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -28,8 +28,20 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
     });
   };
 
+  // 「t」键换主题：键盘用户不必去点右上角
+  useEffect(() => {
+    const onTheme = () => flipTheme();
+    window.addEventListener("onefeed:theme", onTheme);
+    return () => window.removeEventListener("onefeed:theme", onTheme);
+  });
+
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-paper/92 backdrop-blur">
+    // 顶栏独立成一层转场元素：整页在飞，导航不能跟着抖
+    <header
+      data-vt="topbar"
+      style={{ viewTransitionName: "of-topbar" }}
+      className="sticky top-0 z-30 border-b border-line bg-paper/92 backdrop-blur"
+    >
       <div className="relative mx-auto flex h-14 w-full max-w-[1180px] items-center gap-4 px-6">
         <NavLink to="/" className="flex items-baseline gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-solid text-[13px] font-semibold text-solid-fg">
@@ -74,6 +86,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
           <NavLink
             to="/market"
             title="插件市场"
+            aria-label="插件市场"
             className={({ isActive }) =>
               "flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-wash " +
               (isActive ? "text-ink" : "text-muted")
@@ -84,6 +97,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
           <NavLink
             to="/settings"
             title="设置"
+            aria-label="设置"
             className={({ isActive }) =>
               "flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-wash " +
               (isActive ? "text-ink" : "text-muted")

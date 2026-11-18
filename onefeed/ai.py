@@ -24,6 +24,8 @@ from . import settings as settings_mod, smart
 DEFAULT_BASE = "https://api.deepseek.com/v1"
 DEFAULT_MODEL = "deepseek-chat"
 TIMEOUT = 20.0
+# 流式要等首块，20 秒对推理型模型偏紧；首块之后每块都会刷新这个读超时。
+STREAM_TIMEOUT = 60.0
 MAX_HISTORY = 6
 
 PLATFORM_IDS = ("bilibili", "xiaohongshu", "douyin", "juejin", "v2ex", "zhihu", "zhihu-hot")
@@ -187,6 +189,84 @@ def complete(messages: list[dict[str, str]], max_tokens: int = 900,
                           "ok": False, "error": (str(exc) or exc.__class__.__name__)[:200],
                           "tried": list(tried)})
     raise RuntimeError("、".join(tried) + " 都不可用")
+
+
+def _stream_post(provider: dict[str, Any], messages: list[dict[str, str]],
+                 max_tokens: int = 900, temperature: float = 0.3):
+    """逐块读 OpenAI 兼容的 SSE。刻意不传 response_format——要的是一段能边生成边显示的话。"""
+    if not provider.get("key"):
+        raise RuntimeError("没有配置模型 key")
+    body = json.dumps({
+        "model": provider["model"],
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        str(provider["base_url"]).rstrip("/") + "/chat/completions", data=body, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "text/event-stream",
+                 "Authorization": "Bearer " + str(provider["key"])})
+    with urllib.request.urlopen(req, timeout=STREAM_TIMEOUT) as resp:
+        for raw_line in resp:
+            line = raw_line.decode("utf-8", "ignore").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                return
+            try:
+                chunk = json.loads(data)
+            except ValueError:
+                continue
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            # 推理型模型先吐一串思维链，再吐正文。思维链不显示给用户，但它是「还活着」的信号：
+            # 没有它，前几秒面板上什么都没有，看着像卡死了。
+            if delta.get("reasoning_content"):
+                yield "thinking", ""
+                continue
+            piece = delta.get("content")
+            if piece:
+                yield "content", str(piece)
+
+
+def stream_complete(messages: list[dict[str, str]], max_tokens: int = 900,
+                    temperature: float = 0.3):
+    """逐块要一段长回答，yield (种类, 文本块, provider)。种类是 "content" 或 "thinking"。
+
+    和非流式 complete() 有一处刻意的不同：一旦开始吐字就不再换模型——中途换模型会让
+    人看到两段不同的话，比慢更难受。第一块之前照常按顺序表往下试。
+    """
+    chain = _provider_list()
+    if not chain:
+        raise RuntimeError("没有配置模型 key")
+    tried: list[str] = []
+    last_error = ""
+    for provider in chain:
+        tried.append(provider["name"])
+        started = False
+        try:
+            for kind, piece in _stream_post(provider, messages, max_tokens=max_tokens,
+                                            temperature=temperature):
+                if not started:
+                    started = True
+                    _LAST.update({"at": int(time.time()), "provider": provider["name"],
+                                  "ok": True, "error": "", "tried": tried})
+                yield kind, piece, provider
+            if started:
+                return
+            raise RuntimeError("模型没有返回内容")
+        except Exception as exc:  # noqa: BLE001 - 首块之前失败才换下一个
+            last_error = (str(exc) or exc.__class__.__name__)[:200]
+            _LAST.update({"at": int(time.time()), "provider": provider["name"],
+                          "ok": False, "error": last_error, "tried": list(tried)})
+            if started:
+                raise
+    raise RuntimeError("、".join(tried) + " 都不可用" +
+                       ((f"（{last_error}）" if last_error else "")))
 
 
 def test_provider(raw: dict[str, Any] | None = None) -> dict[str, Any]:

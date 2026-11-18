@@ -2,10 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import TopBar from "./components/TopBar";
+import ShortcutHelp from "./components/ShortcutHelp";
+import { ConfirmHost } from "./components/ui/Confirm";
+import { pushScope, popScope, useHotkeys } from "./motion/useHotkeys";
 import FeedPage from "./pages/FeedPage";
 import ItemPage from "./pages/ItemPage";
 import MarketPage from "./pages/MarketPage";
 import SettingsPage from "./pages/SettingsPage";
+import NotFound from "./pages/NotFound";
 import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, type Summary } from "./api";
 import { DUR, EASE, pageVariants } from "./motion";
 
@@ -36,6 +40,7 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [toast, setToast] = useState("");
+  const [help, setHelp] = useState(false);
   const wasRunning = useRef(false);
   const location = useLocation();
   const reduce = useReducedMotion();
@@ -122,12 +127,35 @@ export default function App() {
     void reloadSettings();
   }, [loadSummary, reloadSettings]);
 
+  // 全局快捷键：⌘K / 「/」叫出 AI 输入框，「?」看键位表，「t」换主题，「r」刷新一轮
+  useHotkeys("global", {
+    "/": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
+    "mod+k": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
+    "?": () => setHelp(true),
+    t: () => window.dispatchEvent(new CustomEvent("onefeed:theme")),
+    r: () => void refresh(),
+  });
+
+  // 帮助层压在快捷键栈顶上，底下的列表/全局键让位
+  useEffect(() => {
+    if (!help) return;
+    pushScope("dialog");
+    return () => popScope("dialog");
+  }, [help]);
+
   const ctx: OutletCtx = { progress, reloadKey, refresh, summary, settings, reloadSettings, bump };
 
   return (
     <div className="min-h-screen bg-paper">
+      {/* 键盘用户第一个 Tab 就能跳过顶栏直达内容 */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-full focus:bg-solid focus:px-4 focus:py-2 focus:text-[13px] focus:text-solid-fg"
+      >
+        跳到内容
+      </a>
       <TopBar health={health} progress={progress} onRefresh={refresh} />
-      <main className="mx-auto w-full max-w-[1180px] px-6">
+      <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1180px] px-6 outline-none">
         {/* 走 View Transition 时新页已经以最终样子进了快照，这里不能再播进场动画 */}
         <motion.div
           key={location.pathname}
@@ -141,6 +169,7 @@ export default function App() {
             <Route path="/item/:id" element={<ItemPage />} />
             <Route path="/market" element={<MarketPage ctx={ctx} />} />
             <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </motion.div>
       </main>
@@ -152,12 +181,15 @@ export default function App() {
             animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
             exit={{ opacity: 0, y: 12, scale: 0.97, x: "-50%" }}
             transition={{ duration: reduce ? 0 : DUR.base, ease: EASE }}
-            className="fixed bottom-6 left-1/2 z-50 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop"
+            className="fixed bottom-24 left-1/2 z-50 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop"
           >
             {toast}
           </motion.div>
         ) : null}
       </AnimatePresence>
+      {/* 全站确认框的落点：任何页面 await confirmDialog(...) 都渲染在这里 */}
+      <ConfirmHost />
+      <ShortcutHelp open={help} onClose={() => setHelp(false)} />
     </div>
   );
 }

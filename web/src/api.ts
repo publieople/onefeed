@@ -420,6 +420,51 @@ export function aiStatus(signal?: AbortSignal): Promise<AiStatus> {
   return getJSON<AiStatus>("/api/ai/status", signal);
 }
 
+/** 单条详情的外壳：主记录 + 同一件事在其他平台的那几条 */
+export interface ItemResponse {
+  item: FeedItem;
+  siblings: { id: string; platform: string; title: string; author: string; url: string; published_at: number }[];
+}
+
+/**
+ * 悬停预取。
+ *
+ * 沉浸式转场最怕「飞进去之后是骨架屏」：动画把一张卡片放大成页面，页面里却什么都没有。
+ * 指针在卡片上停 260ms 就把首屏要的三份数据拉下来，点开时基本都是即时命中。
+ * 缓存只活 60 秒——聚合器里的内容本来就变得快，预取过期了就当没有。
+ */
+const PREFETCH_TTL = 60_000;
+const prefetched = new Map<string, { item?: ItemResponse; detail?: DetailResponse; at: number }>();
+
+export function prefetchItem(id: string): void {
+  const hit = prefetched.get(id);
+  if (hit && Date.now() - hit.at < PREFETCH_TTL) return;
+  const at = Date.now();
+  const slot = prefetched.get(id) ?? { at };
+  prefetched.set(id, slot);
+  getJSON<ItemResponse>("/api/item/" + encodeURIComponent(id))
+    .then((d) => {
+      slot.item = d;
+    })
+    .catch(() => {
+      /* 预取失败不用惊动用户，点进去会重新拉 */
+    });
+  getDetail(id)
+    .then((d) => {
+      slot.detail = d;
+    })
+    .catch(() => {
+      /* 同上 */
+    });
+}
+
+/** 预取的结果只给首屏垫个底，过期就丢掉，别把旧内容当新内容用 */
+export function peekItem(id: string): { item?: ItemResponse; detail?: DetailResponse } | null {
+  const hit = prefetched.get(id);
+  if (!hit || Date.now() - hit.at > PREFETCH_TTL) return null;
+  return hit;
+}
+
 export function getDetail(id: string, refresh = false, signal?: AbortSignal): Promise<DetailResponse> {
   const qs = refresh ? "?refresh=1" : "";
   return getJSON<DetailResponse>("/api/item/" + encodeURIComponent(id) + "/detail" + qs, signal);
@@ -466,6 +511,77 @@ export function getSummary(id: string, refresh = false, signal?: AbortSignal): P
   const qs = refresh ? "?refresh=1" : "";
   return getJSON<SummaryResponse>("/api/item/" + encodeURIComponent(id) + "/summary" + qs, signal);
 }
+/** 流式总结的进度回调。done 之后调用方就不用再发请求了，整份 payload 会一起给到。 */
+export interface SummaryStreamHandlers {
+  onMeta?: (meta: { basis: string; basis_text?: string; duration?: number; source_chars?: number }) => void;
+  /** 推理型模型先想后写：收到一次 thinking 就够，用来把「卡住了」变成「在干活」 */
+  onStatus?: (phase: string) => void;
+  onDelta: (text: string) => void;
+  onDone: (payload: SummaryPayload, fromCache: boolean) => void;
+  onError: (message: string) => void;
+}
+
+/**
+ * 流式总结。用 fetch 读 ReadableStream 而不是 EventSource：EventSource 收不到 404 的错误体，
+ * 也没法 abort；猜错路径时用户只会看到「连接失败」，这里能给出具体原因。
+ * 返回一个取消函数。
+ */
+export function streamSummary(id: string, refresh: boolean, h: SummaryStreamHandlers): () => void {
+  const ctrl = new AbortController();
+  const qs = refresh ? "?refresh=1" : "";
+  void (async () => {
+    let resp: Response;
+    try {
+      resp = await fetch("/api/item/" + encodeURIComponent(id) + "/summary/stream" + qs, {
+        signal: ctrl.signal,
+        headers: { Accept: "text/event-stream" },
+      });
+    } catch (err) {
+      if (!ctrl.signal.aborted) h.onError(err instanceof Error ? err.message : "请求失败");
+      return;
+    }
+    if (!resp.ok || !resp.body) {
+      h.onError(resp.status === 404 ? "没有这条内容" : `请求失败（${resp.status}）`);
+      return;
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let cut = buf.indexOf("\n\n");
+        while (cut >= 0) {
+          const chunk = buf.slice(0, cut);
+          buf = buf.slice(cut + 2);
+          cut = buf.indexOf("\n\n");
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            const body = line.slice(5).trim();
+            if (!body) continue;
+            let event: Record<string, unknown>;
+            try {
+              event = JSON.parse(body) as Record<string, unknown>;
+            } catch {
+              continue; /* 坏帧丢掉，别因为一行解析失败把整份总结作废 */
+            }
+            if (event.type === "meta") h.onMeta?.(event as never);
+            else if (event.type === "status") h.onStatus?.(String(event.phase ?? ""));
+            else if (event.type === "delta") h.onDelta(String(event.text ?? ""));
+            else if (event.type === "done") h.onDone(event.summary as SummaryPayload, Boolean(event.from_cache));
+            else if (event.type === "error") h.onError(String(event.message ?? "生成失败"));
+          }
+        }
+      }
+    } catch (err) {
+      if (!ctrl.signal.aborted) h.onError(err instanceof Error ? err.message : "连接断了");
+    }
+  })();
+  return () => ctrl.abort();
+}
+
 
 export interface Health {
   ok: boolean;
