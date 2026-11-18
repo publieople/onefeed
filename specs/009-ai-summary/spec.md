@@ -161,3 +161,37 @@ API：
    且总结与详情并行请求、互不阻塞（详情缓存命中时总结走缓存正文，不再开浏览器）。
 3. **成本**：每次总结约 3–6k 输入 token；缓存把重复打开降到零，重算要用户点。
 4. **合规**：总结是派生内容，卡片底部永远保留「去原站」，导流不截流。
+
+## 9. 交付状态（2026-11-18，B 站第一刀）
+
+T50–T57 已落地，主仓 `5144634`、插件仓 `99aa323`：
+
+| 项 | 实际做法 |
+|---|---|
+| 接口 | `GET /api/item/{id}/summary` 返回 `{ok, summary, from_cache, fetched_at}`，失败 `{ok:false, error}`；没有 `supported` 字段——总结永远尝试给出结果 |
+| 无模型 | 不隐藏页签，退回「按素材顺序摘原句」，`engine:"rules"`，caveat 写明 |
+| 插件素材 | manifest 加 `summary` feature；`host.summary_source()` 调插件的 `summarySource()`，插件没认领就直接返回 None，宿主拿详情缓存正文兜底 |
+| B 站 | 插件 0.5.0：`bili video watch --frames 0 --comments 5`，一次拿字幕 + 平台 AI 总结 + 热评，约 2s |
+| 前端 | 详情页两个页签（AI 总结默认 / 原文）；要点前的时间戳是按钮，点击切到「原文」并让播放器带 `t=秒&autoplay=1`；依据行写「依据 完整字幕 · 10697 字 · DeepSeek · deepseek-chat · 18.2s」 |
+| 测试 | `tests/test_summary.py` 42 项（解析、素材、规则兜底、缓存、接口 404）；`test_store.py` 迁移断言升到 4 |
+
+实测（`bilibili:video:BV1ZMWd6mE77`，字幕 6059 字）：**冷启动 18.3s**，返回 6 条带时间点的要点，点 `3:00` 后播放器从 03:02 开始播；第二次走 summaries 缓存。
+
+### 踩坑：venv 里的 python 写不了 %APPDATA%
+
+`bili video watch` 无条件调 `cards.mark_seen()` 写 `%APPDATA%\bili-cli\seen.json`。onefeed 的 venv python 在这个机器上对该目录没有写权限（`PermissionError: [Errno 13]`），子进程继承同一上下文，于是整个 watch 失败——`bili video info` 因为不写文件一直正常，容易误判成参数问题。
+
+修法是 manifest 的两个新字段：
+
+- `cli.env`：给 CLI 进程加环境变量，支持 `${state}`、`${plugin}`、`${appdata}`、`${localappdata}`、`${home}` 展开；
+- `cli.seed`：把只读位置的文件复制进 `${state}` 下的私有目录（目标缺失或源更新时才复制）。
+
+B 站插件把 `BILI_CLI_HOME` 指到 `${state}/toolhome/bili-cli`，并把 `credential.json` seed 过去，登录态仍然只在本机、插件读不到明文。
+
+### 还没做
+
+- 抖音 / 小红书 / 知乎的 `summarySource`（现在走详情正文兜底，等 detail 缓存才有素材）；
+- `?depth=deep`（ASR）与 `chapters` 的实际消费（B 站 chapters 已透传，前端暂未渲染）；
+- 时间戳跳转只认 B 站播放器，其它平台的 `t
+eq` 还不统一。
+
