@@ -1,10 +1,11 @@
-"""卡片 → 详情缩放动效的静态回归。
+"""卡片 → 详情共享元素变形的静态回归。
 
 真效果由 probes/check_card_morph.py 在真浏览器里验（需要服务在跑）；
 这里守住几件容易被重构悄悄弄丢的事：
-1. 跳页包了 View Transition，且主题那套全局规则不会串到导航上；
-2. 卡片单独成组（of-card），0.7s / expo-out，返回退场的是整页（of-page）；
-3. 不支持 View Transition 或用户关了动效时直接跳，不硬上。
+1. 卡片与详情页根部共用 of-card，浏览器才有几何插值的两个端点；
+2. 0.7s / expo-out，两个方向都靠同一组 keyframes 收尾；
+3. 返回时列表里那张卡片要先在场（feedCache + data-vt-item），否则没有落点；
+4. 不支持 View Transition 或用户关了动效时直接跳，不硬上。
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ APP = (SRC / "App.tsx").read_text(encoding="utf-8")
 FEED = (SRC / "pages" / "FeedPage.tsx").read_text(encoding="utf-8")
 ITEM = (SRC / "pages" / "ItemPage.tsx").read_text(encoding="utf-8")
 CARD = (SRC / "components" / "Card.tsx").read_text(encoding="utf-8")
+API = (SRC / "api.ts").read_text(encoding="utf-8")
 
 CASES: list[tuple[str, callable]] = []
 
@@ -29,27 +31,30 @@ def case(fn):
 
 
 @case
-def test_card_group_css() -> None:
+def test_shared_element_css() -> None:
     for needle in (
         "html.nav-vt::view-transition-group(of-card)",
         "html.nav-vt::view-transition-old(of-card)",
-        "@keyframes nav-card-lift",
-        "scale(1.075)",
+        "html.nav-vt::view-transition-new(of-card)",
+        "@keyframes nav-card-out",
+        "@keyframes nav-card-in",
         "0.7s",
         "cubic-bezier(0.16, 1, 0.3, 1)",
     ):
         assert needle in CSS, "theme.css 缺 " + needle
+    # 几何交给浏览器插值，不能再写死缩放倍数
+    assert "scale(1.075)" not in CSS, "of-card 还在写死放大倍数，共享元素变形会被覆盖"
 
 
 @case
-def test_back_transition_css() -> None:
+def test_old_page_fades_behind() -> None:
     for needle in (
-        "html.nav-vt::view-transition-old(of-page)",
-        "@keyframes nav-page-down",
-        "scale(0.972)",
         "html.nav-vt::view-transition-old(root)",
+        "nav-root-out",
+        "html.nav-vt::view-transition-new(root)",
     ):
         assert needle in CSS, "theme.css 缺 " + needle
+    assert "of-page" not in CSS, "of-page 的旧规则还在，会和 of-card 抢同一页"
 
 
 @case
@@ -71,9 +76,9 @@ def test_helper_fallbacks() -> None:
         "flushSync",
         "viewTransitionName",
         "of-card",
-        "of-page",
     ):
         assert needle in NAV_TS, "navTransition.ts 缺 " + needle
+    assert "of-page" not in NAV_TS, "helper 还在给整页起名字"
 
 
 @case
@@ -85,13 +90,31 @@ def test_app_waits_for_snapshot() -> None:
 
 
 @case
+def test_detail_shell_is_the_target() -> None:
+    # 详情页一挂载就得有 of-card，否则新 DOM 里没有变形右端，只剩淡出
+    assert "function Shell(" in ITEM, "详情页没有过渡载体"
+    assert 'viewTransitionName: "of-card"' in ITEM, "载体没挂 of-card"
+    assert ITEM.count("<Shell>") >= 3, "错误态 / 骨架 / 正文没有都包进载体"
+    assert "fromId: item?.id" in ITEM, "返回没带上是哪张卡片"
+
+
+@case
+def test_feed_restores_card_before_morph() -> None:
+    assert "data-vt-item=" in FEED, "列表项没有可供返回定位的标记"
+    assert 'vtName={item.id === backId ? "of-card" : undefined}' in FEED, "返回目标卡片没挂 of-card"
+    assert "scrollIntoView" in FEED, "返回时没把卡片滚回视野"
+    assert "feedCache" in API, "api.ts 没有首屏缓存，返回瞬间列表是空的"
+
+
+@case
 def test_entry_points() -> None:
     assert "runNavTransition" in FEED, "信息流没走过渡"
     assert "el ?? null" in FEED, "卡片元素没交给过渡"
     assert "onOpen: (id: string, el: HTMLElement) => void" in CARD
     assert "e.currentTarget" in CARD, "点击没把卡片元素带出来"
-    assert "const goBack = () => runNavTransition" in ITEM, "返回没走过渡"
-    assert 'state: { vt: true, back: 1 }' in ITEM, "返回没标方向"
+    assert "vtName" in CARD, "卡片没接 of-card 这个名字"
+    assert "const goBack = () =>" in ITEM, "返回没走过渡"
+    assert "back: 1" in ITEM, "返回没标方向"
 
 
 def main() -> int:

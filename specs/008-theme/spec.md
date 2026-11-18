@@ -93,4 +93,6 @@ onClick={() => { document.startViewTransition
 
 换肤与「点卡片进详情」都走 View Transition，两套 `::view-transition-*` 规则会互相打架：跳页时也套上 `reveal-light` / `reveal-dark` 的斜带，缩放与扫屏叠在一起。
 
+跳页这一侧 2026-11-18 晚改成共享元素变形（卡片与详情页根部共用 `of-card`，见 `007-motion` 第 8 节），原先给整页起名 `of-page` 的那套规则已删；两边的类名仍然严格分开。
+
 所以换肤的选择器全部收进 `html.theme-vt`：`html.theme-vt::view-transition-group(root)`、`html.theme-vt::view-transition-old(root)`、`html.theme-vt::view-transition-new(root)`、`html.theme-vt.dark::view-transition-new(root)`。跳页的规则挂在 `html.nav-vt`，两者互不可见。`tests/test_nav_motion.py` 里有一条断言专门守这个作用域，改 CSS 时不要把前缀删掉。

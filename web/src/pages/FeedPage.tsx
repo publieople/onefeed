@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import type { OutletCtx } from "../App";
 import { useFeed } from "../api";
@@ -18,6 +18,14 @@ export default function FeedPage({ ctx }: Props) {
   const [range, setRange] = useState<"all" | "today">("all");
   const [q, setQ] = useState("");
   const navigate = useNavigate();
+  const location = useLocation();
+  // 从详情页返回时，详情页要缩回这张卡片：它得先在场，还要在视野里
+  const backId = (location.state as { fromId?: string } | null)?.fromId ?? null;
+  useLayoutEffect(() => {
+    if (!backId) return;
+    const el = document.querySelector('[data-vt-item="' + CSS.escape(backId) + '"]');
+    el?.scrollIntoView({ block: "center", behavior: "auto" });
+  }, [backId]);
   // 卡片先放大再进详情：把被点的元素作为过渡的那一层
   const openItem = (id: string, el?: HTMLElement) => {
     runNavTransition(
@@ -137,8 +145,13 @@ export default function FeedPage({ ctx }: Props) {
 
       <section className="mt-5 grid grid-cols-1 items-stretch gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
         {feed.items.map((item, index) => (
-          <div key={item.id} className="rise h-full" style={{ animationDelay: Math.min(index, 11) * 22 + "ms" }}>
-            <Card item={item} onOpen={openItem} />
+          <div
+            key={item.id}
+            data-vt-item={item.id}
+            className="rise h-full"
+            style={{ animationDelay: Math.min(index, 11) * 22 + "ms" }}
+          >
+            <Card item={item} onOpen={openItem} vtName={item.id === backId ? "of-card" : undefined} />
           </div>
         ))}
       </section>

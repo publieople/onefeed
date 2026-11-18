@@ -4,20 +4,14 @@ type Doc = Document & {
   startViewTransition?: (callback: () => void) => { finished: Promise<void> };
 };
 
-/** 卡片自己那一层：旧卡片放大淡出，新页面随后淡入 */
+/** 卡片与详情页根部共用这个名字，浏览器才能把它们当成同一个元素做变形 */
 const CARD_NAME = "of-card";
-/** 从详情回列表：整页缩一点退场，列表反向长回来 */
-const PAGE_NAME = "of-page";
 
 /**
- * 跳页时套一层 View Transition，让被点的卡片先轻轻放大再散开。
+ * 跳页时套一层 View Transition：被点的卡片长大铺满整页，返回时缩回原位。
  * 浏览器不支持、或用户开了「减少动态效果」时直接跳，不留下任何痕迹。
  */
-export function runNavTransition(
-  apply: () => void,
-  target?: HTMLElement | "page" | null,
-  back = false,
-): void {
+export function runNavTransition(apply: () => void, target?: HTMLElement | null, back = false): void {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const doc = document as Doc;
   if (reduce || typeof doc.startViewTransition !== "function") {
@@ -26,9 +20,7 @@ export function runNavTransition(
   }
 
   const root = document.documentElement;
-  const named =
-    target === "page" ? (document.querySelector(".page-shell") as HTMLElement | null) : (target ?? null);
-  const name = target === "page" ? PAGE_NAME : CARD_NAME;
+  const named = target ?? null;
 
   let ran = false;
   const run = () => {
@@ -43,7 +35,7 @@ export function runNavTransition(
     if (named) named.style.viewTransitionName = "";
   };
 
-  if (named) named.style.viewTransitionName = name;
+  if (named) named.style.viewTransitionName = CARD_NAME;
   root.classList.add("nav-vt");
   root.classList.toggle("nav-vt-back", back);
 

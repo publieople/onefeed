@@ -9,6 +9,8 @@ interface Props {
   item: FeedItem;
   /** 一起把被点的卡片元素交出去：跳页时要给它一个 view-transition-name */
   onOpen: (id: string, el: HTMLElement) => void;
+  /** 从详情页返回时，给目标卡片挂上 of-card，让详情页缩回它的位置 */
+  vtName?: string;
 }
 
 function hexAlpha(hex: string, alpha: number): string {
@@ -207,7 +209,7 @@ function MetaLine({ item, body }: { item: FeedItem; body: string }) {
   );
 }
 
-export default function Card({ item, onOpen }: Props) {
+export default function Card({ item, onOpen, vtName }: Props) {
   const p = platform(item.platform);
   const body = excerpt(item);
   const kindLabel = KIND_LABEL[item.kind] ?? item.kind;
@@ -224,6 +226,7 @@ export default function Card({ item, onOpen }: Props) {
           onOpen(item.id, e.currentTarget);
         }
       }}
+      style={vtName ? { viewTransitionName: vtName } : undefined}
       whileHover={{ y: -2 }}
       whileTap={{ scale: 0.985 }}
       transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.7 }}

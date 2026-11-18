@@ -413,12 +413,18 @@ export interface FeedQuery {
   since?: number | null;
 }
 
+// 详情页返回时首帧就要有卡片：共享元素变形需要一个真实的落点，
+// 顺便也省掉一次「白屏然后重排」。
+const feedCache = new Map<string, FeedResponse>();
+
 export function useFeed(query: FeedQuery, reloadKey: number) {
-  const [items, setItems] = useState<FeedItem[]>([]);
-  const [next, setNext] = useState<string | null>(null);
-  const [count, setCount] = useState(0);
-  const [parsed, setParsed] = useState<ParsedQuery | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = JSON.stringify([query.platforms, query.kind, query.sort, query.q, query.since ?? 0]);
+  const seed = feedCache.get(cacheKey);
+  const [items, setItems] = useState<FeedItem[]>(() => seed?.items ?? []);
+  const [next, setNext] = useState<string | null>(() => seed?.next ?? null);
+  const [count, setCount] = useState(() => seed?.count ?? 0);
+  const [parsed, setParsed] = useState<ParsedQuery | null>(() => seed?.parsed ?? null);
+  const [loading, setLoading] = useState(!seed);
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
@@ -446,6 +452,7 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
       setError("");
       try {
         const data = await getJSON<FeedResponse>(build(cursor), controller.signal);
+        if (!append) feedCache.set(cacheKey, data);
         setItems((prev) => (append ? [...prev, ...data.items] : data.items));
         setNext(data.next);
         setCount(data.count);
@@ -456,7 +463,7 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
         setLoading(false);
       }
     },
-    [build],
+    [build, cacheKey],
   );
 
   useEffect(() => {

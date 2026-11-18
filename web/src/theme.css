@@ -254,8 +254,9 @@ html.theme-vt.dark::view-transition-new(root) {
 }
 
 
-/* 卡片 → 详情：被点的卡片单独一层，先轻轻放大再化开；新页面同时在下面淡入。
-   返回时反着来：详情页缩一点退场，信息流从 0.972 长回 1。
+/* 卡片 → 详情：被点的那张卡片与详情页根部共用一个名字（of-card），
+   浏览器把两张快照的盒子从卡片矩形插值到整页矩形，看到的就是「这张卡片自己长大、铺满一屏」；
+   返回时同一段路倒着走，缩回它在列表里的位置。
    曲线和换肤同一组：0.7s / cubic-bezier(0.16, 1, 0.3, 1)。 */
 .nav-vt,
 .nav-vt *,
@@ -273,7 +274,7 @@ html.nav-vt::view-transition-group(root) {
    这样看到的是「旧页退开、露出已经就位的新页」，文字不会重影。 */
 html.nav-vt::view-transition-old(root) {
   z-index: 2;
-  animation: nav-root-out 0.34s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+  animation: nav-root-out 0.32s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both;
 }
 
 html.nav-vt::view-transition-new(root) {
@@ -290,7 +291,8 @@ html.nav-vt::view-transition-new(root) {
   }
 }
 
-/* 被点的卡片：先放大一点点，再化开 */
+/* 卡片与详情页根部共用 of-card：浏览器把两张快照的盒子从卡片矩形插值到整页矩形，
+   于是看到的就是「这张卡片本身长大、铺满屏幕」，返回时同一段路倒着走。 */
 html.nav-vt::view-transition-group(of-card) {
   z-index: 3;
   animation-duration: 0.7s;
@@ -298,50 +300,31 @@ html.nav-vt::view-transition-group(of-card) {
 }
 
 html.nav-vt::view-transition-old(of-card) {
-  transform-origin: center;
-  animation: nav-card-lift 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: nav-card-out 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 html.nav-vt::view-transition-new(of-card) {
-  animation: none;
-  opacity: 0;
+  animation: nav-card-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@keyframes nav-card-lift {
-  from {
-    transform: scale(1);
+/* 前 62% 让「卡片在长大」这件事看清楚，最后一段才把两层合成最终画面 */
+@keyframes nav-card-out {
+  0%,
+  62% {
     opacity: 1;
   }
-  to {
-    transform: scale(1.075);
+  100% {
     opacity: 0;
   }
 }
 
-/* 返回时退场的是详情页：缩一点、淡出 */
-html.nav-vt::view-transition-group(of-page) {
-  z-index: 3;
-  animation-duration: 0.55s;
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-html.nav-vt::view-transition-old(of-page) {
-  transform-origin: center;
-  animation: nav-page-down 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-html.nav-vt::view-transition-new(of-page) {
-  animation: none;
-  opacity: 0;
-}
-
-@keyframes nav-page-down {
-  from {
-    transform: scale(1);
-    opacity: 1;
-  }
-  to {
-    transform: scale(0.972);
+@keyframes nav-card-in {
+  0%,
+  62% {
     opacity: 0;
   }
+  100% {
+    opacity: 1;
+  }
 }
+

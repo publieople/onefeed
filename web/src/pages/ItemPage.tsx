@@ -313,11 +313,25 @@ function SummaryPanel({ data, loading, error, canSeek, onJump, onRetry, url }: S
   );
 }
 
+/** 详情页的过渡载体：铺满整页宽，卡片就是长大到它这里。 */
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-[70vh] w-full" style={{ viewTransitionName: "of-card" }}>
+      {children}
+    </div>
+  );
+}
+
 export default function ItemPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  // 返回时和进来时反着来：整页缩一点退场，信息流再长回来
-  const goBack = () => runNavTransition(() => navigate("/", { state: { vt: true, back: 1 } }), "page", true);
+  // 返回时和进来时反着来：详情页缩回列表里那张卡片的位置与大小
+  const goBack = () =>
+    runNavTransition(
+      () => navigate("/", { state: { vt: true, back: 1, fromId: item?.id } }),
+      null,
+      true,
+    );
   const [data, setData] = useState<ItemResponse | null>(null);
   const [itemError, setItemError] = useState("");
   const [detail, setDetail] = useState<DetailResponse | null>(null);
@@ -510,6 +524,7 @@ export default function ItemPage() {
 
   if (itemError) {
     return (
+      <Shell>
       <div className="py-24 text-center">
         <p className="text-[15px] font-medium">这条内容打不开</p>
         <p className="mt-2 text-[13px] text-muted">{itemError}</p>
@@ -521,11 +536,13 @@ export default function ItemPage() {
           回到信息流
         </button>
       </div>
+      </Shell>
     );
   }
 
   if (!item) {
     return (
+      <Shell>
       <div className="mx-auto max-w-[860px] animate-pulse py-8">
         <div className="h-4 w-24 rounded bg-wash" />
         <div className="mt-5 h-8 w-3/4 rounded bg-wash" />
@@ -537,6 +554,7 @@ export default function ItemPage() {
           <div className="h-3 w-4/5 rounded bg-wash" />
         </div>
       </div>
+      </Shell>
     );
   }
 
@@ -550,6 +568,7 @@ export default function ItemPage() {
   const p = platform(item.platform);
 
   return (
+    <Shell>
     <div className="mx-auto max-w-[860px] pb-24 pt-6">
       <div className="flex items-center gap-3 text-[12px] text-muted">
         <button
@@ -821,5 +840,6 @@ export default function ItemPage() {
         </div>
       ) : null}
     </div>
+    </Shell>
   );
 }
