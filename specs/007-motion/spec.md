@@ -183,3 +183,37 @@ uv run python probes/check_interactions.py   # 行为：9 项断言，跑真实 
 - `tests/test_nav_motion.py`（8 项静态）：共享元素三件套、两个方向的关键帧、`of-page` 已清、`theme-vt` 作用域、`Shell` 覆盖三个分支、`feedCache` 与 `data-vt-item`、降级分支与接线。
 - `probes/check_card_morph.py`（18 项行为，真 Chrome）：起手宽度就是卡片宽（364px）、中途超过两倍、最终 1132px（整页宽）、前段旧页不透明、收尾旧页淡出新页到位、返回从 1132 缩回 364、无 VT / 减少动效照常跳、无 `pageerror`。
 - 截图：`design/morph-enter-120.png`、`morph-enter-260.png`、`morph-back-150.png`、`morph-back-300.png`。
+
+## 9. 筛选条件进出详情页（2026-11-18）
+
+点开一条内容再返回，必须回到同一屏：同样的平台 / 关键词 / 排序 / 时间范围，列表还在原来那一行。以前这些活在组件 state 里，跳详情时组件卸载就没了，返回一律是「全部 + 按新鲜度 + 滚到顶」。
+
+### 9.1 筛选条件是 URL 的一部分
+
+- FeedPage 用 useSearchParams 读 p（逗号分隔的平台 id）/ q（关键词）/ sort（freshness 或 engagement）/ range（today 才写）。
+- 所有改动走 patch() 写回 URL，setParams(sp, { replace: true })：筛选是同一页上的状态变化，不该每条都堆一条历史记录（否则返回要连按很多次）。
+- 点平台胶囊、分段控件、AI 应用条件都走同一个 patch，所以四条路径行为一致；副作用是刷新、分享链接也能复现同一屏。
+- 返回按钮不再写死 /：进详情时把 from = location.pathname + location.search 与 fromId 放进 location.state，返回时 navigate(from, { state: { vt: true, back: 1, fromId } })。
+
+### 9.2 三个东西缺一不可
+
+1. feedCache（web/src/api.ts，模块级 Map<cacheKey, FeedResponse>）：返回首帧就用缓存种上 items，否则列表是空的，共享元素找不到落点。cacheKey 用 JSON.stringify([platforms, kind, sort, q, since])，与 URL 参数一一对应。
+2. data-vt-item：列表每个单元挂上条目 id，返回时按 fromId 找到那张卡片、给它的 Card 传 vtName 为 of-card。
+3. scrollIntoView({ block: "center" })：卡片可能在屏幕外，先把它滚进视野，变形才有起点。缓存没命中时 requestAnimationFrame 再找一次。
+
+### 9.3 滚动归属：谁负责滚，只能有一个
+
+- 进详情：在 runNavTransition 的 apply 回调里 navigate 之后立刻 window.scrollTo({ top: 0 })，在快照之前滚好，详情页不会从列表的滚动位置开始。
+- 返回列表：由 FeedPage 的 useLayoutEffect 滚到那张卡片。
+- App 里「切页滚到顶」的 effect 必须跳过 state.vt 的跳转。这里踩过一个真坑：那个 effect 是被动 effect、绘制之后才跑，会把 useLayoutEffect 里刚滚好的位置冲回顶部。之前「返回后卡片在视野里」的断言之所以过，只是因为被点的卡本来就在顶部附近。实测修好后，列表滚到 3481px 再点开、返回仍是 3481px，卡片回到 top 346。
+
+### 9.4 可访问性
+
+分段控件（全部/今天、按新鲜度/按热度）与平台胶囊都把选中态暴露成 aria-pressed。既方便读屏，也让行为探针能直接断言状态，不用猜 class。
+
+### 9.5 验收
+
+- tests/test_feed_filters.py（5 项静态）：URL 四个参数读写齐全、replace: true、from 与 fromId 进 state、返回滚到 data-vt-item、App 对 vt 跳转让出滚动、feedCache、aria-pressed。
+- probes/check_feed_filters.py（25 项行为，真 Chrome）：点 B 站 → URL 带 p=bilibili → 点开 → 返回 URL / 胶囊 / 命中数 / 卡片落点全保持；浏览器后退键同样保留；深链 ?p=bilibili&q=AI&range=today 三个条件同时生效；排序与 Ctrl 多选往返不丢；空态返回仍是空态；列表滚到 3481px 再点开、返回落点 346px 且不在顶部；全程无 pageerror。
+- 截图：design/feed-filter-kept-1.png（筛选后的列表）、-2.png（返回后同一屏）、-3.png（深滚动返回）。
+

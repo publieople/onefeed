@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import type { OutletCtx } from "../App";
 import { useFeed } from "../api";
@@ -13,23 +13,66 @@ interface Props {
 }
 
 export default function FeedPage({ ctx }: Props) {
-  const [selected, setSelected] = useState<string[]>([]);
-  const [sort, setSort] = useState("");
-  const [range, setRange] = useState<"all" | "today">("all");
-  const [q, setQ] = useState("");
+  // 筛选条件是 URL 的一部分：刷新、分享链接、从详情页返回都还认得这套条件
+  const [params, setParams] = useSearchParams();
+  const selected = useMemo(() => (params.get("p") ?? "").split(",").filter(Boolean), [params]);
+  const q = params.get("q") ?? "";
+  const sort = params.get("sort") ?? "";
+  const range: "all" | "today" = params.get("range") === "today" ? "today" : "all";
+  const patch = (next: {
+    platforms?: string[];
+    keyword?: string;
+    sort?: string;
+    range?: "all" | "today";
+  }) => {
+    const sp = new URLSearchParams(params);
+    if (next.platforms) {
+      if (next.platforms.length) sp.set("p", next.platforms.join(","));
+      else sp.delete("p");
+    }
+    if (next.keyword !== undefined) {
+      if (next.keyword.trim()) sp.set("q", next.keyword);
+      else sp.delete("q");
+    }
+    if (next.sort !== undefined) {
+      if (next.sort) sp.set("sort", next.sort);
+      else sp.delete("sort");
+    }
+    if (next.range !== undefined) {
+      if (next.range === "today") sp.set("range", "today");
+      else sp.delete("range");
+    }
+    setParams(sp, { replace: true });
+  };
   const navigate = useNavigate();
   const location = useLocation();
   // 从详情页返回时，详情页要缩回这张卡片：它得先在场，还要在视野里
   const backId = (location.state as { fromId?: string } | null)?.fromId ?? null;
   useLayoutEffect(() => {
     if (!backId) return;
-    const el = document.querySelector('[data-vt-item="' + CSS.escape(backId) + '"]');
-    el?.scrollIntoView({ block: "center", behavior: "auto" });
+    const find = () => document.querySelector('[data-vt-item="' + CSS.escape(backId) + '"]');
+    const el = find();
+    if (el) {
+      el.scrollIntoView({ block: "center", behavior: "auto" });
+      return;
+    }
+    // 缓存没命中时首帧还没有卡片，等一拍再找
+    const raf = requestAnimationFrame(() => {
+      find()?.scrollIntoView({ block: "center", behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(raf);
   }, [backId]);
-  // 卡片先放大再进详情：把被点的元素作为过渡的那一层
+  // 卡片先放大再进详情：把被点的元素作为过渡的那一层。
+  // 同时把现在的地址（含筛选条件）交给详情页，返回时才能回到同一屏。
   const openItem = (id: string, el?: HTMLElement) => {
     runNavTransition(
-      () => navigate("/item/" + encodeURIComponent(id), { state: { vt: true } }),
+      () => {
+        navigate("/item/" + encodeURIComponent(id), {
+          state: { vt: true, from: location.pathname + location.search, fromId: id },
+        });
+        // 进详情从头看；App 的切页滚动对 vt 跳转已让位，这里在快照前滚好
+        window.scrollTo({ top: 0, behavior: "auto" });
+      },
       el ?? null,
     );
   };
@@ -57,10 +100,12 @@ export default function FeedPage({ ctx }: Props) {
       } | undefined;
       if (!detail) return;
       // 胶囊支持多选后，AI 给出的平台可以原样落进来（同一件事在几个平台上都有时更好对照）
-      setSelected(Array.isArray(detail.platforms) ? detail.platforms : []);
-      setQ(typeof detail.keyword === "string" ? detail.keyword : "");
-      setRange(detail.range === "today" ? "today" : "all");
-      if (detail.sort) setSort(detail.sort);
+      patch({
+        platforms: Array.isArray(detail.platforms) ? detail.platforms : [],
+        keyword: typeof detail.keyword === "string" ? detail.keyword : "",
+        range: detail.range === "today" ? "today" : "all",
+        ...(detail.sort ? { sort: detail.sort } : {}),
+      });
     };
     window.addEventListener("onefeed:filter", onFilter);
     return () => window.removeEventListener("onefeed:filter", onFilter);
@@ -71,7 +116,13 @@ export default function FeedPage({ ctx }: Props) {
   }, [ctx.summary?.total]);
 
   // 换排序或换筛选等于换了一屏内容，停在原来的滚动位置会莫名其妙。
+  // 但从详情页返回时首帧要留在卡片原来的位置，别把它的落点滚走。
+  const firstPaint = useRef(true);
   useEffect(() => {
+    if (firstPaint.current) {
+      firstPaint.current = false;
+      return;
+    }
     window.scrollTo({ top: 0 });
   }, [activeSort, selected.join(","), q, range]);
 
@@ -96,7 +147,7 @@ export default function FeedPage({ ctx }: Props) {
         <Seg
           id="range"
           value={range}
-          onChange={setRange}
+          onChange={(next) => patch({ range: next })}
           options={[
             { id: "all" as const, label: "全部" },
             { id: "today" as const, label: "今天" },
@@ -105,7 +156,7 @@ export default function FeedPage({ ctx }: Props) {
         <Seg
           id="sort"
           value={activeSort as "freshness" | "engagement"}
-          onChange={setSort}
+          onChange={(next) => patch({ sort: next })}
           options={[
             { id: "freshness" as const, label: "按新鲜度" },
             { id: "engagement" as const, label: "按热度" },
@@ -122,10 +173,7 @@ export default function FeedPage({ ctx }: Props) {
           selected={selected}
           counts={counts}
           total={ctx.summary?.total ?? 0}
-          onChange={(ids) => {
-            setSelected(ids);
-            setQ("");
-          }}
+          onChange={(ids) => patch({ platforms: ids, keyword: "" })}
         />
       </section>
 
@@ -221,6 +269,7 @@ function Seg<T extends string>({
           <button
             key={o.id}
             onClick={() => onChange(o.id)}
+            aria-pressed={on}
             className={"relative rounded-full px-2.5 py-1 transition-colors " + (on ? "text-solid-fg" : "text-muted hover:text-ink")}
           >
             {on ? (

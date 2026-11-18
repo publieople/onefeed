@@ -96,7 +96,8 @@ def main() -> int:
         print("back:", json.dumps(back[:2] + back[-2:], ensure_ascii=False))
 
         ok("返回走了 View Transition", page.evaluate("() => window.__vt") == 2)
-        ok("返回回到信息流", page.url.rstrip("/").endswith(":8791"), page.url)
+        # 返回会带回进来时那一屏（可能带 ?p=...&q=...），只看路径是不是首页
+        ok("返回回到信息流", page.url.split("?")[0].rstrip("/").endswith(":8791"), page.url)
         ok("返回目标卡片在场上且叫 of-card",
            page.evaluate("() => { const el = document.querySelector('[data-vt-item]'); return !!el && !!el.querySelector('[style*=\"view-transition-name\"]'); }"))
         b_first, b_last = back[0], back[-1]

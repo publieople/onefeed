@@ -47,8 +47,11 @@ export default function App() {
   const dir: 1 | -1 = depth(location.pathname) >= depth(prevPath.current) ? 1 : -1;
   useEffect(() => {
     prevPath.current = location.pathname;
+    // 共享元素变形那次跳转自己决定落点：进详情已经滚到顶，返回要滚回原卡片。
+    // 这里再 scrollTo(0) 会把返回的位置冲掉（effect 在绘制后才跑）。
+    if ((location.state as { vt?: boolean } | null)?.vt) return;
     window.scrollTo({ top: 0, behavior: "auto" });
-  }, [location.pathname]);
+  }, [location.pathname, location.state]);
   const page = pageVariants(dir);
 
   const reloadSettings = useCallback(async () => {

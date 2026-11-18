@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, MessageCircle, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   getDetail,
   getJSON,
@@ -325,13 +325,17 @@ function Shell({ children }: { children: React.ReactNode }) {
 export default function ItemPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  // 返回时和进来时反着来：详情页缩回列表里那张卡片的位置与大小
-  const goBack = () =>
+  const location = useLocation();
+  // 返回时和进来时反着来：详情页缩回列表里那张卡片的位置与大小。
+  // 回到进来时那一屏（带着筛选条件），而不是无条件回首页。
+  const goBack = () => {
+    const from = (location.state as { from?: string } | null)?.from || "/";
     runNavTransition(
-      () => navigate("/", { state: { vt: true, back: 1, fromId: item?.id } }),
+      () => navigate(from, { state: { vt: true, back: 1, fromId: item?.id } }),
       null,
       true,
     );
+  };
   const [data, setData] = useState<ItemResponse | null>(null);
   const [itemError, setItemError] = useState("");
   const [detail, setDetail] = useState<DetailResponse | null>(null);
