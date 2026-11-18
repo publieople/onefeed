@@ -33,6 +33,7 @@ ORDER = [
     "test_preflight.py",
     "test_ai.py",
     "test_agent.py",
+    "test_agent_runtime.py",
     "test_summary.py",
     "test_ui_lint.py",
     "test_theme_reveal.py",

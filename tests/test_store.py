@@ -69,7 +69,9 @@ def main() -> int:
 
         # 建表与迁移
         check(db.is_file(), "数据库文件已创建")
-        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 4, "user_version = 4")
+        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 5, "user_version = 5")
+        # v5：Agent 运行、步骤、收藏标记都在同一库；hidden 默认不进 feed
+        check(store.get_mark("demo:item0")["saved"] is False, "v5 item_marks 默认未收藏")
 
         # upsert 幂等
         rows = sample(5)

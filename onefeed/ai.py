@@ -477,7 +477,7 @@ def chat(store, message: str, history: list[dict[str, str]] | None = None,
             from . import agent as agent_mod  # 懒加载：import pydantic_ai 要 1.7s
             result = agent_mod.run(store, message, history=history, limit=limit,
                                    exclude=exclude, chain=chain,
-                                   max_tools=int(conf.get("ai_agent_max_tools") or 6))
+                                   max_tools=int(conf.get("ai_agent_max_tools") or 10))
             _LAST.update({"at": int(time.time()), "provider": result.get("provider", ""),
                           "ok": True, "error": "", "tried": [p["name"] for p in chain]})
             return result

@@ -19,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 
@@ -125,6 +125,49 @@ SORTS = {"freshness": f"{FRESH_KEY} DESC, i.id DESC",
 SORT_KEYS = {"freshness": FRESH_KEY, "engagement": ENGAGE_KEY}
 
 
+AGENT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS agent_threads (
+    id            TEXT PRIMARY KEY,
+    title         TEXT NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id            TEXT PRIMARY KEY,
+    thread_id     TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'running',   -- running/done/error/cancelled
+    input         TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    reply         TEXT NOT NULL DEFAULT '',
+    steps         INTEGER NOT NULL DEFAULT 0,
+    ms            INTEGER NOT NULL DEFAULT 0,
+    tokens        INTEGER NOT NULL DEFAULT 0,
+    error         TEXT NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL,
+    finished_at   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_thread
+    ON agent_runs(thread_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS agent_steps (             -- 事件流水：回放 + 审计
+    run_id        TEXT NOT NULL,
+    seq           INTEGER NOT NULL,
+    kind          TEXT NOT NULL,
+    name          TEXT NOT NULL DEFAULT '',
+    payload       TEXT NOT NULL DEFAULT '{}',
+    undo_token    TEXT NOT NULL DEFAULT '',
+    at            INTEGER NOT NULL,
+    PRIMARY KEY (run_id, seq)
+);
+CREATE TABLE IF NOT EXISTS item_marks (              -- 收藏 / 已读 / 隐藏
+    item_id       TEXT PRIMARY KEY,
+    saved         INTEGER NOT NULL DEFAULT 0,
+    read_at       INTEGER NOT NULL DEFAULT 0,
+    hidden        INTEGER NOT NULL DEFAULT 0,
+    updated_at    INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
 def _state_root() -> Path:
     """复用插件运行时的状态目录解析（ONEFEED_HOME > ~/.onefeed > 仓库内 .onefeed）。"""
     try:
@@ -225,6 +268,8 @@ class Store:
                 conn.executescript(DETAILS_SCHEMA)
             if version < 4:
                 conn.executescript(SUMMARIES_SCHEMA)
+            if version < 5:
+                conn.executescript(AGENT_SCHEMA)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
         self.recompute_engage()
@@ -324,8 +369,12 @@ class Store:
             key = SORT_KEYS.get(sort, FRESH_KEY)
             where.append(f"({key} < ? OR ({key} = ? AND i.id < ?))")
             params.extend([ts, ts, ident])
-        clause = ("WHERE " + " AND ".join(where)) if where else ""
-        sql = f"SELECT i.* FROM items i {clause} ORDER BY {order} LIMIT ?"
+        where.append("COALESCE(m.hidden, 0) = 0")  # 「不感兴趣」的条目默认不进流
+        clause = "WHERE " + " AND ".join(where)
+        sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
+               f"m.hidden AS mark_hidden "
+               f"FROM items i LEFT JOIN item_marks m ON m.item_id = i.id "
+               f"{clause} ORDER BY {order} LIMIT ?")
         params.append(limit + 1)
         rows = [dict(r) for r in self.conn.execute(sql, params).fetchall()]
         has_more = len(rows) > limit
@@ -397,8 +446,12 @@ class Store:
             ids = [str(x) for x in exclude][:200]
             where.append(f"i.id NOT IN ({', '.join('?' for _ in ids)})")
             params.extend(ids)
-        clause = ("WHERE " + " AND ".join(where)) if where else ""
-        sql = f"SELECT i.* FROM items i {clause} ORDER BY {SORTS.get(sort, SORTS['freshness'])} LIMIT ?"
+        where.append("COALESCE(m.hidden, 0) = 0")
+        clause = "WHERE " + " AND ".join(where)
+        sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
+               f"m.hidden AS mark_hidden "
+               f"FROM items i LEFT JOIN item_marks m ON m.item_id = i.id "
+               f"{clause} ORDER BY {SORTS.get(sort, SORTS['freshness'])} LIMIT ?")
         params.append(pool)
         rows = [dict(r) for r in self.conn.execute(sql, params).fetchall()]
         for row in rows:
@@ -437,9 +490,17 @@ class Store:
         # 前端习惯的名字
         row["stats"] = {"like": row.get("like_count", 0), "comment": row.get("comment_count", 0),
                         "share": row.get("share_count", 0), "view": row.get("view_count", 0)}
+        # 收藏 / 已读 / 隐藏：真值放 item_marks，这里拍平成布尔给前端
+        for key, mark in (("saved", "mark_saved"), ("read", "mark_read_at"),
+                          ("hidden", "mark_hidden")):
+            row[key] = bool(row.pop(mark, 0) or 0)
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
-        row = self.conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        row = self.conn.execute(
+            "SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
+            "m.hidden AS mark_hidden "
+            "FROM items i LEFT JOIN item_marks m ON m.item_id = i.id WHERE i.id = ?",
+            (item_id,)).fetchone()
         if row is None:
             return None
         data = dict(row)
@@ -478,6 +539,131 @@ class Store:
         with self._write_lock:
             self.conn.execute("DELETE FROM details WHERE item_id = ?", (item_id,))
             self.conn.commit()
+
+    # ------------------------------------------------------------ agent
+    # 011：会话 / 运行 / 步骤 / 条目标记。轨迹先落库再吐 SSE：
+    # 刷新页面能回放，进程重启也不丢。
+    def ensure_thread(self, thread_id: str, title: str = "") -> None:
+        now = int(time.time())
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO agent_threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at, "
+                "title=CASE WHEN excluded.title != '' THEN excluded.title ELSE agent_threads.title END",
+                (thread_id, title[:200], now, now))
+            self.conn.commit()
+
+    def start_agent_run(self, run_id: str, thread_id: str = "", input_text: str = "",
+                        model: str = "") -> None:
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO agent_runs (id, thread_id, status, input, model, created_at) "
+                "VALUES (?, ?, 'running', ?, ?, ?)",
+                (run_id, thread_id, input_text[:2000], model[:120], int(time.time())))
+            self.conn.commit()
+        if thread_id:
+            self.ensure_thread(thread_id, title=input_text[:60])
+
+    def finish_agent_run(self, run_id: str, status: str = "done", reply: str = "",
+                         error: str = "", steps: int = 0, ms: int = 0,
+                         tokens: int = 0) -> None:
+        with self._write_lock:
+            self.conn.execute(
+                "UPDATE agent_runs SET status=?, reply=?, error=?, steps=?, ms=?, tokens=?, "
+                "finished_at=? WHERE id=?",
+                (status, reply[:4000], error[:1000], int(steps), int(ms), int(tokens),
+                 int(time.time()), run_id))
+            self.conn.commit()
+
+    def add_agent_step(self, run_id: str, seq: int, kind: str, name: str = "",
+                       payload: dict[str, Any] | None = None, undo_token: str = "") -> None:
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO agent_steps "
+                "(run_id, seq, kind, name, payload, undo_token, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, int(seq), kind, name[:120],
+                 json.dumps(payload or {}, ensure_ascii=False), undo_token, int(time.time())))
+            self.conn.commit()
+
+    @staticmethod
+    def _decode_step(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            payload = json.loads(row.get("payload") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        return {"seq": int(row.get("seq") or 0), "kind": row.get("kind") or "",
+                "name": row.get("name") or "", "at": int(row.get("at") or 0),
+                "undo_token": row.get("undo_token") or "",
+                "data": payload if isinstance(payload, dict) else {}}
+
+    def get_agent_run(self, run_id: str, steps: bool = True) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM agent_runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        data = dict(row)
+        if steps:
+            rows = self.conn.execute(
+                "SELECT seq, kind, name, payload, undo_token, at FROM agent_steps "
+                "WHERE run_id = ? ORDER BY seq", (run_id,)).fetchall()
+            data["events"] = [self._decode_step(dict(r)) for r in rows]
+        return data
+
+    def recent_agent_runs(self, thread_id: str | None = None,
+                          limit: int = 20) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 100))
+        if thread_id:
+            rows = self.conn.execute(
+                "SELECT * FROM agent_runs WHERE thread_id = ? ORDER BY created_at DESC LIMIT ?",
+                (thread_id, limit)).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM agent_runs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_mark(self, item_id: str) -> dict[str, Any]:
+        row = self.conn.execute("SELECT * FROM item_marks WHERE item_id = ?",
+                                (item_id,)).fetchone()
+        if row is None:
+            return {"item_id": item_id, "saved": False, "read": False, "hidden": False,
+                    "read_at": 0}
+        return {"item_id": item_id, "saved": bool(row["saved"]), "read": bool(row["read_at"]),
+                "hidden": bool(row["hidden"]), "read_at": int(row["read_at"] or 0),
+                "updated_at": int(row["updated_at"] or 0)}
+
+    def mark_item(self, item_id: str, saved: bool | None = None, read: bool | None = None,
+                  hidden: bool | None = None) -> dict[str, Any]:
+        """局部更新标记：只改传了的那几项，没传的保持原值。"""
+        current = self.get_mark(item_id)
+        if saved is not None:
+            current["saved"] = bool(saved)
+        if read is not None:
+            current["read"] = bool(read)
+            current["read_at"] = int(time.time()) if read else 0
+        if hidden is not None:
+            current["hidden"] = bool(hidden)
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO item_marks (item_id, saved, read_at, hidden, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET "
+                "saved=excluded.saved, read_at=excluded.read_at, hidden=excluded.hidden, "
+                "updated_at=excluded.updated_at",
+                (item_id, int(current["saved"]), int(current["read_at"]),
+                 int(current["hidden"]), int(time.time())))
+            self.conn.commit()
+        return self.get_mark(item_id)
+
+    def saved_items(self, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
+            "m.hidden AS mark_hidden "
+            "FROM item_marks m JOIN items i ON i.id = m.item_id "
+            "WHERE m.saved = 1 AND COALESCE(m.hidden, 0) = 0 "
+            "ORDER BY m.updated_at DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),)).fetchall()
+        out = [dict(r) for r in rows]
+        for row in out:
+            self._decode_row(row)
+        return out
 
     # ------------------------------------------------------------ summaries
     def get_summary(self, item_id: str) -> dict[str, Any] | None:

@@ -2,15 +2,18 @@ import { ArrowUp, Loader2, Sparkles, Wand2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import type { AiResponse, FeedItem } from "../api";
-import { aiChat } from "../api";
+import type { AgentEvent, AiResponse, FeedItem } from "../api";
+import { agentCancel, agentConfirm, agentStart, agentStream, aiChat, ApiError } from "../api";
 import { platform } from "../platform";
+import AgentConsole from "./AgentConsole";
 import FilterBox from "./FilterBox";
 
 interface Turn {
   role: "user" | "ai";
   text: string;
   data?: AiResponse;
+  /** Agent 这轮留下的轨迹（回放同一份） */
+  trace?: AgentEvent[];
 }
 
 const HINTS = [
@@ -26,13 +29,107 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const [manual, setManual] = useState(false);
+  const [live, setLive] = useState<{ run_id: string; events: AgentEvent[] } | null>(null);
+  const [answered, setAnswered] = useState<Record<string, boolean>>({});
+  const streamRef = useRef<null | (() => void)>(null);
+  const settledRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
 
+  useEffect(() => () => streamRef.current?.(), []);
+
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [turns, busy]);
+
+  const say = (text: string) => setTurns((prev) => [...prev, { role: "ai", text }]);
+
+  const applyUi = (event: AgentEvent) => {
+    const payload = (event.data?.payload ?? {}) as Record<string, unknown>;
+    if (event.name === "ui_filter") {
+      window.dispatchEvent(
+        new CustomEvent("onefeed:filter", {
+          detail: {
+            platforms: Array.isArray(payload.platforms) ? payload.platforms : [],
+            keyword: typeof payload.keyword === "string" ? payload.keyword : "",
+            range: payload.since === "today" ? "today" : "all",
+            sort: typeof payload.sort === "string" ? payload.sort : undefined,
+          },
+        }),
+      );
+    } else if (event.name === "ui_open_item" && payload.id) {
+      onOpenItem(String(payload.id));
+    }
+  };
+
+  const listen = (runId: string) => {
+    const events: AgentEvent[] = [];
+    settledRef.current = false;
+    setAnswered({});
+    setLive({ run_id: runId, events: [] });
+    streamRef.current?.();
+    streamRef.current = agentStream(
+      runId,
+      (event) => {
+        events.push(event);
+        setLive({ run_id: runId, events: [...events] });
+        if (event.kind === "action") applyUi(event);
+        if (event.kind === "done") {
+          settledRef.current = true;
+          streamRef.current?.();
+          streamRef.current = null;
+          const d = event.data as Record<string, any>;
+          const items: FeedItem[] = Array.isArray(d.items) ? d.items : [];
+          const data: AiResponse = {
+            engine: "agent",
+            provider: typeof d.provider === "string" ? d.provider : "",
+            plan:
+              (d.plan as AiResponse["plan"]) ?? {
+                mode: "agent",
+                platforms: [],
+                kinds: [],
+                since: null,
+                keyword: "",
+                sort: "freshness",
+              },
+            reply: String(d.reply ?? ""),
+            items,
+            count: items.length,
+            suggestions: Array.isArray(d.suggestions) ? d.suggestions : [],
+            understood: String(d.understood ?? ""),
+            steps: Number(d.usage?.steps ?? 0),
+            ms: Number(d.usage?.ms ?? 0),
+          };
+          setTurns((prev) => [
+            ...prev,
+            { role: "ai", text: data.reply || `翻到 ${items.length} 条。`, data, trace: events.slice() },
+          ]);
+          setLive(null);
+          setBusy(false);
+        }
+      },
+      (msg) => {
+        if (settledRef.current) return;
+        settledRef.current = true;
+        streamRef.current = null;
+        setLive(null);
+        setBusy(false);
+        say(`${msg}，稍后再试。`);
+      },
+    );
+  };
+
+  const fallback = async (said: string, exclude: string[], history: unknown) => {
+    try {
+      const data = await aiChat(said, { exclude, history });
+      setTurns((prev) => [...prev, { role: "ai", text: data.reply, data }]);
+    } catch (err) {
+      say(err instanceof Error ? err.message : "请求失败");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const ask = async (message: string, exclude: string[] = []) => {
     const said = message.trim();
@@ -41,30 +138,54 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
     setOpen(true);
     setBusy(true);
     setTurns((prev) => [...prev, { role: "user", text: said }]);
+    const history = turns.slice(-4).map((t) => ({
+      role: t.role === "user" ? "user" : "assistant",
+      text: t.text,
+      plan: t.data?.plan,
+    }));
     try {
-      const data = await aiChat(said, {
-        exclude,
-        history: turns.slice(-4).map((t) => ({
-          role: t.role === "user" ? "user" : "assistant",
-          text: t.text,
-          plan: t.data?.plan,
-        })),
-      });
-      setTurns((prev) => [...prev, { role: "ai", text: data.reply, data }]);
+      const started = await agentStart(said, { exclude, history });
+      listen(started.run_id);
     } catch (err) {
-      setTurns((prev) => [...prev, { role: "ai", text: err instanceof Error ? err.message : "请求失败" }]);
-    } finally {
+      // 后端关掉 Agent 或旧版本没有这条路由：退回一次出计划的老路径
+      if (err instanceof ApiError && (err.code === "agent_unavailable" || err.code === "http_error")) {
+        await fallback(said, exclude, history);
+        return;
+      }
+      say(err instanceof Error ? err.message : "请求失败");
       setBusy(false);
+    }
+  };
+
+  const confirm = async (confirmId: string, allow: boolean) => {
+    if (!live) return;
+    const runId = live.run_id;
+    setAnswered((prev) => ({ ...prev, [confirmId]: allow }));
+    try {
+      await agentConfirm(runId, confirmId, allow);
+    } catch {
+      /* 过期了就按后端拒绝处理，不打扰用户 */
+    }
+  };
+
+  const stop = async () => {
+    if (!live) return;
+    try {
+      await agentCancel(live.run_id);
+    } catch {
+      /* 已经结束了 */
     }
   };
 
   const last = [...turns].reverse().find((t) => t.role === "ai" && t.data)?.data;
 
   const applyFilter = (data: AiResponse) => {
+    // plan.since 是检索时真实生效的起始秒；只有落在 36 小时内的才算「今天」
+    const since = Number(data.plan.since || 0);
     const detail = {
       platforms: data.plan.platforms,
       keyword: data.plan.keyword,
-      range: data.plan.since ? "today" : "all",
+      range: since && Date.now() / 1000 - since <= 36 * 3600 ? "today" : "all",
       sort: data.plan.sort,
     };
     window.dispatchEvent(new CustomEvent("onefeed:filter", { detail }));
@@ -161,6 +282,12 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                         </div>
                       </div>
 
+                      {turn.trace?.length ? (
+                        <div className="pl-8">
+                          <AgentConsole events={turn.trace} answered={answered} />
+                        </div>
+                      ) : null}
+
                       {turn.data?.items.length ? (
                         <div className="space-y-1.5 pl-8">
                           {turn.data.items.slice(0, 8).map((item) => (
@@ -198,7 +325,26 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                   ),
                 )}
 
-                {busy ? (
+                {live ? (
+                  <div className="rise space-y-1.5">
+                    <AgentConsole
+                      events={live.events}
+                      running
+                      answered={answered}
+                      onConfirm={confirm}
+                    />
+                    <div className="flex items-center gap-2 pl-1">
+                      <button
+                        onClick={() => void stop()}
+                        className="rounded-full border border-line px-2.5 py-1 text-[11px] text-fade transition hover:border-ink/25 hover:text-ink"
+                      >
+                        停止
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {busy && !live ? (
                   <div className="flex items-center gap-2 text-[12px] text-fade">
                     <Loader2 size={14} className="animate-spin" />
                     Agent 正在本地库里翻…
@@ -302,7 +448,7 @@ function MiniRow({ item, onOpen }: { item: FeedItem; onOpen: () => void }) {
         <span className="line-clamp-2 text-[12.5px] leading-snug">{item.title}</span>
         <span className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-fade">
           <span className="text-muted">{p.label}</span>
-          {item.reasons.slice(0, 2).map((r) => (
+          {(item.reasons || []).slice(0, 2).map((r) => (
             <span key={r}>{r}</span>
           ))}
         </span>

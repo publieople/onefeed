@@ -203,6 +203,153 @@ def ai_chat(request: Request, payload: dict[str, Any] = Body(default={})) -> dic
     )
 
 
+# ---------------------------------------------------------------- agent（011）
+def _agent_runtime():
+    """懒加载：关掉 agent 时连 pydantic_ai 都不 import（010 的开关语义）。"""
+    from . import agent_runtime
+    return agent_runtime
+
+
+def _agent_ready() -> tuple[bool, str]:
+    conf = settings_mod.load()
+    if not ai_mod._agent_enabled(conf):
+        return False, "Agent 开关关着"
+    if not ai_mod._provider_list():
+        return False, "还没配模型"
+    return True, ""
+
+
+@router.post("/agent/runs", status_code=202)
+def agent_run_create(request: Request, payload: dict[str, Any] = Body(default={})) -> dict:
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail={
+            "code": "empty_message", "message": "说一句话再问",
+            "hint": "例如「把今天 B 站讲 AI 的挑三条存起来」"})
+    ok, why = _agent_ready()
+    if not ok:
+        raise HTTPException(status_code=409, detail={
+            "code": "agent_unavailable", "message": why,
+            "hint": "去设置页打开 Agent 或填一个模型 key"})
+    try:
+        limit = int(payload.get("limit") or 12)
+    except (TypeError, ValueError):
+        limit = 12
+    limit = max(1, min(limit, 24))
+    exclude = payload.get("exclude")
+    history = payload.get("history")
+    runtime = _agent_runtime()
+    return runtime.start(
+        _store(request), message,
+        history=history if isinstance(history, list) else None,
+        limit=limit,
+        exclude=[str(x) for x in exclude] if isinstance(exclude, list) else None,
+        chain=ai_mod._provider_list(),
+        max_tools=int(settings_mod.load().get("ai_agent_max_tools") or 10),
+        runner=_runner(request),
+        thread_id=str(payload.get("thread_id") or ""),
+    )
+
+
+@router.get("/agent/runs/{run_id}/events")
+def agent_run_events(request: Request, run_id: str) -> StreamingResponse:
+    """SSE：实时事件流。断线重连带 Last-Event-ID 就能续上（事件本来就在库里）。"""
+    runtime = _agent_runtime()
+    store = _store(request)
+    if store.get_agent_run(run_id, steps=False) is None:
+        raise HTTPException(status_code=404, detail={"code": "no_run",
+                                                     "message": "没有这条运行"})
+    try:
+        after = int(request.headers.get("last-event-id") or 0)
+    except ValueError:
+        after = 0
+    return StreamingResponse(
+        runtime.sse_stream(store, run_id, after=after),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"})
+
+
+@router.get("/agent/runs/{run_id}")
+def agent_run_get(request: Request, run_id: str) -> dict:
+    """回放：事件流从库里读，刷新页面 / 换设备都能看。"""
+    run = _store(request).get_agent_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail={"code": "no_run",
+                                                     "message": "没有这条运行"})
+    return {"run": run, "events": run.get("events", [])}
+
+
+@router.post("/agent/runs/{run_id}/confirm")
+def agent_run_confirm(request: Request, run_id: str,
+                      payload: dict[str, Any] = Body(default={})) -> dict:
+    confirm_id = str(payload.get("confirm_id") or "")
+    if not confirm_id:
+        raise HTTPException(status_code=400, detail={"code": "no_confirm",
+                                                     "message": "缺 confirm_id"})
+    ok = _agent_runtime().resolve_confirm(run_id, confirm_id, bool(payload.get("allow")))
+    if not ok:
+        raise HTTPException(status_code=404, detail={"code": "confirm_expired",
+                                                     "message": "这条确认已过期"})
+    return {"ok": True, "allow": bool(payload.get("allow"))}
+
+
+@router.post("/agent/runs/{run_id}/cancel")
+def agent_run_cancel(request: Request, run_id: str) -> dict:
+    ok = _agent_runtime().cancel(run_id)
+    if ok:
+        _store(request).finish_agent_run(run_id, "cancelled", reply="已取消")
+    return {"ok": ok}
+
+
+@router.get("/agent/runs")
+def agent_run_list(request: Request, thread_id: str | None = Query(None),
+                   limit: int = Query(20, ge=1, le=100)) -> dict:
+    runs = _store(request).recent_agent_runs(thread_id=thread_id, limit=limit)
+    return {"runs": runs, "count": len(runs)}
+
+
+@router.get("/agent/actions")
+def agent_actions() -> dict:
+    """动作白名单：设置页「Agent 能做什么」直接渲染这个。"""
+    from . import actions as actions_mod
+    return {"actions": actions_mod.catalog()}
+
+
+@router.post("/agent/undo")
+def agent_undo(request: Request, payload: dict[str, Any] = Body(default={})) -> dict:
+    from . import actions as actions_mod
+    token = str(payload.get("token") or "")
+    if not token:
+        raise HTTPException(status_code=400, detail={"code": "no_token",
+                                                     "message": "缺 undo token"})
+    return actions_mod.apply_undo(_store(request), token)
+
+
+@router.get("/agent/saved")
+def agent_saved(request: Request, limit: int = Query(50, ge=1, le=200)) -> dict:
+    items = _store(request).saved_items(limit=limit)
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/agent/mark")
+def agent_mark(request: Request, payload: dict[str, Any] = Body(default={})) -> dict:
+    """卡片上的收藏/已读/隐藏按钮（不经过模型）。"""
+    item_id = str(payload.get("id") or "").strip()
+    if not item_id:
+        raise HTTPException(status_code=400, detail={"code": "no_id", "message": "缺 id"})
+    store = _store(request)
+    if store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail={"code": "no_item",
+                                                     "message": "库里没有这条"})
+    def _flag(key: str) -> bool | None:
+        value = payload.get(key)
+        return None if value is None else bool(value)
+    mark = store.mark_item(item_id, saved=_flag("saved"), read=_flag("read"),
+                           hidden=_flag("hidden"))
+    return {"ok": True, "mark": mark}
+
+
 @router.get("/feed")
 def feed(
     request: Request,

@@ -287,6 +287,113 @@ export function aiChat(message: string, extra: Record<string, unknown> = {}): Pr
   return postJSON<AiResponse>("/api/ai/chat", { message, ...extra });
 }
 
+/* ---------------------------------------------------------------- Agent 运行 */
+
+/** 运行事件：SSE 的每一帧，和回放读的是同一份 */
+export interface AgentEvent {
+  seq: number;
+  kind: "run_start" | "step" | "tool" | "action" | "need_confirm" | "delta" | "done" | "error" | string;
+  name: string;
+  data: Record<string, any>;
+  undo_token?: string;
+  at: number;
+}
+
+export interface AgentStart {
+  run_id: string;
+  thread_id: string;
+  status: string;
+}
+
+/** 起一轮 Agent。后端关掉 Agent 时抛 code=agent_unavailable，调用方回落 aiChat。 */
+export async function agentStart(
+  message: string,
+  extra: Record<string, unknown> = {},
+): Promise<AgentStart> {
+  const resp = await fetch("/api/agent/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, ...extra }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const err = (data?.error ?? data?.detail ?? {}) as { code?: string; message?: string };
+    throw new ApiError(err.message ?? `请求失败（${resp.status}）`, err.code ?? "http_error");
+  }
+  return data as AgentStart;
+}
+
+/** 订阅一次运行的事件流；返回关闭函数。done 之后由调用方主动关，别等自动重连。 */
+export function agentStream(
+  runId: string,
+  onEvent: (event: AgentEvent) => void,
+  onFail: (message: string) => void,
+): () => void {
+  const es = new EventSource("/api/agent/runs/" + encodeURIComponent(runId) + "/events");
+  es.onmessage = (msg) => {
+    try {
+      onEvent(JSON.parse(msg.data) as AgentEvent);
+    } catch {
+      /* 坏帧忽略，别让整条流断掉 */
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    onFail("事件流断了");
+  };
+  return () => es.close();
+}
+
+export function agentConfirm(runId: string, confirmId: string, allow: boolean): Promise<{ ok: boolean }> {
+  return postJSON("/api/agent/runs/" + encodeURIComponent(runId) + "/confirm", { confirm_id: confirmId, allow });
+}
+
+export function agentCancel(runId: string): Promise<{ ok: boolean }> {
+  return postJSON("/api/agent/runs/" + encodeURIComponent(runId) + "/cancel", {});
+}
+
+export interface AgentMark {
+  saved: boolean;
+  read: boolean;
+  hidden: boolean;
+}
+
+export function agentMark(id: string, patch: { saved?: boolean; read?: boolean; hidden?: boolean }): Promise<{ ok: boolean; mark: AgentMark }> {
+  return postJSON("/api/agent/mark", { id, ...patch });
+}
+
+export function agentSaved(): Promise<{ items: FeedItem[]; count: number }> {
+  return getJSON("/api/agent/saved");
+}
+
+export function agentUndo(token: string): Promise<Record<string, unknown>> {
+  return postJSON("/api/agent/undo", { token });
+}
+
+export interface AgentReplay {
+  run: {
+    id: string;
+    thread_id: string;
+    status: string;
+    input: string;
+    model: string;
+    reply: string;
+    steps: number;
+    ms: number;
+    tokens: number;
+    error: string;
+    created_at: number;
+    finished_at: number;
+    events: AgentEvent[];
+  };
+  events: AgentEvent[];
+}
+
+export function agentReplay(runId: string): Promise<AgentReplay> {
+  return getJSON("/api/agent/runs/" + encodeURIComponent(runId));
+}
+
+
 export function aiStatus(signal?: AbortSignal): Promise<AiStatus> {
   return getJSON<AiStatus>("/api/ai/status", signal);
 }

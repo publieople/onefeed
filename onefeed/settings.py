@@ -38,7 +38,8 @@ DEFAULTS: dict[str, Any] = {
     # Agent 化：模型拿工具自己搜、看结果、换词，而不是一次 JSON 计划 + 盲目 LIKE。
     # 出问题一键关掉就退回旧路径；ONEFEED_AI_AGENT=0 也能关（环境变量优先）。
     "ai_agent": True,
-    "ai_agent_max_tools": 6,
+    # 011 起预算按 spec 的 max_tool_calls=10；010 时期是 6，真机上 6 次常在中途用满。
+    "ai_agent_max_tools": 10,
 }
 
 ENV_KEYS = {"registry_url": "ONEFEED_REGISTRY", "plugins_dir": "ONEFEED_PLUGINS_DIR"}
