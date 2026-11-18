@@ -1,6 +1,6 @@
 import { animate, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { DUR, SPRING } from "../../motion";
+import { DUR, EASE, SPRING } from "../../motion";
 
 export interface RailItem {
   id: string;
@@ -39,6 +39,8 @@ interface Run {
   box: Box;
   /** 动画起点：这一帧之前和它重叠的那几段的并集；不填就用 box */
   seed?: { x: number; w: number };
+  /** 这一段是这一帧凭空新生的（点了个不相邻的平台），需要从窄条铺开 */
+  born?: boolean;
 }
 
 const sameBox = (a: Box, b: Box) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
@@ -93,7 +95,7 @@ function RunMask({
 }) {
   // 起点用「被它并进来的那几段」的并集：中间插一个时，胶囊一上来就盖住整段，
   // 否则会先从左边那段长过去，中间那个 chip 有几十毫秒还是白底，看着像抖了一下
-  const seed = run.seed ?? run.box;
+  const seed = reduce ? run.box : (run.seed ?? run.box);
   const x = useMotionValue(seed.x);
   const w = useMotionValue(seed.w);
   const counter = useTransform(x, (value) => -value);
@@ -184,6 +186,26 @@ function GhostMask({
   );
 }
 
+/**
+ * 新盖上某个 chip 时往外散的一圈淡影。
+ *
+ * 单独一层、不带文字，所以缩放不会把副本拉变形；放在遮罩下面（z-5），
+ * 从 chip 原尺寸胀到 1.15 倍并淡出，配合胶囊自身的展开，看起来才是「扩散出来」。
+ */
+function BloomPill({ box, onDone }: { box: Box; onDone: () => void }) {
+  return (
+    <motion.span
+      aria-hidden
+      className="pointer-events-none absolute z-[5] rounded-full bg-solid"
+      style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
+      initial={{ opacity: 0.34, scale: 1 }}
+      animate={{ opacity: 0, scale: 1.15 }}
+      transition={{ duration: DUR.list, ease: EASE }}
+      onAnimationComplete={onDone}
+    />
+  );
+}
+
 export default function TabRail({ items, value, onChange, label }: Props) {
   const reduce = useReducedMotion() ?? false;
   const rail = useRef<HTMLDivElement>(null);
@@ -192,6 +214,7 @@ export default function TabRail({ items, value, onChange, label }: Props) {
   const [boxes, setBoxes] = useState<Record<string, ItemBox>>({});
   const [focused, setFocused] = useState<string | null>(null);
   const [ghosts, setGhosts] = useState<{ gid: string; run: Run; box: Box; absorbed: boolean }[]>([]);
+  const [blooms, setBlooms] = useState<{ bid: string; box: Box }[]>([]);
   const seen = useRef<Run[]>([]);
 
   const key = value.join(",");
@@ -268,9 +291,13 @@ export default function TabRail({ items, value, onChange, label }: Props) {
     run.box = { x: first.x, y: first.y, w: tail.x + tail.w - first.x, h: first.h };
   }
 
-  // 身份：只有同一段沿用同一个身份，遮罩组件才不会被卸载，动画才有起点
+  // 身份：只有同一段（或位置有重叠）沿用同一个身份，遮罩组件才不会被卸载，动画才有起点。
+  // 位置完全错位的一跳不沿用：旧胶囊原地淡出、新胶囊就地铺开，才像「从点的这个平台扩散出来」，
+  // 而不是一整块黑胶囊横着平移过去。
   const prevRuns = seen.current;
+  const firstPaint = prevRuns.length === 0;
   const used = new Set<string>();
+  const overlaps = (a: Box, b: Box) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 4;
   for (const run of runs) {
     const old = prevRuns.find((each) => each.key === run.key && !used.has(each.id));
     if (old) {
@@ -278,28 +305,35 @@ export default function TabRail({ items, value, onChange, label }: Props) {
       used.add(old.id);
     }
   }
-  // 只剩一段时（全部 ↔ 单个平台、单个平台之间）：让同一个遮罩平移过去
+  // 只剩一段时（全部 ↔ 单个平台、单个平台之间）：位置接得上才让同一个遮罩平移/合并
   if (runs.length === 1 && !runs[0].id) {
     const free = prevRuns.find((each) => !used.has(each.id));
-    if (free) {
+    if (free && (firstPaint || overlaps(free.box, runs[0].box))) {
       runs[0].id = free.id;
       used.add(free.id);
     }
   }
-  // 其余按横向重叠继承（合并、拆分），没得继承才用段首 id
+  // 其余按横向重叠继承（合并、拆分），没得继承就是新生的一段
   for (const run of runs) {
     if (run.id) continue;
-    const old = prevRuns.find((each) => {
-      if (used.has(each.id)) return false;
-      const overlap = Math.min(each.box.x + each.box.w, run.box.x + run.box.w) - Math.max(each.box.x, run.box.x);
-      return overlap > 4;
-    });
-    run.id = old ? old.id : run.key;
+    const old = prevRuns.find((each) => !used.has(each.id) && overlaps(each.box, run.box));
+    if (old) {
+      run.id = old.id;
+    } else {
+      run.id = run.key;
+      run.born = !firstPaint;
+    }
     used.add(run.id);
   }
 
-  // 新一段的起点：所有和它横向重叠的旧段的并集（合并时一下就盖满，拆分时从整条缩回去）
+  // 新一段的起点：所有和它横向重叠的旧段的并集（合并时一下就盖满，拆分时从整条缩回去）。
+  // 凭空新生的一段没有旧段可继承，就从一个窄条铺开，配合 bloom 做成扩散。
   for (const run of runs) {
+    if (run.born) {
+      const w0 = Math.max(18, Math.min(30, Math.round(run.box.w * 0.45)));
+      run.seed = { x: run.box.x, w: w0 };
+      continue;
+    }
     let minX = run.box.x;
     let maxR = run.box.x + run.box.w;
     for (const old of prevRuns) {
@@ -317,6 +351,23 @@ export default function TabRail({ items, value, onChange, label }: Props) {
     const prev = seen.current;
     const live = new Set(runs.map((run) => run.id));
     const gone = prev.filter((run) => !live.has(run.id));
+    // 这一帧新盖上的 chip：每人放一圈往外散的淡影（连点也只保留最近 8 个，不堆垃圾）
+    if (prev.length && !reduce) {
+      const before = new Set(prev.flatMap((run) => run.items.map((item) => item.id)));
+      const fresh = runs
+        .flatMap((run) => run.items)
+        .filter((item) => !before.has(item.id) && boxes[item.id])
+        .slice(0, 4);
+      if (fresh.length) {
+        const stamp = Date.now();
+        setBlooms((old) =>
+          [
+            ...old,
+            ...fresh.map((item, at) => ({ bid: item.id + "@" + stamp + ":" + at, box: boxes[item.id] })),
+          ].slice(-8),
+        );
+      }
+    }
     seen.current = runs;
     if (!gone.length) return;
     const covered = (target: Box) =>
@@ -426,6 +477,14 @@ export default function TabRail({ items, value, onChange, label }: Props) {
         {runs.map((run) => (
           // 段里 chip 数一变（合并 / 拆分）就重挂一次，让遮罩从 seed 长到目标几何
           <RunMask key={run.id + ":" + run.items.length} run={run} boxes={boxes} railW={railW} reduce={reduce} />
+        ))}
+
+        {blooms.map((bloom) => (
+          <BloomPill
+            key={bloom.bid}
+            box={bloom.box}
+            onDone={() => setBlooms((old) => old.filter((each) => each.bid !== bloom.bid))}
+          />
         ))}
 
         {ghosts.map((ghost) => (
