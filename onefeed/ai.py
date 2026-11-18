@@ -118,14 +118,15 @@ def status() -> dict[str, Any]:
     }
 
 
-def _chat(provider: dict[str, Any], messages: list[dict[str, str]]) -> str:
+def _post(provider: dict[str, Any], messages: list[dict[str, str]],
+          max_tokens: int = 300, temperature: float = 0.2) -> str:
     if not provider.get("key"):
         raise RuntimeError("没有配置模型 key")
     body = json.dumps({
         "model": provider["model"],
         "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": 300,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -135,6 +136,34 @@ def _chat(provider: dict[str, Any], messages: list[dict[str, str]]) -> str:
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     return str(payload["choices"][0]["message"]["content"])
+
+
+def _chat(provider: dict[str, Any], messages: list[dict[str, str]]) -> str:
+    return _post(provider, messages)
+
+
+def complete(messages: list[dict[str, str]], max_tokens: int = 900,
+             temperature: float = 0.3) -> tuple[str, dict[str, Any]]:
+    """要一段长回答（总结用）：按顺序表挨个试，返回原文和命中的那个模型。
+
+    与 plan() 的区别只有一个——失败不会静默降级，由调用方决定退回规则还是报错。
+    """
+    chain = _provider_list()
+    if not chain:
+        raise RuntimeError("没有配置模型 key")
+    tried: list[str] = []
+    for provider in chain:
+        tried.append(provider["name"])
+        try:
+            raw = _post(provider, messages, max_tokens=max_tokens, temperature=temperature)
+            _LAST.update({"at": int(time.time()), "provider": provider["name"],
+                          "ok": True, "error": "", "tried": tried})
+            return raw, provider
+        except Exception as exc:  # noqa: BLE001 - 任何一个挂了就换下一个
+            _LAST.update({"at": int(time.time()), "provider": provider["name"],
+                          "ok": False, "error": (str(exc) or exc.__class__.__name__)[:200],
+                          "tried": list(tried)})
+    raise RuntimeError("、".join(tried) + " 都不可用")
 
 
 def test_provider(raw: dict[str, Any] | None = None) -> dict[str, Any]:

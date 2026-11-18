@@ -291,6 +291,48 @@ export function getDetail(id: string, refresh = false, signal?: AbortSignal): Pr
   return getJSON<DetailResponse>("/api/item/" + encodeURIComponent(id) + "/detail" + qs, signal);
 }
 
+export interface SummaryPoint {
+  text: string;
+  /** 这条要点在原文里的秒数；没有时间轴时是 null */
+  t: number | null;
+}
+
+export interface SummaryChapter {
+  from?: number | null;
+  title?: string;
+}
+
+export interface SummaryPayload {
+  tldr: string;
+  points: SummaryPoint[];
+  chapters?: SummaryChapter[];
+  caveat?: string;
+  /** 依据哪一档素材：完整字幕 / 平台自带总结 / 只有标题与简介 */
+  basis: "transcript" | "official" | "desc" | string;
+  basis_text?: string;
+  duration?: number;
+  engine: string;
+  provider?: string;
+  model?: string;
+  source_chars: number;
+  ms: number;
+  generated_at: number;
+  note?: string;
+}
+
+export interface SummaryResponse {
+  ok: boolean;
+  summary?: SummaryPayload;
+  from_cache?: boolean;
+  fetched_at?: number;
+  error?: string;
+}
+
+export function getSummary(id: string, refresh = false, signal?: AbortSignal): Promise<SummaryResponse> {
+  const qs = refresh ? "?refresh=1" : "";
+  return getJSON<SummaryResponse>("/api/item/" + encodeURIComponent(id) + "/summary" + qs, signal);
+}
+
 export interface Health {
   ok: boolean;
   version: string;

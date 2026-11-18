@@ -11,6 +11,7 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -230,6 +231,45 @@ def clean_env() -> dict[str, str]:
     return env
 
 
+def _expand(value: str, plugin_id: str) -> str:
+    """把 plugin.json 里的占位换成真实路径。"""
+    subs = {
+        "${state}": str(state_root()),
+        "${plugin}": plugin_id,
+        "${appdata}": os.environ.get("APPDATA", ""),
+        "${localappdata}": os.environ.get("LOCALAPPDATA", ""),
+        "${home}": str(Path.home()),
+    }
+    out = value
+    for key, val in subs.items():
+        out = out.replace(key, val)
+    return out
+
+
+def seed_cli_files(manifest: Manifest) -> list[str]:
+    """把本机的 CLI 配置（登录凭证之类）复制进宿主的私有目录。
+
+    宿主跑在受限上下文里，子进程写不了 %APPDATA%，而 bili 这类 CLI 需要一个
+    可写的 home 才能记录状态。复制只在目标缺失或源更新时发生，且目标只能在
+    state_root() 下面（manifest 校验已经卡住这一点）。
+    """
+    copied: list[str] = []
+    for entry in manifest.cli_seed:
+        src = Path(_expand(entry["from"], manifest.id))
+        dst = Path(_expand(entry["to"], manifest.id))
+        if not src.is_file():
+            continue
+        try:
+            if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime:
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            copied.append(dst.name)
+        except OSError:
+            continue
+    return copied
+
+
 def clamp(value: Any) -> int:
     if isinstance(value, bool):
         return int(value)
@@ -417,8 +457,18 @@ class Capabilities:
         self.log("info", "cli " + " ".join(argv)[:160])
         exe = argv[0]
         resolved = _which(exe) or exe
+        env = clean_env()
+        state = str(state_root())
+        for key, raw in self.manifest.cli_env.items():
+            value = _expand(raw, self.manifest.id)
+            env[key] = value
+            if value.startswith(state):
+                Path(value).mkdir(parents=True, exist_ok=True)
+        seeded = seed_cli_files(self.manifest)
+        if seeded:
+            self.log("info", "cli 初始化 " + ",".join(seeded))
         proc = subprocess.run([resolved, *argv[1:]], capture_output=True, timeout=timeout,
-                              env=clean_env(), cwd=str(Path.home()))
+                              env=env, cwd=str(Path.home()))
         return {
             "code": proc.returncode,
             "stdout": proc.stdout.decode("utf-8", "replace"),

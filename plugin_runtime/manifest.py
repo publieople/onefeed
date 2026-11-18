@@ -17,7 +17,7 @@ CAPABILITIES = {"http", "browser", "cli"}
 KINDS = {"video", "images", "article", "short", "list"}
 # 能力（capabilities）说的是"插件能调什么"，feature 说的是"插件对外提供什么额外内容"。
 # 评论/详情/媒体都是可选能力：认领了才调，没认领的平台照常出卡片。
-FEATURES = {"comments", "detail", "media"}
+FEATURES = {"comments", "detail", "media", "summary"}
 # 宿主能渲染的整站嵌入只有这两家：B 站官方播放器、抖音官方播放器。
 # 其它平台（小红书/知乎/快手…）一律走插件自渲染正文，别拿 iframe 硬套。
 EMBED_PROVIDERS = {"bilibili", "douyin"}
@@ -55,6 +55,8 @@ class Manifest:
     homepage: str = ""
     theme_color: str = ""
     cli_allow: list[list[str]] = field(default_factory=list)
+    cli_env: dict[str, str] = field(default_factory=dict)      # 子进程额外的环境变量（支持 ${state} 等占位）
+    cli_seed: list[dict[str, str]] = field(default_factory=list)  # 首次调用前把本机文件复制进隔离目录
     settings: list[dict[str, Any]] = field(default_factory=list)
     features: set[str] = field(default_factory=set)
     embeds: list[str] = field(default_factory=list)        # 允许嵌的播放器：bilibili / douyin
@@ -149,6 +151,24 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
         elif any(not a or "/" in a[0] or "\\" in a[0] for a in allow):
             errors.append("cli.allow 每项第一段必须是不带路径的裸命令名（如 bili）")
 
+    cli_env = data.get("cli", {}).get("env")
+    if cli_env is not None:
+        if not isinstance(cli_env, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in cli_env.items()
+        ):
+            errors.append("cli.env 必须是 \"变量名 -> 值\" 的对象，值只能是字符串")
+
+    cli_seed = data.get("cli", {}).get("seed")
+    if cli_seed is not None:
+        if not isinstance(cli_seed, list) or not all(
+            isinstance(s, dict) and isinstance(s.get("from"), str) and isinstance(s.get("to"), str)
+            for s in cli_seed
+        ):
+            errors.append("cli.seed 必须是 [{\"from\": \"…\", \"to\": \"…\"}] 数组")
+        elif any(not s["to"].startswith("${state}") for s in cli_seed):
+            # 只允许把文件复制到宿主的私有状态目录里，不能往系统任意位置写
+            errors.append("cli.seed 的 to 必须以 ${state}/ 开头（只能写宿主的私有状态目录）")
+
     kinds = data.get("kinds")
     if not isinstance(kinds, list) or not kinds:
         errors.append("kinds 必填：该插件会产出的卡片形态")
@@ -224,6 +244,8 @@ def load_manifest(plugin_dir: Path | str, host_version: str = HOST_VERSION) -> M
         raise ManifestError(f"{plugin_dir.name}: " + "；".join(errors))
 
     cli_allow = [list(a) for a in (data.get("cli", {}).get("allow") or [])]
+    cli_env = {str(k): str(v) for k, v in (data.get("cli", {}).get("env") or {}).items()}
+    cli_seed = [{"from": s["from"], "to": s["to"]} for s in (data.get("cli", {}).get("seed") or [])]
     return Manifest(
         id=data["id"],
         name=data["name"],
@@ -242,6 +264,8 @@ def load_manifest(plugin_dir: Path | str, host_version: str = HOST_VERSION) -> M
         homepage=data.get("homepage", ""),
         theme_color=data.get("themeColor", ""),
         cli_allow=cli_allow,
+        cli_env=cli_env,
+        cli_seed=cli_seed,
         settings=list(data.get("settings") or []),
         features=set(data.get("features") or []),
         embeds=list(data.get("embeds") or []),

@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS plugins (
 # v3 才有 details 表；老库升级时单独建，新库走上面的 SCHEMA。
 DETAILS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS details (
+    item_id    TEXT PRIMARY KEY,
+    payload    TEXT NOT NULL DEFAULT '{}',
+    fetched_at INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+# v4 的 AI 总结缓存。总结比详情更贵（要跑模型），所以按 item_id 永久存，
+# 只有用户点「重算」才覆盖；basis 记素材来源，前端据此决定要不要写「依据」那一行。
+SUMMARIES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS summaries (
     item_id    TEXT PRIMARY KEY,
     payload    TEXT NOT NULL DEFAULT '{}',
     fetched_at INTEGER NOT NULL DEFAULT 0
@@ -200,6 +210,8 @@ class Store:
                              "ON items(engage_score DESC, published_at DESC)")
             if version < 3:
                 conn.executescript(DETAILS_SCHEMA)
+            if version < 4:
+                conn.executescript(SUMMARIES_SCHEMA)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
         self.recompute_engage()
@@ -361,6 +373,37 @@ class Store:
     def drop_detail(self, item_id: str) -> None:
         with self._write_lock:
             self.conn.execute("DELETE FROM details WHERE item_id = ?", (item_id,))
+            self.conn.commit()
+
+    # ------------------------------------------------------------ summaries
+    def get_summary(self, item_id: str) -> dict[str, Any] | None:
+        """取 AI 总结缓存。总结按条永久存，不看时间——要看新的就 refresh。"""
+        row = self.conn.execute(
+            "SELECT item_id, payload, fetched_at FROM summaries WHERE item_id = ?",
+            (item_id,)).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict) or not payload:
+            return None
+        return {"item_id": row["item_id"], "payload": payload,
+                "fetched_at": int(row["fetched_at"] or 0)}
+
+    def save_summary(self, item_id: str, payload: dict[str, Any]) -> None:
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO summaries (item_id, payload, fetched_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(item_id) DO UPDATE SET payload=excluded.payload, "
+                "fetched_at=excluded.fetched_at",
+                (item_id, json.dumps(payload, ensure_ascii=False), int(time.time())))
+            self.conn.commit()
+
+    def drop_summary(self, item_id: str) -> None:
+        with self._write_lock:
+            self.conn.execute("DELETE FROM summaries WHERE item_id = ?", (item_id,))
             self.conn.commit()
 
     def update_clusters(self, mapping: dict[str, str]) -> int:

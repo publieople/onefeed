@@ -69,7 +69,7 @@ def main() -> int:
 
         # 建表与迁移
         check(db.is_file(), "数据库文件已创建")
-        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 3, "user_version = 3")
+        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 4, "user_version = 4")
 
         # upsert 幂等
         rows = sample(5)

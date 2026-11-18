@@ -19,7 +19,8 @@ from .capabilities import clean_env
 from .manifest import HOST_VERSION, Manifest, ManifestError, load_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TIMEOUTS = {"pull": 92.0, "comments": 92.0, "detail": 92.0, "auth": 60.0, "init": 30.0}
+DEFAULT_TIMEOUTS = {"pull": 92.0, "comments": 92.0, "detail": 92.0, "summary": 92.0,
+                    "auth": 60.0, "init": 30.0}
 
 # 只认这两家官方播放器；插件自己拼的 iframe 一律不收（那是绕过风险边界）。
 EMBED_HOSTS = {"player.bilibili.com": "bilibili", "open.douyin.com": "douyin"}
@@ -233,6 +234,27 @@ class PluginHost:
         if not isinstance(value, dict):
             raise RuntimeError(f"[{plugin_id}] detail 必须返回对象")
         return self._normalize_detail(manifest, value)
+
+    def summary_source(self, plugin_id: str, item: Item | dict[str, Any]) -> dict[str, Any] | None:
+        """取「总结素材」：字幕、平台自带总结、简介、热评。
+
+        插件没认领 summary 就返回 None，由调用方拿详情正文兜底——
+        这条路径决定了新平台接入时不用写一行总结代码。
+        """
+        try:
+            manifest = self.get(plugin_id)
+        except (KeyError, ManifestError):
+            return None
+        if "summary" not in manifest.features:
+            return None
+        raw = item if isinstance(item, dict) else item.to_dict()
+        out = self.run(plugin_id, "summarySource", {"item": raw})
+        if not out["ok"]:
+            raise RuntimeError(f"[{plugin_id}] {out['error']}")
+        value = out["value"]
+        if not isinstance(value, dict):
+            raise RuntimeError(f"[{plugin_id}] summarySource 必须返回对象")
+        return value
 
     def _normalize_detail(self, manifest: Manifest, value: dict[str, Any]) -> dict[str, Any]:
         """白名单 + 边界检查：正文长度、图片数量、iframe 只认官方播放器。"""

@@ -17,7 +17,8 @@ from fastapi.responses import StreamingResponse
 from plugin_runtime.host import PluginHost
 from plugin_runtime.paths import state_root
 
-from . import __version__, ai as ai_mod, auth as auth_mod, market, media as media_mod, smart, settings as settings_mod
+from . import (__version__, ai as ai_mod, auth as auth_mod, market, media as media_mod,
+               smart, settings as settings_mod, summary as summary_mod)
 from .service import RefreshRunner, demo_mode, sync_installed
 from .store import SORTS, Store
 
@@ -308,6 +309,32 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
                "limit": limit, "next": page["next"]}
     _COMMENT_CACHE[key] = (now, payload)
     return payload
+
+
+@router.get("/item/{item_id}/summary")
+def item_summary(request: Request, item_id: str, refresh: bool = Query(False)) -> dict:
+    """AI 总结：插件交素材、宿主出摘要，模型不可用时按素材顺序摘原句。"""
+    store = _store(request)
+    row = store.get_item(item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "item_not_found", "message": f"没有这条内容：{item_id}",
+            "hint": "从 /api/feed 的返回里取 id"})
+
+    if not refresh:
+        cached = store.get_summary(item_id)
+        if cached and isinstance(cached.get("payload"), dict) and cached["payload"].get("tldr") is not None:
+            return {"ok": True, "summary": cached["payload"], "from_cache": True,
+                    "fetched_at": cached["fetched_at"]}
+
+    try:
+        payload = summary_mod.build(store, _runner(request).host, row)
+    except Exception as exc:  # noqa: BLE001 - 前端只要一句原因
+        return {"ok": False, "error": str(exc)[:300]}
+
+    store.save_summary(item_id, payload)
+    return {"ok": True, "summary": payload, "from_cache": False,
+            "fetched_at": int(time.time())}
 
 
 @router.get("/item/{item_id}/detail")

@@ -1,16 +1,18 @@
 import DOMPurify from "dompurify";
-import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, MessageCircle, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, MessageCircle, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   getDetail,
   getJSON,
+  getSummary,
   type CommentItem,
   type CommentsResponse,
   type DetailMedia,
   type DetailPayload,
   type DetailResponse,
   type FeedItem,
+  type SummaryResponse,
 } from "../api";
 import { CommentBody } from "../components/CommentBody";
 import { KIND_LABEL, platform } from "../platform";
@@ -74,8 +76,21 @@ function MediaBroken({ item, onRetry }: { item: FeedItem; onRetry: () => void })
   );
 }
 
+/** 点总结里的 [02:14]，B 站播放器用 t= 秒跳过去；别的平台没有统一参数，原样返回。 */
+function withSeek(url: string, seek?: number | null) {
+  if (seek == null || !url.includes("player.bilibili.com")) return url;
+  try {
+    const u = new URL(url);
+    u.searchParams.set("t", String(Math.max(0, Math.floor(seek))));
+    u.searchParams.set("autoplay", "1");
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 /** 媒体区：embed 走官方播放器，file 走直链（要 Referer 的走边车）。 */
-function Media({ item, media }: { item: FeedItem; media?: DetailMedia }) {
+function Media({ item, media, seek }: { item: FeedItem; media?: DetailMedia; seek?: number | null }) {
   const [direct, setDirect] = useState(false);
   // 直链过期时 <video> 只会静默失败（黑框），给一句人话 + 重试按钮，别让人以为页面坏了
   const [broken, setBroken] = useState(false);
@@ -104,7 +119,8 @@ function Media({ item, media }: { item: FeedItem; media?: DetailMedia }) {
             />
           ) : (
             <iframe
-              src={media.embedUrl}
+              key={withSeek(media.embedUrl, seek)}
+              src={withSeek(media.embedUrl, seek)}
               title={item.title}
               className="h-full w-full"
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
@@ -187,6 +203,115 @@ function Gallery({ images, onOpen }: { images: string[]; onOpen: (index: number)
   );
 }
 
+/** 秒数写成 2:14；一小时以上才补小时位 */
+function clock(sec: number) {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const tail = String(s % 60).padStart(2, "0");
+  return h ? h + ":" + String(m).padStart(2, "0") + ":" + tail : m + ":" + tail;
+}
+
+const BASIS_LABEL: Record<string, string> = {
+  transcript: "完整字幕",
+  official: "平台自带总结",
+  desc: "标题与简介",
+};
+
+interface SummaryPanelProps {
+  data: SummaryResponse | null;
+  loading: boolean;
+  error: string;
+  /** 播放器能不能按秒跳（目前只有 B 站官方播放器认 t= 参数） */
+  canSeek: boolean;
+  onJump: (sec: number) => void;
+  onRetry: () => void;
+  url: string;
+}
+
+/** 详情页的默认视图：Agent 看完给的结论、要点和依据。 */
+function SummaryPanel({ data, loading, error, canSeek, onJump, onRetry, url }: SummaryPanelProps) {
+  if (loading) {
+    return (
+      <div className="mt-5 rounded-xl border border-line p-5">
+        <div className="flex items-center gap-2 text-[12px] text-muted">
+          <Sparkles size={13} />
+          Agent 正在看这条内容…（大概十几秒）
+        </div>
+        <div className="mt-4 space-y-2.5">
+          <div className="h-4 w-3/4 skeleton rounded" />
+          <div className="h-3 w-full skeleton rounded" />
+          <div className="h-3 w-11/12 skeleton rounded" />
+          <div className="h-3 w-4/5 skeleton rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  const s = data?.summary;
+  if (error || !data?.ok || !s) {
+    return (
+      <div className="mt-5 rounded-lg bg-wash px-3 py-2.5 text-[12px] leading-relaxed text-muted">
+        {error || data?.error || "这条暂时总结不出来。"}
+        <span className="mt-1.5 flex flex-wrap items-center gap-3">
+          <button onClick={onRetry} className="underline underline-offset-2 hover:text-ink">再试一次</button>
+          <a href={url} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2 hover:text-ink">
+            去原站看
+          </a>
+        </span>
+      </div>
+    );
+  }
+
+  const basis = BASIS_LABEL[s.basis] || s.basis_text || "素材";
+  const meta = [s.provider, s.model, s.ms ? (s.ms / 1000).toFixed(1) + "s" : ""].filter(Boolean).join(" · ");
+
+  return (
+    <div className="fade-in mt-5 rounded-xl border border-line p-5">
+      <p className="text-[16px] font-medium leading-[1.7] tracking-tight">{s.tldr}</p>
+
+      {s.points?.length ? (
+        <ul className="mt-4 space-y-2.5">
+          {s.points.map((point, index) => (
+            <li key={index} className="flex gap-2.5 text-[14px] leading-[1.8] text-ink/90">
+              {point.t != null && canSeek ? (
+                <button
+                  onClick={() => onJump(point.t as number)}
+                  title="跳到播放器的这个位置"
+                  className="mt-[3px] h-[19px] shrink-0 rounded bg-wash px-1.5 font-mono text-[11px] tabular-nums text-muted transition-colors hover:bg-solid hover:text-solid-fg"
+                >
+                  {clock(point.t)}
+                </button>
+              ) : point.t != null ? (
+                <span className="mt-[3px] shrink-0 font-mono text-[11px] tabular-nums text-fade">{clock(point.t)}</span>
+              ) : (
+                <span className="mt-[9px] h-[4px] w-[4px] shrink-0 rounded-full bg-fade" />
+              )}
+              <span>{point.text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {s.caveat ? (
+        <p className="mt-4 text-[12px] leading-relaxed text-muted">注意：{s.caveat}</p>
+      ) : null}
+      {s.note ? <p className="mt-1.5 text-[12px] leading-relaxed text-fade">{s.note}</p> : null}
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-[11px] text-fade">
+        <span>依据 {basis}{s.source_chars ? " · " + s.source_chars + " 字" : ""}</span>
+        {meta ? <span>{meta}</span> : null}
+        <button onClick={onRetry} className="underline underline-offset-2 transition-colors hover:text-ink">
+          重新总结
+        </button>
+        <a href={url} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2 transition-colors hover:text-ink">
+          去原站
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export default function ItemPage() {
   const { id = "" } = useParams();
   const [data, setData] = useState<ItemResponse | null>(null);
@@ -201,6 +326,12 @@ export default function ItemPage() {
   const commentSentinel = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
+  const [tab, setTab] = useState<"summary" | "source">("summary");
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState("");
+  /** 点了总结里的时间戳之后，播放器要从这里开始 */
+  const [seek, setSeek] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -261,6 +392,37 @@ export default function ItemPage() {
     return () => {
       alive = false;
     };
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    setSummary(null);
+    setSummaryError("");
+    setSummaryLoading(true);
+    getSummary(id)
+      .then((d) => {
+        if (alive) setSummary(d);
+      })
+      .catch((err: Error) => {
+        if (alive) setSummaryError(err.message);
+      })
+      .finally(() => {
+        if (alive) setSummaryLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const retrySummary = useCallback(() => {
+    if (!id) return;
+    setSummaryLoading(true);
+    setSummaryError("");
+    getSummary(id, true)
+      .then((d) => setSummary(d))
+      .catch((err: Error) => setSummaryError(err.message))
+      .finally(() => setSummaryLoading(false));
   }, [id]);
 
   const loadMoreComments = useCallback(() => {
@@ -426,6 +588,42 @@ export default function ItemPage() {
         </div>
       ) : null}
 
+      <div className="mt-5 inline-flex items-center rounded-full border border-line p-0.5 text-[12px]">
+        {([
+          ["summary", "AI 总结"],
+          ["source", "原文"],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
+            className={
+              "rounded-full px-3 py-1 transition-colors duration-150 " +
+              (tab === key ? "bg-solid text-solid-fg" : "text-muted hover:text-ink")
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "summary" ? (
+        <SummaryPanel
+          data={summary}
+          loading={summaryLoading}
+          error={summaryError}
+          canSeek={Boolean(payload?.media?.embedUrl?.includes("player.bilibili.com"))}
+          onJump={(sec) => {
+            setSeek(sec);
+            setTab("source");
+          }}
+          onRetry={retrySummary}
+          url={item.url}
+        />
+      ) : null}
+
+      {tab === "source" ? (
+      <>
       {detailLoading ? (
         <div className="mt-5">
           {/* 只有真会有媒体（视频/图文/有封面）才占 16:9，文章类用小骨架，避免正文被推来推去 */}
@@ -438,7 +636,7 @@ export default function ItemPage() {
         </div>
       ) : (
         <div className="fade-in">
-          <Media item={item} media={payload?.media} />
+          <Media item={item} media={payload?.media} seek={seek} />
         </div>
       )}
 
@@ -478,6 +676,8 @@ export default function ItemPage() {
       ) : null}
 
       {payload?.note ? <p className="mt-4 text-[12px] leading-relaxed text-fade">{payload.note}</p> : null}
+      </>
+      ) : null}
 
       {item.tags?.length ? (
         <div className="mt-4 flex flex-wrap gap-1.5">
