@@ -194,6 +194,20 @@ def test_shortcut_help_is_the_single_source() -> None:
         assert key in HELP, "快捷键表里没写 " + key
 
 
+@case
+def test_sheet_history_wrapper_is_conditional() -> None:
+    """历史收起时那层 flex-1 必须一起卸载。
+
+    以前它一直渲染着：空的 flex-1 会把面板剩余空间全占掉，把对话区挤到底部，
+    顶上一大片空白、内容还被裁掉一截（用户截图里「上半部分空白」就是这个）。
+    """
+    assert "const { open: historyOpen } = useAgentHistory();" in SURFACE
+    assert "{historyOpen ? (" in SURFACE
+    block = SURFACE.split("{historyOpen ? (")[1].split(") : null}")[0]
+    assert "<AgentHistory />" in block, "历史容器应当只在打开时渲染"
+    assert "min-h-0 flex-1 overflow-y-auto" in block
+
+
 def main() -> int:
     failed = 0
     for name, fn in CASES:

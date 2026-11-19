@@ -2,7 +2,7 @@ import { History, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FilterBox from "../components/FilterBox";
-import { useAgentActions, useAgentSession, useAgentSurface } from "./AgentProvider";
+import { useAgentActions, useAgentHistory, useAgentSession, useAgentSurface } from "./AgentProvider";
 import AgentComposer from "./AgentComposer";
 import AgentHistory from "./AgentHistory";
 import AgentThread from "./AgentThread";
@@ -58,6 +58,7 @@ export function AgentLauncher() {
 /** 底部抽屉：窄屏、非详情页，以及详情页但不够宽的时候 */
 export function AgentSheet() {
   const { open } = useAgentSurface();
+  const { open: historyOpen } = useAgentHistory();
   const { close, toggleHistory } = useAgentActions();
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const [manual, setManual] = useState(false);
@@ -101,7 +102,7 @@ export function AgentSheet() {
       className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4"
     >
       <div className="flex w-full max-w-[760px] flex-col gap-3">
-        <div className="flex max-h-[62vh] min-h-[320px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_18px_50px_rgba(20,20,20,0.14)]">
+        <div className="flex max-h-[62vh] min-h-[200px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_18px_50px_rgba(20,20,20,0.14)]">
           <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
             <Sparkles size={14} className="text-ink" />
             <span className="text-[13px] font-medium">找内容</span>
@@ -122,9 +123,13 @@ export function AgentSheet() {
               <X size={15} />
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <AgentHistory />
-          </div>
+          {/* 这层滚动容器必须跟着历史开关一起装卸：历史收起时它是个空的 flex-1，
+              会把整块高度占满，把下面的话往底下一挤 —— 顶上空一大片，内容还被裁掉 */}
+          {historyOpen ? (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <AgentHistory />
+            </div>
+          ) : null}
           <AgentThread />
           <div className="border-t border-line px-4 py-2.5">
             <button
