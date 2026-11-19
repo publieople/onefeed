@@ -33,14 +33,17 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
     const onTheme = () => flipTheme();
     window.addEventListener("onefeed:theme", onTheme);
     return () => window.removeEventListener("onefeed:theme", onTheme);
-  });
+    // 依赖 theme：flipTheme 闭包里读它，但它每帧都会新建——这里只认 theme，
+    // 否则每次渲染都解绑重绑一次，滚动时白白烧主线程。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme]);
 
   return (
     // 顶栏独立成一层转场元素：整页在飞，导航不能跟着抖
     <header
       data-vt="topbar"
       style={{ viewTransitionName: "of-topbar" }}
-      className="sticky top-0 z-30 border-b border-line bg-paper/92 backdrop-blur"
+      className="sticky top-0 z-30 border-b border-line bg-paper"
     >
       <div className="relative mx-auto flex h-14 w-full max-w-[1180px] items-center gap-4 px-6">
         <NavLink to="/" className="flex items-baseline gap-2">

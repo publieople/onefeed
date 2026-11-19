@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties } from "react";
+import { memo, useRef, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { prefetchItem } from "../api";
 import { FileText, Heart, Image as ImageIcon, MessageCircle, Play, Quote, Star } from "lucide-react";
@@ -212,7 +212,9 @@ function MetaLine({ item, body }: { item: FeedItem; body: string }) {
   );
 }
 
-export default function Card({ item, onOpen, vtNames }: Props) {
+/** memo：信息流一次渲染 30 张卡，父组件因为筛选、进度、轮询重渲染时
+    卡片本体不该跟着重算（每张卡里都有一坨时间格式化与平台查表）。 */
+function Card({ item, onOpen, vtNames }: Props) {
   const p = platform(item.platform);
   const body = excerpt(item);
   const kindLabel = KIND_LABEL[item.kind] ?? item.kind;
@@ -313,3 +315,5 @@ export default function Card({ item, onOpen, vtNames }: Props) {
     </motion.a>
   );
 }
+
+export default memo(Card);

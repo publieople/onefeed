@@ -25,7 +25,12 @@ def read(*parts: str) -> str:
 HOTKEYS = read("motion", "useHotkeys.ts")
 APP = read("App.tsx")
 FEED = read("pages", "FeedPage.tsx")
-DOCK = read("components", "AiDock.tsx")
+AGENT = read("agent", "AgentProvider.tsx")
+SURFACE = read("agent", "AgentSurface.tsx")
+THREAD = read("agent", "AgentThread.tsx")
+COMPOSER = read("agent", "AgentComposer.tsx")
+AGENT_PAGE = read("pages", "AgentPage.tsx")
+ITEM = read("pages", "ItemPage.tsx")
 RAIL = read("components", "ui", "TabRail.tsx")
 CONFIRM = read("components", "ui", "Confirm.tsx")
 HELP = read("components", "ShortcutHelp.tsx")
@@ -71,9 +76,9 @@ def test_rail_arrows_only_move_focus() -> None:
 
 @case
 def test_composer_opens_on_click_not_focus() -> None:
-    assert "onFocus={() => setFocused(true)}" in DOCK
-    assert "onClick={() => setOpen(true)}" in DOCK
-    assert "onFocus={() => setOpen(true)}" not in DOCK, "focus 又去展开面板了"
+    # 输入框只管自己的视觉态；展开由唤起器 / 快捷键 / 发送决定
+    assert "onFocus={() => setFocused(true)}" in COMPOSER
+    assert "setOpen(true)" not in COMPOSER, "focus 又去展开面板了"
 
 
 @case
@@ -82,15 +87,33 @@ def test_light_layers_close_without_animation() -> None:
     assert "AnimatePresence" not in CONFIRM
     assert "if (!open) return null;" in HELP, "快捷键帮助还在等退出动画"
     assert "<AnimatePresence" not in HELP
-    assert "AnimatePresence" not in DOCK.split("panel")[0] or "AnimatePresence" in DOCK
+    # 抽屉 / 右栏 / 全页三处都不靠退出动画关闭
+    for src in (SURFACE, THREAD):
+        assert "<AnimatePresence" not in src, "轻层又在等 AnimatePresence 收尾"
 
 
 @case
 def test_dock_is_a_dialog() -> None:
-    assert 'role="dialog"' in DOCK and 'aria-modal="true"' in DOCK
-    assert 'aria-live="polite"' in DOCK, "Agent 回复没有 aria-live，读屏听不到"
-    assert "FOCUSABLE" in DOCK and "Tab" in DOCK, "没有 Tab 陷阱"
-    assert "pointerdown" in DOCK, "桌面端点面板外关不掉（遮罩已经不给桌面了）"
+    assert 'role="dialog"' in SURFACE and 'aria-modal="true"' in SURFACE
+    assert 'aria-live="polite"' in THREAD, "Agent 回复没有 aria-live，读屏听不到"
+    assert "FOCUSABLE" in SURFACE and "Tab" in SURFACE, "没有 Tab 陷阱"
+    # Esc 由 Provider 统一收，三种形态都生效
+    assert 'useHotkeys("dialog", { escape: close }, open)' in AGENT
+
+
+@case
+def test_agent_survives_navigation() -> None:
+    # 会话在 Provider 里：换页面（Agent 自己打开的那条）不重建
+    assert "<AgentProvider>" in APP, "App 没包 AgentProvider"
+    assert "<AgentSurface />" in APP, "唤起器/抽屉没挂到全局"
+    assert "AgentProvider" in AGENT and "useState<AgentTurn[]>" in AGENT
+    # 详情页右栏 + 上下文上报
+    assert '"rail"' in AGENT and '"sheet"' in AGENT and '"closed"' in AGENT
+    assert "AgentRail" in ITEM, "详情页没有右栏"
+    assert "setFocus({ id: item.id" in ITEM, "详情页没告诉 Agent 在看哪条"
+    # 全页形态
+    assert 'path="/agent"' in APP and 'path="/agent/:threadId"' in APP
+    assert "loadHistory" in AGENT_PAGE and "AgentThreadView" in AGENT_PAGE
 
 
 @case
@@ -139,8 +162,8 @@ def test_ask_user_answer_round_trip() -> None:
     # 单选：点一下就算答完，别再让用户找第二次「就这个」
     assert 'send([option], "")' in CONSOLE
     # 答过的提问不能在新一轮开始时变回可点（历史里的选项会重新亮起来）
-    assert "setAnsweredAsk({})" not in DOCK
-    assert "answeredAsk" in DOCK and "onAnswer" in DOCK
+    assert "setAnsweredAsk({})" not in AGENT
+    assert "answeredAsk" in THREAD and "onAnswer" in THREAD
 
 
 @case
@@ -158,11 +181,11 @@ def test_saved_view_is_a_filter_not_a_second_page() -> None:
 @case
 def test_threads_are_resumable_and_saved() -> None:
     # 线程跟页面刷新走：同一段对话才能接着说
-    assert "onefeed.agent.thread" in DOCK
-    assert "开一段新的" in DOCK
-    assert "listThreads" in DOCK and "getThread" in DOCK
+    assert "onefeed.agent.thread" in AGENT
+    assert "开一段新的" in read("agent", "AgentHistory.tsx")
+    assert "listThreads" in AGENT and "getThread" in AGENT
     # 结果卡片带收藏入口（后端 item_marks，不经模型）
-    assert "agentSave" in DOCK and 'aria-pressed={saved}' in DOCK
+    assert "agentSave" in AGENT and 'aria-pressed={saved}' in THREAD
 
 
 @case

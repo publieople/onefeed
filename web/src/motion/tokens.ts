@@ -16,6 +16,8 @@ export const EASE_CSS = "cubic-bezier(0.22, 1, 0.36, 1)";
 export const DUR = {
   /** 按下、hover、图标切换这类即时反馈 */
   micro: 0.14,
+  /** 图标、小元素切换 */
+  fast: 0.16,
   /** 面板、浮层进出 */
   base: 0.24,
   /** 切页 */

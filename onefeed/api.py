@@ -13,7 +13,7 @@ from typing import Any
 import urllib.parse
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from plugin_runtime.host import PluginHost
 from plugin_runtime.paths import state_root
 
@@ -253,6 +253,7 @@ def agent_run_create(request: Request, payload: dict[str, Any] = Body(default={}
         max_tools=int(settings_mod.load().get("ai_agent_max_tools") or 10),
         runner=_runner(request),
         thread_id=str(payload.get("thread_id") or ""),
+        context=payload.get("context") if isinstance(payload.get("context"), dict) else None,
     )
 
 
@@ -693,14 +694,15 @@ def media(request: Request, item_id: str, slot: str,
         cookie = (media_mod.cookie_header(plugin_id)
                   if media_mod._host_allowed(url_host, hosts) else "")
 
-        if not media_mod.SEMAPHORE.acquire(timeout=20):
+        sem = media_mod.semaphore_for(slot)
+        if not sem.acquire(timeout=20):
             raise HTTPException(status_code=503, detail={
-                "code": "busy", "message": "同时在拉的视频太多了", "hint": "等一会儿再试"})
+                "code": "busy", "message": "同时在拉的媒体太多了", "hint": "等一会儿再试"})
         try:
             status, headers, resp = media_mod.open_stream(
                 target["url"], referer=target["referer"], cookie=cookie, range_header=range_header)
         except Exception as exc:  # 网络层失败：别把半截流当成功
-            media_mod.SEMAPHORE.release()
+            sem.release()
             raise HTTPException(status_code=502, detail={
                 "code": "media_failed", "message": f"取媒体失败：{exc}"[:300],
                 "hint": "点原帖试试"})
@@ -711,7 +713,7 @@ def media(request: Request, item_id: str, slot: str,
         try:
             resp.close()
         finally:
-            media_mod.SEMAPHORE.release()
+            sem.release()
 
         # T46：签名直链过期是常态（小红书 t / 抖音 play_addr），重取一次详情换地址再试一次。
         # 只重试一次，且同一个 item 60 秒内只让一个请求去重取，避免播放器的多段 Range 同时开浏览器。
@@ -738,13 +740,25 @@ def media(request: Request, item_id: str, slot: str,
     out = {k: headers[k] for k in
            ("content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified")
            if k in headers}
-    out["cache-control"] = "private, max-age=0"
+    # 边车地址对同一条内容是不变的（过期了服务端自己会重取），所以让浏览器存十分钟：
+    # 否则每滚回一屏、每换一次筛选都要把封面重新拉一遍（实测单张 312 kB）。
+    out["cache-control"] = "public, max-age=600, stale-while-revalidate=60"
+
+    # 过了 max-age 的那部分请求：ETag 对得上就直接 304，别再流一遍字节
+    etag = headers.get("etag")
+    if etag and request.headers.get("if-none-match") == etag:
+        try:
+            resp.close()
+        finally:
+            sem.release()
+        return Response(status_code=304, headers={"etag": etag,
+                                                  "cache-control": out["cache-control"]})
 
     def _body():
         try:
             yield from media_mod.iter_body(resp)
         finally:
-            media_mod.SEMAPHORE.release()
+            sem.release()
 
     return StreamingResponse(_body(), status_code=status, headers=out,
                              media_type=headers.get("content-type", "application/octet-stream"))

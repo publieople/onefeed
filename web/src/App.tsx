@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import TopBar from "./components/TopBar";
@@ -6,10 +6,16 @@ import ShortcutHelp from "./components/ShortcutHelp";
 import { ConfirmHost } from "./components/ui/Confirm";
 import { pushScope, popScope, useHotkeys } from "./motion/useHotkeys";
 import FeedPage from "./pages/FeedPage";
+// 详情页必须跟着主包一起到：共享元素转场要在点击后立刻拿到新快照，
+// 拆成异步 chunk 会在转场里插一段空白。其余三页不在转场路径上，按需加载。
 import ItemPage from "./pages/ItemPage";
-import MarketPage from "./pages/MarketPage";
-import SettingsPage from "./pages/SettingsPage";
-import NotFound from "./pages/NotFound";
+
+const MarketPage = lazy(() => import("./pages/MarketPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const AgentPage = lazy(() => import("./pages/AgentPage"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+import { AgentProvider } from "./agent/AgentProvider";
+import AgentSurface from "./agent/AgentSurface";
 import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, type Summary } from "./api";
 import { DUR, EASE, pageVariants } from "./motion";
 
@@ -32,6 +38,19 @@ const IDLE: RunState = {
   error: "",
   plugins: {},
 };
+
+/** 进度轮询的相等判断：plugins 明细变了也算变，但普通心跳不算 */
+function sameRun(a: RunState | null, b: RunState): boolean {
+  if (!a) return false;
+  return (
+    a.running === b.running &&
+    a.done === b.done &&
+    a.total === b.total &&
+    a.error === b.error &&
+    a.started_at === b.started_at &&
+    a.finished_at === b.finished_at
+  );
+}
 
 export default function App() {
   const [progress, setProgress] = useState<RunState | null>(null);
@@ -91,7 +110,9 @@ export default function App() {
       try {
         const data = await getJSON<{ state: RunState }>("/api/progress");
         if (!alive) return;
-        setProgress(data.state);
+        // 1600ms 一次轮询，绝大多数时候什么都没变：只在真变了才 setState，
+        // 否则顶栏、进度条、每张卡都会跟着重渲染一轮。
+        setProgress((prev) => (sameRun(prev, data.state) ? prev : data.state));
         if (wasRunning.current && !data.state.running && data.state.done > 0) {
           setReloadKey((k) => k + 1);
           void loadSummary();
@@ -150,7 +171,9 @@ export default function App() {
   const ctx: OutletCtx = { progress, reloadKey, refresh, summary, settings, reloadSettings, bump };
 
   return (
-    <div className="min-h-screen bg-paper">
+    // Agent 的会话挂在路由之上：换页面（包括 Agent 自己打开的那一条）都不重建
+    <AgentProvider>
+      <div className="min-h-screen bg-paper">
       {/* 键盘用户第一个 Tab 就能跳过顶栏直达内容 */}
       <a
         href="#main"
@@ -168,15 +191,28 @@ export default function App() {
           animate={page.animate}
           transition={{ duration: instant || reduce ? 0 : DUR.page, ease: EASE }}
         >
-          <Routes location={location}>
-            <Route path="/" element={<FeedPage ctx={ctx} />} />
-            <Route path="/item/:id" element={<ItemPage />} />
-            <Route path="/market" element={<MarketPage ctx={ctx} />} />
-            <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <Suspense
+            fallback={
+              <div className="pt-10">
+                <div className="h-6 w-40 animate-pulse rounded bg-wash" />
+                <div className="mt-6 h-[220px] animate-pulse rounded-card border border-line bg-paper" />
+              </div>
+            }
+          >
+            <Routes location={location}>
+              <Route path="/" element={<FeedPage ctx={ctx} />} />
+              <Route path="/item/:id" element={<ItemPage />} />
+              <Route path="/market" element={<MarketPage ctx={ctx} />} />
+              <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
+              <Route path="/agent" element={<AgentPage />} />
+              <Route path="/agent/:threadId" element={<AgentPage />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
         </motion.div>
       </main>
+      {/* 三形态的落点：唤起器 / 底部抽屉 / 详情页右栏（右栏由 ItemPage 自己渲染） */}
+      <AgentSurface />
       <AnimatePresence>
         {toast ? (
           <motion.div
@@ -192,8 +228,9 @@ export default function App() {
         ) : null}
       </AnimatePresence>
       {/* 全站确认框的落点：任何页面 await confirmDialog(...) 都渲染在这里 */}
-      <ConfirmHost />
-      <ShortcutHelp open={help} onClose={() => setHelp(false)} />
-    </div>
+        <ConfirmHost />
+        <ShortcutHelp open={help} onClose={() => setHelp(false)} />
+      </div>
+    </AgentProvider>
   );
 }

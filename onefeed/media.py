@@ -27,6 +27,13 @@ IMG_SLOT_RE = re.compile(r"^img-(\d{1,2})$")
 CHUNK = 64 * 1024
 MAX_BYTES = 240 * 1024 * 1024
 SEMAPHORE = threading.BoundedSemaphore(4)   # 并发上限：一台机器刷六路，别把上行打满
+# 图片和视频分开排队：一条 240MB 的视频占着名额时，一屏 30 张封面不该跟着干等。
+IMAGE_SEMAPHORE = threading.BoundedSemaphore(8)
+
+
+def semaphore_for(slot: str):
+    """按媒体位挑队列：封面/正文图走图片队列，视频走视频队列。"""
+    return IMAGE_SEMAPHORE if IMG_SLOT_RE.match(slot) else SEMAPHORE
 
 
 def resolve_slot(detail: dict[str, Any], slot: str) -> dict[str, str] | None:

@@ -1,10 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Star } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { useFeed, type FeedItem } from "../api";
-import AiDock from "../components/AiDock";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
 import { runNav } from "../motion/nav";
@@ -79,7 +78,7 @@ export default function FeedPage({ ctx }: Props) {
   };
   // 卡片先放大再进详情：把被点的元素作为过渡的那一层。
   // 同时把现在的地址（含筛选条件）交给详情页，返回时才能回到同一屏。
-  const openItem = (id: string, el?: HTMLElement, seed?: FeedItem) => {
+  const openItem = useCallback((id: string, el?: HTMLElement, seed?: FeedItem) => {
     // 卡片里的媒体框和标题是共享元素的两端：给它们挂上名字，浏览器才知道这两块要「长大」
     const media = el?.querySelector<HTMLElement>('[data-vt="media"]') ?? null;
     const title = el?.querySelector<HTMLElement>('[data-vt="title"]') ?? null;
@@ -101,7 +100,8 @@ export default function FeedPage({ ctx }: Props) {
         ],
       },
     );
-  };
+    // 稳定引用：否则 memo 过的卡片每帧都收到新 onOpen，白 memo
+  }, [navigate, location.pathname, location.search]);
 
   const activeSort = sort || ctx.settings?.settings.default_sort || "freshness";
   const since = useMemo(() => {
@@ -292,26 +292,36 @@ export default function FeedPage({ ctx }: Props) {
       ) : null}
 
       <section className="mt-5 grid grid-cols-1 items-stretch gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
-        {feed.items.map((item, index) => (
+        {feed.items.map((item, index) => {
           // T5：换筛选 / 排序时让留下来的卡片滑到新位置。项数一多，逐张滑会像在拖地，
-          // 所以只在 12 张以内开（正好是一屏的量），超过就直接换。
-          <motion.div
-            key={item.id}
-            data-vt-item={item.id}
-            layout={animateLayout ? "position" : false}
-            transition={{ duration: DUR.base, ease: EASE }}
-            className="rise h-full"
-            style={{ animationDelay: Math.min(index, 11) * 22 + "ms" }}
-          >
+          // 所以只在 12 张以内开（正好是一屏的量），超过就直接换 —— 连 motion 节点都不建，
+          // 免得 30 张卡各自挂一套布局测量。
+          const card = (
             <Card
               item={item}
               onOpen={openItem}
-              vtNames={
-                item.id === backId ? { media: "of-media", title: "of-title" } : undefined
-              }
+              vtNames={item.id === backId ? { media: "of-media", title: "of-title" } : undefined}
             />
-          </motion.div>
-        ))}
+          );
+          const shell = "rise h-full";
+          const delay = { animationDelay: Math.min(index, 11) * 22 + "ms" };
+          return animateLayout ? (
+            <motion.div
+              key={item.id}
+              data-vt-item={item.id}
+              layout="position"
+              transition={{ duration: DUR.base, ease: EASE }}
+              className={shell}
+              style={delay}
+            >
+              {card}
+            </motion.div>
+          ) : (
+            <div key={item.id} data-vt-item={item.id} className={shell} style={delay}>
+              {card}
+            </div>
+          );
+        })}
       </section>
 
       {feed.loading && feed.items.length === 0 ? (
@@ -372,8 +382,6 @@ export default function FeedPage({ ctx }: Props) {
           </button>
         </div>
       ) : null}
-
-      <AiDock onOpenItem={openItem} />
     </div>
   );
 }

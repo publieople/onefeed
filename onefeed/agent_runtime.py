@@ -579,6 +579,7 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
         chain: list[dict[str, Any]] | None = None, model: Any = None,
         max_tools: int = MAX_TOOL_CALLS, timeout: float = MAX_SECONDS,
         runner: Any = None, thread_id: str = "", max_steps: int = MAX_STEPS,
+        context: dict[str, Any] | None = None,
         _state: RunState | None = None) -> dict[str, Any]:
     """同步跑一轮（测试与简报用）；API 走 start() 起线程。"""
     prepared = _state is not None
@@ -614,6 +615,7 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
         agent = build_agent(built, deps, writer, deps.max_tool_calls)
         prompt = message + ("\n\n" + _previous(history) if history else "")
         prompt += _hints(message)
+        prompt += _focus_hint(context)
         if exclude:
             prompt += f"\n\n（这些 id 用户已经表示不感兴趣，不要再给：{', '.join(exclude[:20])}）"
         writer.emit("step", "think", {"title": "理解指令", "kind": "think",
@@ -689,7 +691,8 @@ def start(store: Any, message: str, history: list[dict[str, str]] | None = None,
           limit: int = 12, exclude: list[str] | None = None,
           chain: list[dict[str, Any]] | None = None, model: Any = None,
           max_tools: int = MAX_TOOL_CALLS, timeout: float = MAX_SECONDS,
-          runner: Any = None, thread_id: str = "") -> dict[str, Any]:
+          runner: Any = None, thread_id: str = "",
+          context: dict[str, Any] | None = None) -> dict[str, Any]:
     """起一轮运行并立刻返回 run_id（AC-4：run_start 先落库再返回）。"""
     state = RunState(run_id=uuid.uuid4().hex[:16],
                      thread_id=thread_id or uuid.uuid4().hex[:12])
@@ -710,7 +713,7 @@ def start(store: Any, message: str, history: list[dict[str, str]] | None = None,
         try:
             run(store, message, history=history, limit=limit, exclude=exclude,
                 chain=chain, model=model, max_tools=max_tools, timeout=timeout,
-                runner=runner, thread_id=state.thread_id, _state=state)
+                runner=runner, thread_id=state.thread_id, context=context, _state=state)
         except Exception as exc:  # 线程里别静默死掉
             try:
                 store.finish_agent_run(state.run_id, "error", reply="",
@@ -724,6 +727,25 @@ def start(store: Any, message: str, history: list[dict[str, str]] | None = None,
 
     threading.Thread(target=work, name=f"agent-{state.run_id}", daemon=True).start()
     return {"run_id": state.run_id, "thread_id": state.thread_id, "status": "running"}
+
+
+def _focus_hint(context: dict[str, Any] | None) -> str:
+    """详情页的右栏会让用户说「总结这条」——把「这条」具体是哪条提前告诉模型。"""
+    if not context:
+        return ""
+    item_id = str(context.get("item_id") or "").strip()
+    title = str(context.get("title") or "").strip()[:200]
+    if not item_id and not title:
+        return ""
+    bits = ["用户此刻正在看这一条内容，说「这条」「总结一下」时指的就是它，不用再问是哪条"]
+    if title:
+        bits.append(f"标题：{title}")
+    if item_id:
+        bits.append(f"id：{item_id}（get_item / summarize_item 直接用这个 id）")
+    platform = str(context.get("platform") or "").strip()
+    if platform:
+        bits.append(f"平台：{platform}")
+    return "\n\n（" + "；".join(bits) + "）"
 
 
 def _hints(message: str) -> str:

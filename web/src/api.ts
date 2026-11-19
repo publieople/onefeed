@@ -494,9 +494,24 @@ export interface ItemResponse {
 const PREFETCH_TTL = 60_000;
 const prefetched = new Map<string, { item?: ItemResponse; detail?: DetailResponse; at: number }>();
 
+/** 预取表不能只进不出：一屏扫过去就是二三十条，滚一路会攒下整天的数据 */
+const PREFETCH_MAX = 24;
+function prunePrefetch(): void {
+  const now = Date.now();
+  for (const [key, slot] of prefetched) {
+    if (now - slot.at > PREFETCH_TTL) prefetched.delete(key);
+  }
+  while (prefetched.size > PREFETCH_MAX) {
+    const oldest = prefetched.keys().next();
+    if (oldest.done) break;
+    prefetched.delete(oldest.value);
+  }
+}
+
 export function prefetchItem(id: string): void {
   const hit = prefetched.get(id);
   if (hit && Date.now() - hit.at < PREFETCH_TTL) return;
+  prunePrefetch();
   const at = Date.now();
   const slot = prefetched.get(id) ?? { at };
   prefetched.set(id, slot);
@@ -523,9 +538,29 @@ export function peekItem(id: string): { item?: ItemResponse; detail?: DetailResp
   return hit;
 }
 
+/** 详情一旦取到，一分钟内再进同一条就用这份：返回列表再点回来不该出现 7.9s 的冷启动 */
+const detailCache = new Map<string, { at: number; value: DetailResponse }>();
+const DETAIL_TTL = 60_000;
+
 export function getDetail(id: string, refresh = false, signal?: AbortSignal): Promise<DetailResponse> {
+  if (!refresh) {
+    const hit = detailCache.get(id);
+    if (hit && Date.now() - hit.at < DETAIL_TTL) return Promise.resolve(hit.value);
+  }
   const qs = refresh ? "?refresh=1" : "";
-  return getJSON<DetailResponse>("/api/item/" + encodeURIComponent(id) + "/detail" + qs, signal);
+  return getJSON<DetailResponse>("/api/item/" + encodeURIComponent(id) + "/detail" + qs, signal).then(
+    (data) => {
+      if (data && data.detail) {
+        detailCache.set(id, { at: Date.now(), value: data });
+        while (detailCache.size > 12) {
+          const oldest = detailCache.keys().next();
+          if (oldest.done) break;
+          detailCache.delete(oldest.value);
+        }
+      }
+      return data;
+    },
+  );
 }
 
 export interface SummaryPoint {
@@ -770,7 +805,15 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
       setError("");
       try {
         const data = await getJSON<FeedResponse>(build(cursor), controller.signal);
-        if (!append) feedCache.set(cacheKey, data);
+        if (!append) {
+          feedCache.set(cacheKey, data);
+          // 筛选条件一路换下去，这张表会长得没有边；留最近 20 种组合足够。
+          while (feedCache.size > 20) {
+            const oldest = feedCache.keys().next();
+            if (oldest.done) break;
+            feedCache.delete(oldest.value);
+          }
+        }
         setItems((prev) => (append ? [...prev, ...data.items] : data.items));
         setNext(data.next);
         setCount(data.count);

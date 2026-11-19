@@ -114,9 +114,9 @@ button:active:not(:disabled) {
 
 /* 路由切换只动透明度与位移；容器自身的 transform 会被动画结束后清掉，
    底部的 fixed 元素（AI 胶囊、toast）已用 portal 挂到 body，不受影响。 */
-.page-shell {
-  will-change: opacity, transform;
-}
+/* 曾经在这里常挂 will-change：那张 4000+ px 高的容器会被整块提升成合成层，
+   滚动时每帧都要重绘整层（实测去掉后平滑滚动最大帧 40ms → 13.6ms）。
+   进场动画本身只有 200ms，交给 framer-motion 按需提层就够了。 */
 
 @media (prefers-reduced-motion: reduce) {
   *,
