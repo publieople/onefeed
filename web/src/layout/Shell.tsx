@@ -8,21 +8,24 @@ import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
 import { usePresence } from "../motion/usePresence";
 import { useShell } from "./useShell";
 
-/** 左栏两档宽度：展开 288、图标轨 64。写常量是因为宽度要拿去过渡，不能再靠 class 切换。 */
-const LEFT_W_FULL = 288;
+/** 左栏两档宽度：展开 240、图标轨 64。写常量是因为宽度要拿去过渡，不能再靠 class 切换。 */
+const LEFT_W_FULL = 240;
 const LEFT_W_RAIL = 64;
+/** 右栏钉住时的宽度。和 ghost.ts 里的代位盒子口径一致。 */
+const RIGHT_W = 320;
 
 /**
- * 外壳：左 Agent 工作台 / 中内容 / 右槽位。
+ * 外壳：左 Agent 工作台 / 中内容 / 右槽位，三栏贴边。
  *
- * 左栏一直待在栅格里（1440 起 288、1024 起 64 图标轨），右栏只在 1800 起钉住，
- * 往下是抽屉 —— 因为 1440 段再塞 320 进去，中间的内容列就只剩 800 多，
- * 三列卡片会挤成一条缝。内容列宽度稳定优先于视觉对称。
+ * 形态照搬常规社交平台（B 站 / 小红书 / 抖音）：顶栏通栏，两栏各贴一侧边缘、
+ * 上下贯通到底，中间那列吃掉剩下的全部宽度 —— 而不是三张浮在纸上的圆角卡片。
+ * 贴边让内容有「一直滚不到头」的连续感，也让窄屏时两栏可以整块收掉不留缝。
  *
- * 左栏展开 = 这一列从 64 变宽成 288，内容列被 flex 挤窄；
- * 不再有 fixed 的全屏浮层（那种会盖住整页，破坏沉浸感）。
+ * 断点（见 useShell）：1440 起右栏可钉住（默认仍是关的，] 打开），
+ * 1200 起左栏可展开 240，960 起退成 64 图标轨，再窄两栏都不渲染。
  *
- * 收放都要有过渡：宽度走外层容器的 width 过渡（两段分支共用同一层，
+ * 左栏展开 = 这一列从 64 变宽成 240，中间列被 flex 挤窄；不是浮层。
+ * 收放都要有过渡：宽度走这一层的 width 过渡（两段内容共用同一层，
  * 所以换分支时那一列还在，能连续变宽变窄）；右抽屉走 translate 滑入滑出。
  */
 export default function Shell({
@@ -47,9 +50,30 @@ export default function Shell({
   const drawerOpen = !pinned && (shell.rightOpen || rail);
   // 抽屉得先留着才能播退场：它滑出去之后才是真的卸载
   const drawer = usePresence(drawerOpen, 240);
-  // 1280 以上抽屉把内容让开：340 盖在 1180 的内容列上，会切掉右边一整列卡片。
-  // 让位是瞬时位移，但跟着抽屉的挂载延迟一起收，否则抽屉还在往外滑、内容已经弹回去了。
-  const pushRight = drawer.mounted && shell.width >= 1280;
+
+  const leftW = shell.left === "hidden" ? 0 : shell.left === "full" ? LEFT_W_FULL : LEFT_W_RAIL;
+  const rightW = pinned && (shell.rightOpen || rail) ? RIGHT_W : 0;
+
+  /**
+   * 两栏的真实宽度写成 CSS 变量给视口级浮层用。
+   *
+   * 底部唤起器是 fixed 的，如果还按 inset-x-0 铺满视口，它会在两栏底部的空白里
+   * 居中，跟内容列对不上（宽屏上偏左、右栏打开时偏右）。浮层拿这两个变量把自己
+   * 夹在内容列上，代位盒子（motion/ghost.ts）再实测 #main，两边口径一致。
+   */
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--shell-left-w", leftW + "px");
+    root.style.setProperty("--shell-right-w", rightW + "px");
+  }, [leftW, rightW]);
+  // 离开外壳（比如独立的会话页）时清掉，别把别人也夹住
+  useEffect(() => {
+    const root = document.documentElement;
+    return () => {
+      root.style.removeProperty("--shell-left-w");
+      root.style.removeProperty("--shell-right-w");
+    };
+  }, []);
 
   // [ ] 开合两侧；右抽屉打开时压一层 dialog 作用域，Esc 先关最上面那层
   useHotkeys("global", { "[": shell.toggleLeft, "]": shell.toggleRight });
@@ -81,21 +105,20 @@ export default function Shell({
       </a>
       <TopBar health={health} progress={progress} onRefresh={onRefresh} />
 
-      <div
-        className="mx-auto flex w-full max-w-[1820px] items-start justify-center gap-5 px-5 transition-[padding-right] duration-[240ms] ease-out"
-        style={pushRight ? { paddingRight: 364 } : undefined}
-      >
-        {/* 这一层是左栏的「面板」本身：宽度在这里过渡，展开/收起时才不会整块瞬移。
-            两段内容共用一个容器，点收起时那一列从 288 挤到 64，内容列跟着变宽。 */}
+      <div className="flex w-full items-start">
+        {/* 这一层是左栏本身：宽度在这里过渡，展开/收起时才不会整块瞬移。
+            两段内容共用一个容器，点收起时那一列从 240 挤到 64，中间列跟着变宽。 */}
         {shell.left !== "hidden" ? (
           <div
             data-shell-left={shell.left}
-            style={{ width: shell.left === "full" ? LEFT_W_FULL : LEFT_W_RAIL }}
+            style={{ width: leftW }}
             // z-40：抬到底部渐隐层（AgentLauncher 那条 fixed inset-x-0 h-28，z-30）之上。
             // 那条渐变是为「卡片滚到底淡进纸面」做的，横跨整个视口，会顺手把左栏底部
             // 「稍后再看 / 快捷键 / 设置」刷成灰的，看着像被禁用了。两栏都是不透明纸色底，
             // 抬上去就把渐变挡回内容区，不用去算列宽。
-            className="sticky top-[76px] z-40 h-[calc(100vh-96px)] min-w-0 shrink-0 overflow-hidden rounded-card border border-line bg-paper transition-[width] duration-[220ms] ease-out"
+            // top-[57px] / 100vh-57px：顶栏 h-14 加 1px 分隔线才是它真正的下沿，
+            // 用 top-14 会让栏底多出 1px 落到视口外
+            className="sticky top-[57px] z-40 h-[calc(100vh-57px)] min-w-0 shrink-0 overflow-hidden border-r border-line bg-paper transition-[width] duration-[220ms] ease-out"
           >
             {shell.left === "full" ? (
               <AgentSidebar onCollapse={shell.toggleLeft} onHelp={onHelp} />
@@ -105,13 +128,19 @@ export default function Shell({
           </div>
         ) : null}
 
-        <main id="main" tabIndex={-1} className="w-full min-w-0 max-w-[1180px] px-6 outline-none">
-          {children}
+        {/* 中间列吃掉剩下的宽度：不再写死 max-w，宽屏就真的铺满。
+            可读性靠内层的 1240 上限，而不是把整列缩成一个居中的窄条。 */}
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-6 outline-none">
+          {/* data-content：内容列的真正边界（含 1400 上限），代位盒子按它算落点，
+              而不是量整条 main —— 宽屏上 main 比内容宽，盒子会飘到右侧空白里 */}
+          <div data-content className="mx-auto w-full max-w-[1400px]">
+            {children}
+          </div>
         </main>
 
         {pinned && (shell.rightOpen || rail) ? (
           <RightRail
-            className="rail-in sticky top-[76px] z-40 h-[calc(100vh-96px)] min-h-[420px] w-[320px] shrink-0"
+            className="rail-in sticky top-[57px] z-40 h-[calc(100vh-57px)] min-h-[420px] w-[320px] shrink-0 border-l border-line"
             defaultTab={onItemPage ? "ai" : "saved"}
             onClose={dismissRail}
           />
@@ -119,16 +148,19 @@ export default function Shell({
       </div>
 
       {drawer.mounted ? (
-        // 不做遮罩：详情页右栏要能跟内容并排用，蒙一层会把点击吞掉
+        // 不做遮罩：详情页右栏要能跟内容并排用，蒙一层会把点击吞掉。
+        // 窄屏也没有「内容让位」——340 的抽屉在这个宽度上本来就盖在边上，
+        // 强行挤内容会把卡片压成一条缝，滑过去再收起还要再抖一次。
         <div
           data-shell-drawer="right"
           className={
-            "drawer-in fixed inset-y-0 right-0 z-40 flex w-[340px] max-w-[92vw] flex-col p-3 transition duration-[240ms] ease-out " +
+            // top-[57px]：从顶栏下沿开始，别把顶栏右侧的刷新/主题/设置盖掉
+            "drawer-in fixed bottom-0 right-0 top-[57px] z-40 flex w-[340px] max-w-[92vw] flex-col p-3 transition duration-[240ms] ease-out " +
             (drawer.shown ? "translate-x-0 opacity-100" : "translate-x-full opacity-0")
           }
         >
           <RightRail
-            className="h-full"
+            className="h-full rounded-card border border-line shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
             defaultTab={onItemPage ? "ai" : "saved"}
             onClose={dismissRail}
           />

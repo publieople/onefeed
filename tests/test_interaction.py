@@ -241,14 +241,14 @@ def test_agent_surface_transitions() -> None:
     ghost = read("motion", "ghost.ts")
     nav = read("motion", "nav.ts")
     css = read("theme.css")
-    assert "CONTENT_MAX = 1180" in ghost and "export function createGhost" in ghost
+    assert "CONTENT_MAX = 1400" in ghost and "export function createGhost" in ghost
     assert 'kind === "corner"' in ghost and "viewTransitionName" in ghost
     # 名字挂在 760 宽的面板上，不是外层通栏容器（否则插值盒子横向铺满整屏）
     sheet = SURFACE.split("data-agent-surface=\"sheet\"")[1]
     assert 'data-vt="agent"' in sheet and 'viewTransitionName: "of-agent"' in sheet
     assert 'data-vt="agent"' in read("agent", "AgentRail.tsx")
     # 唤起器贴内容栏而不是屏幕右沿
-    assert "max-w-[1180px]" in SURFACE and 'data-agent-launcher="corner"' in SURFACE
+    assert "max-w-[1400px]" in SURFACE and 'data-agent-launcher="corner"' in SURFACE
     assert "of-agent" in css and "nav-agent-in" in css
     # 打开用 tab（新侧入场）、收起用 back（旧侧收缩）；prettier 会把 kind 折到下一行，按 token 断言
     for kind in ('"tab"', '"back"', '"push"'):

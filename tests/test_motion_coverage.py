@@ -27,8 +27,8 @@ def test_presence_hook_does_not_rely_on_a_second_render():
 def test_left_rail_transitions_its_own_column_width():
     shell = read("web/src/layout/Shell.tsx")
     assert "data-shell-left={shell.left}" in shell
-    assert "width: shell.left === \"full\" ? LEFT_W_FULL : LEFT_W_RAIL" in shell
-    # flex item 的 min-width:auto = min-content（子元素固定 288）会把宽度撑住，没有起点
+    assert "shell.left === \"full\" ? LEFT_W_FULL : LEFT_W_RAIL" in shell
+    # flex item 的 min-width:auto = min-content（子元素自己撑）会把宽度撑住，没有起点
     assert "min-w-0" in shell
     assert "transition-[width] duration-[220ms] ease-out" in shell
 
@@ -36,15 +36,15 @@ def test_left_rail_transitions_its_own_column_width():
 def test_right_drawer_enters_with_keyframes_and_leaves_with_transition():
     shell = read("web/src/layout/Shell.tsx")
     assert 'data-shell-drawer="right"' in shell
-    assert "drawer-in fixed inset-y-0 right-0" in shell
+    assert "drawer-in fixed bottom-0 right-0 top-[57px]" in shell
     assert 'drawer.shown ? "translate-x-0 opacity-100" : "translate-x-full opacity-0"' in shell
-    # 右抽屉开着的时候内容列要让位，收起后这段 padding 也要过渡回去，不能瞬间一跳
-    assert "transition-[padding-right] duration-[240ms] ease-out" in shell
+    # 抽屉盖在内容上，不挤内容宽度：让位那条路会让中间列掉到 900 以下
+    assert "paddingRight" not in shell
 
 
 def test_bottom_sheet_keeps_a_mounted_exit():
     surface = read("web/src/agent/AgentSurface.tsx")
-    assert "sheet-in fixed inset-x-0 bottom-0" in surface
+    assert "sheet-in fixed bottom-0" in surface
     assert "translate-y-6 opacity-0" in surface
     assert "export function AgentSheet({ shown = true, named = true }" in surface
     assert "usePresence(mode === \"sheet\", 220)" in surface
@@ -60,12 +60,14 @@ def test_bottom_veil_stays_under_the_two_side_columns():
     两栏都是不透明纸色底，用 z 序把它挡回去，不要靠算列宽。
     """
     surface = read("web/src/agent/AgentSurface.tsx")
-    assert "pointer-events-none fixed inset-x-0 bottom-0 z-30" in surface
+    # 唤起器的外层已经被夹在内容列里（left/right 用 --shell-*-w），渐隐只铺内容区
+    assert "pointer-events-none fixed bottom-0 z-30" in surface
+    assert "left: \"var(--shell-left-w, 0px)\"" in surface
     assert "pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-paper" in surface
 
     shell = read("web/src/layout/Shell.tsx")
-    assert 'sticky top-[76px] z-40 h-[calc(100vh-96px)] min-w-0 shrink-0 overflow-hidden rounded-card border border-line bg-paper' in shell
-    assert "rail-in sticky top-[76px] z-40 h-[calc(100vh-96px)] min-h-[420px] w-[320px] shrink-0" in shell
+    assert "sticky top-[57px] z-40 h-[calc(100vh-57px)] min-w-0 shrink-0 overflow-hidden border-r border-line bg-paper" in shell
+    assert "rail-in sticky top-[57px] z-40 h-[calc(100vh-57px)] min-h-[420px] w-[320px] shrink-0 border-l border-line" in shell
 
 
 def test_keyframes_and_reduce_motion_are_declared():

@@ -29,17 +29,19 @@ export function AgentLauncher() {
   const reach = shown ? "pointer-events-auto" : "pointer-events-none";
   // ≥1800 右栏常驻，详情页再挂个圆钮就是两个入口打架
   if (onItemPage && pinned) return null;
-  // 入口贴内容栏的右沿，不贴屏幕右沿：页面主体是居中 1180px，贴屏幕会在宽屏上飘到空白里去，
+  // 入口贴内容栏的右沿，不贴屏幕右沿：页面主体有 1240 上限，贴屏幕会在宽屏上飘到空白里去，
   // 视觉上跟内容脱节。代位盒子（motion/ghost.ts）算的是同一组边距，两边必须一起改。
   if (onItemPage) {
     return (
       <div
         data-agent-launcher-wrap="corner"
+        // 夹在内容列里（外壳把两栏宽度写成 CSS 变量）：只铺视口会在宽屏上飘到空白里
+        style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
         className={
-          "pointer-events-none fixed inset-x-0 bottom-0 z-30 px-6 pb-5 transition duration-300 ease-out " + lift
+          "pointer-events-none fixed bottom-0 z-30 px-6 pb-5 transition duration-300 ease-out " + lift
         }
       >
-        <div className="mx-auto flex max-w-[1180px] justify-end">
+        <div className="mx-auto flex w-full max-w-[1400px] justify-end">
           <button
             onClick={() => openWith()}
             onPointerEnter={() => hold(true)}
@@ -68,8 +70,9 @@ export function AgentLauncher() {
   return (
     <div
       data-agent-launcher-wrap="pill"
+      style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
       className={
-        "pointer-events-none fixed inset-x-0 bottom-0 z-30 px-6 pb-4 transition duration-300 ease-out " + lift
+        "pointer-events-none fixed bottom-0 z-30 px-6 pb-4 transition duration-300 ease-out " + lift
       }
     >
       {/* 底部渐隐：卡片滚到这里会淡进纸面，而不是被胶囊硬切一条直线。
@@ -79,7 +82,7 @@ export function AgentLauncher() {
         aria-hidden
         className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-paper via-paper/85 to-transparent"
       />
-      <div className="relative mx-auto flex max-w-[1180px] justify-center">
+      <div className="relative mx-auto flex w-full max-w-[1400px] justify-center">
         {/* 平时半透明、薄一点；悬停/聚焦才浮起来。整条不抢内容，但一直够得着。 */}
         <button
           onClick={() => openWith()}
@@ -159,8 +162,9 @@ export function AgentSheet({ shown = true, named = true }: { shown?: boolean; na
       aria-modal="true"
       aria-label="找内容"
       ref={sheetRef}
+      style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
       className={
-        "sheet-in fixed inset-x-0 bottom-0 z-40 flex justify-center px-6 pb-4 transition duration-[220ms] ease-out " +
+        "sheet-in fixed bottom-0 z-40 flex justify-center px-6 pb-4 transition duration-[220ms] ease-out " +
         (shown ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0")
       }
     >

@@ -18,7 +18,7 @@ export const GRID_GAP = 20;
 /** 再窄就不是卡片了：标题放不下两个字，meta 折行 */
 export const CARD_MIN = 216;
 /** 「自动」的目标卡宽：舒适阅读的上限 */
-const CARD_TARGET = 380;
+const CARD_TARGET = 330;
 const MAX_COLS = 5;
 
 function readChoice(): ColsChoice {
@@ -44,7 +44,9 @@ export function maxFitCols(width: number): number {
 
 export function autoColsFor(width: number): number {
   if (width <= 0) return 1;
-  return Math.min(MAX_COLS, Math.max(1, Math.round(width / CARD_TARGET)));
+  // 向下取整：900 宽的窗口 852 / 330 = 2.58，四舍五入会硬塞成 3 列、每列只剩 270，
+  // 标题两个字就开始折行。宁可少一列，卡片宽度先够。
+  return Math.min(MAX_COLS, Math.max(1, Math.floor(width / CARD_TARGET)));
 }
 
 /**
@@ -53,6 +55,8 @@ export function autoColsFor(width: number): number {
  */
 function initialWidth(): number {
   if (typeof document === "undefined") return 1120;
+  const column = document.querySelector("[data-content]");
+  if (column) return column.clientWidth || 1120;
   const main = document.getElementById("main");
   const w = main ? main.clientWidth - 48 : window.innerWidth - 48;
   return w > 0 ? w : 1120;

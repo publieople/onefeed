@@ -14,10 +14,21 @@ def read(rel: str) -> str:
 
 
 def test_shell_is_the_only_place_that_owns_the_columns():
+    """三栏贴边：没有居中壳，也没有两张浮起的圆角卡片。
+
+    照搬的是 B 站 / 小红书 / 抖音的骨架——顶栏通栏，两栏各贴一侧、上下贯通，
+    中间那列吃掉剩下的全部宽度。早先 `mx-auto max-w-[1820px] gap-5 px-5` +
+    两栏 `rounded-card border` 是一张张浮在纸上的卡片，宽屏上四周一圈空白。
+    """
     shell = read("web/src/layout/Shell.tsx")
     app = read("web/src/App.tsx")
-    assert '"max-w-[1820px]"' in shell or "max-w-[1820px]" in shell
-    assert "max-w-[1180px]" in shell, "中间内容列仍有自己的上限，不被侧栏拉宽"
+    assert "max-w-[1820px]" not in shell, "外层不再有居中壳"
+    assert "flex w-full items-start" in shell, "三栏直接铺满视口宽度"
+    assert "border-r border-line" in shell, "左栏贴左缘，用一条分隔线收口"
+    assert "border-l border-line" in shell, "右栏贴右缘"
+    assert "sticky top-[57px]" in shell, "两栏贴着顶栏（56 + 1px 分隔线）往下贯通"
+    assert "flex-1 px-6" in shell, "中间列吃掉剩余宽度"
+    assert "max-w-[1400px]" in shell, "内容仍有阅读上限，不被超宽屏拉成一条横幅"
     assert "id=\"main\"" in shell
     assert "<AgentSidebar" in shell and "<RightRail" in shell
     assert "<Shell" in app and "<TopBar" not in app, "顶栏归外壳管，App 不该再自己拼"
@@ -25,7 +36,7 @@ def test_shell_is_the_only_place_that_owns_the_columns():
 
 def test_left_column_follows_measured_width_and_collapses():
     hook = read("web/src/layout/useShell.ts")
-    assert "LEFT_FULL = 1440" in hook and "LEFT_RAIL = 1024" in hook and "RIGHT_PIN = 1800" in hook
+    assert "LEFT_FULL = 1200" in hook and "LEFT_RAIL = 960" in hook and "RIGHT_PIN = 1440" in hook
     assert "document.documentElement.clientWidth" in hook
     assert "onefeed.shell.left" in hook, "左栏展开偏好是设备偏好，存本地"
     sidebar = read("web/src/agent/AgentSidebar.tsx")
@@ -40,7 +51,7 @@ def test_right_rail_never_duplicates_the_bottom_sheet():
     assert 'const presenting = tab === "ai" && agentOpen && mode === "rail"' in rail
     assert 'presenting ? { viewTransitionName: "of-agent" } : undefined' in rail, "名字只在真右栏时挂，避免重复名整段转场被取消"
     surface = read("web/src/agent/AgentSurface.tsx")
-    assert "if (onItemPage && pinned) return null;" in surface, "≥1800 右栏常驻，详情页不要再挂圆钮"
+    assert "if (onItemPage && pinned) return null;" in surface, "右栏钉住时详情页不要再挂圆钮"
 
 
 def test_saved_list_keeps_undo_after_the_last_row_leaves():
@@ -60,16 +71,38 @@ def test_brackets_toggle_the_rails_and_escape_closes():
     assert "shell.rightOpen" in shell and "setRightOpen(false)" in shell
 
 
-def test_right_drawer_only_pushes_content_on_wide_screens():
+def test_right_drawer_overlays_instead_of_squeezing_the_feed():
+    """窄屏右栏是滑出的抽屉，不再挤内容。
+
+    先在 1280 上试过「让出 364px」，中间列当场掉到 900 以下、三列卡片挤成一条缝，
+    收起时内容还要再弹回去一次。抽屉本来就是这个宽度的常见形态，盖上去更稳。
+    """
     shell = read("web/src/layout/Shell.tsx")
-    assert "pushRight" in shell
-    assert "shell.width >= 1280" in shell, "窄屏让不出 364px，只能盖上去"
-    assert "paddingRight" in shell
+    assert "drawer-in fixed bottom-0 right-0 top-[57px]" in shell
+    assert "pushRight" not in shell and "paddingRight" not in shell, "抽屉不占内容宽度"
+    assert "translate-x-full opacity-0" in shell
+
+
+def test_shell_exposes_column_widths_to_viewport_level_overlays():
+    """底部唤起器是 fixed 的：拿不到两栏宽度就会在整屏里居中，跟内容列对不上。
+
+    外壳把两栏实际宽度写成 CSS 变量，唤起器/回顶按钮/抽屉都用它把自己夹在内容列上。
+    """
+    shell = read("web/src/layout/Shell.tsx")
+    assert '"--shell-left-w"' in shell and '"--shell-right-w"' in shell
+    for rel in ("web/src/agent/AgentSurface.tsx", "web/src/components/ScrollTop.tsx"):
+        src = read(rel)
+        assert 'var(--shell-left-w, 0px)' in src and 'var(--shell-right-w, 0px)' in src, rel
+    surface = read("web/src/agent/AgentSurface.tsx")
+    # 三个挂在视口上的浮层都要夹在内容列里：胶囊、详情页圆钮、抽屉
+    for anchor in ('data-agent-launcher-wrap="corner"', 'data-agent-launcher-wrap="pill"', 'data-agent-surface="sheet"'):
+        block = surface.split(anchor)[1].split(">")[0]
+        assert "var(--shell-left-w, 0px)" in block, anchor + " 没夹在内容列里"
 
 
 def test_ghost_boxes_follow_the_real_content_column():
     ghost = read("web/src/motion/ghost.ts")
-    assert 'getElementById("main")' in ghost, "侧栏挤窄内容列后，代位盒子必须实测"
+    assert '[data-content]' in ghost and 'getElementById("main")' in ghost, "代位盒子量内容列，量不到才退回 main"
     assert "getBoundingClientRect" in ghost
     assert "CONTENT_MAX" in ghost, "量不到时回落常量"
 

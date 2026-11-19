@@ -75,7 +75,9 @@ export default function RightRail({
       style={presenting ? { viewTransitionName: "of-agent" } : undefined}
       aria-label={presenting ? "AI 助手" : "右侧栏"}
       className={
-        "flex min-h-0 flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_10px_30px_rgba(20,20,20,0.06)] " +
+        // 只留底色：钉住时是贴边一栏（左边框由外壳给），抽屉时才是浮起的卡片。
+        // 两处外观不同，所以 chrome 交给调用点，这里只保证不透明底能挡住底部渐隐。
+        "flex min-h-0 flex-col overflow-hidden bg-paper " +
         className
       }
     >

@@ -19,8 +19,11 @@ export default function ScrollTop() {
   }, []);
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-24 z-30 px-6">
-      <div className="mx-auto flex max-w-[1180px] justify-end">
+    <div
+      style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
+      className="pointer-events-none fixed bottom-24 z-30 px-6"
+    >
+      <div className="mx-auto flex w-full max-w-[1400px] justify-end">
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
           aria-label="回到顶部"

@@ -45,7 +45,8 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
       style={{ viewTransitionName: "of-topbar" }}
       className="sticky top-0 z-30 border-b border-line bg-paper"
     >
-      <div className="relative mx-auto flex h-14 w-full max-w-[1820px] items-center gap-4 px-5">
+      {/* 通栏：品牌贴左缘、操作贴右缘，和下面两栏同一条边线对齐 */}
+      <div className="relative flex h-14 w-full items-center gap-4 px-4 sm:px-6">
         <NavLink to="/" className="flex items-baseline gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-solid text-[13px] font-semibold text-solid-fg">
             O

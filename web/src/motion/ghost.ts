@@ -13,7 +13,7 @@
  * 转场结束后由 runNav 的 after 摘掉，不会留在 DOM 里。
  */
 
-const CONTENT_MAX = 1180;
+const CONTENT_MAX = 1400;
 const GUTTER = 24;
 
 export interface Box {
@@ -34,14 +34,15 @@ export interface Ghost {
 /**
  * 内容栏的左右内沿。
  *
- * 外壳有左右栏之后，内容列不再等于「视口居中 1180」——它会被两侧栏挤窄。
- * 所以优先量 #main 的真实位置，量不到（首帧 / 非外壳环境）才回落到常量。
+ * 外壳有左右栏之后，内容列不再等于「视口居中 1400」——它会被两侧栏挤窄。
+ * 所以优先量内容列（[data-content]，外壳里那层带 1400 上限的）的真实位置；
+ * 没有它才退回 #main，再量不到（首帧 / 非外壳环境）才回落到常量。
  */
 export function contentEdges(): { left: number; right: number; width: number } {
-  const main = document.getElementById("main");
-  if (main) {
-    const rect = main.getBoundingClientRect();
-    const style = window.getComputedStyle(main);
+  const column = document.querySelector("[data-content]") ?? document.getElementById("main");
+  if (column) {
+    const rect = column.getBoundingClientRect();
+    const style = window.getComputedStyle(column);
     const left = rect.left + parseFloat(style.paddingLeft || "0");
     const right = rect.right - parseFloat(style.paddingRight || "0");
     if (Number.isFinite(left) && Number.isFinite(right) && right - left > 200) {

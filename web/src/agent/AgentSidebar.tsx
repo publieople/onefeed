@@ -139,7 +139,7 @@ export default function AgentSidebar({
   return (
     <aside
       aria-label="Agent 工作台"
-      className="flex h-full w-72 shrink-0 flex-col overflow-hidden"
+      className="flex h-full w-full min-w-0 flex-col overflow-hidden"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
         <Sparkles size={14} className="text-muted" />
