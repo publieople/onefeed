@@ -341,6 +341,7 @@ const BASIS_LABEL: Record<string, string> = {
   transcript: "完整字幕",
   official: "平台自带总结",
   desc: "标题与简介",
+  visual: "图片",
 };
 
 interface SummaryPanelProps {
@@ -506,7 +507,11 @@ function SummaryPanel({
       {s.note ? <p className="mt-1.5 text-[12px] leading-relaxed text-fade">{s.note}</p> : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-[11px] text-fade">
-        <span>依据 {basis}{s.source_chars ? " · " + s.source_chars + " 字" : ""}</span>
+        <span>
+          依据 {basis}
+          {s.source_chars ? " · " + s.source_chars + " 字" : ""}
+          {s.images ? " · " + s.images + " 张图" : ""}
+        </span>
         {meta ? <span>{meta}</span> : null}
         <button onClick={onRetry} className="underline underline-offset-2 transition-colors hover:text-ink">
           重新总结

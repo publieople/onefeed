@@ -240,6 +240,145 @@ def test_stream_build() -> None:
     check("中途断了" in partial["summary"]["caveat"], "断流会在注意里说清楚")
 
 
+def test_reasoning_hint() -> None:
+    """推理型模型的降思考参数只发给认它的端点。"""
+    mini = ai_mod._reasoning_hint({"base_url": "https://api.minimaxi.com/v1"})
+    check(mini == {"reasoning_effort": "low"}, "MiniMax 默认降一档思考")
+    deep = ai_mod._reasoning_hint({"base_url": "https://api.deepseek.com/v1"})
+    check(deep == {}, "别的网关不加这个字段（会 400）")
+    forced = ai_mod._reasoning_hint({"base_url": "https://api.minimaxi.com/v1",
+                                     "reasoning_effort": "minimal"})
+    check(forced == {"reasoning_effort": "minimal"}, "配置里显式指定时优先用它")
+
+
+def test_images_into_messages() -> None:
+    """图文笔记：图片必须真的拼进 image_url 块，端点不认图时退回纯文本。"""
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    detail = {"payload": {"images": ["https://cdn.example.com/1.png",
+                                     "https://cdn.example.com/2.png",
+                                     "https://cdn.example.com/3.png",
+                                     "https://cdn.example.com/4.png"],
+                          "body": {"value": "<p>标签</p>"}, "media": {}}}
+    store = SimpleNamespace(get_detail=lambda item_id, max_age=0: detail)
+    host = SimpleNamespace(summary_source=lambda pid, row: {
+        "basis": "desc", "title": "图文标题", "desc": "#标签", "duration": 0})
+    row = {"id": "xiaohongshu:note:1", "platform": "xiaohongshu", "title": "图文标题",
+           "text": "", "duration": 0}
+
+    before = summary_mod.media_mod.read_slot_image
+    fetched: list[str] = []
+
+    def fake_slot(item_id, slot, payload, plugin_id):
+        fetched.append(slot)
+        return png, "image/png"
+
+    summary_mod.media_mod.read_slot_image = fake_slot
+    captured: list = []
+
+    def fake_ok(messages, max_tokens=900, temperature=0.5):
+        captured.append(messages)
+        return ('{"tldr":"图里说的","points":[{"text":"要点"}],"caveat":""}',
+                {"name": "MiniMax", "model": "MiniMax-M3.1-Flash"})
+
+    try:
+        with _Patched(fake_ok):
+            out = summary_mod.build(store, host, row)
+    finally:
+        summary_mod.media_mod.read_slot_image = before
+
+    check(fetched == ["img-0", "img-1", "img-2"], "最多取前 3 张图")
+    check(out["images"] == 3, "结果里记下真正用了几张图")
+    check(out["basis"] == "visual" and out["basis_text"] == "图片",
+          "正文只有标签时 basis 记成图片")
+    content = captured[0][1]["content"]
+    check(isinstance(content, list), "带图时 user content 是数组")
+    check(content[0]["type"] == "text" and "另有 3 张图片" in content[0]["text"],
+          "文本块会说明附了图")
+    blocks = [b for b in content if b.get("type") == "image_url"]
+    check(len(blocks) == 3, "三张图各一个 image_url 块")
+    check(blocks[0]["image_url"]["url"].startswith("data:image/png;base64,"),
+          "图片转成 data URL")
+    check(blocks[0]["image_url"]["detail"] == "low", "detail 用 low 控成本")
+
+    # 端点不认图：第一次带图报错，第二次纯文本应成功，且标明没用图
+    calls: list = []
+
+    def fake_reject_images(messages, max_tokens=900, temperature=0.5):
+        calls.append(messages)
+        if isinstance(messages[1]["content"], list):
+            raise RuntimeError("400 unknown field image_url")
+        return ('{"tldr":"纯文本也能干","points":[{"text":"p"}],"caveat":""}',
+                {"name": "DeepSeek", "model": "deepseek-chat"})
+
+    summary_mod.media_mod.read_slot_image = fake_slot
+    try:
+        with _Patched(fake_reject_images):
+            retried = summary_mod.build(store, host, row)
+    finally:
+        summary_mod.media_mod.read_slot_image = before
+    check(len(calls) == 2, "带图被拒后重试一次")
+    check(isinstance(calls[1][1]["content"], str), "重试时 content 退回纯字符串")
+    check(retried["engine"] == "llm" and retried["images"] == 0,
+          "重试成功且标明没用图")
+
+    # 流式：delta 之外，图也必须进第一轮 messages
+    streamed: list = []
+
+    def fake_stream(messages, max_tokens=900, temperature=0.3):
+        streamed.append(messages)
+        yield "content", "TLDR: 图里说的\n", {"name": "MiniMax", "model": "MiniMax-M3.1-Flash"}
+
+    summary_mod.media_mod.read_slot_image = fake_slot
+    try:
+        with _PatchedStream(fake_stream):
+            events = list(summary_mod.stream_build(store, host, row))
+    finally:
+        summary_mod.media_mod.read_slot_image = before
+    check(events[0]["images"] == 3, "流式 meta 带图片张数")
+    check(isinstance(streamed[0][1]["content"], list), "流式也把图拼进 content")
+    check(events[-1]["summary"]["images"] == 3, "流式收尾记下用了几张图")
+
+
+def test_vision_setting_off() -> None:
+    """设置里关掉读图：一张都不取，模型消息里也没有 image_url。"""
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    detail = {"payload": {"images": ["https://cdn.example.com/1.png"],
+                          "body": {"value": "<p>标签</p>"}, "media": {}}}
+    store = SimpleNamespace(get_detail=lambda item_id, max_age=0: detail)
+    host = SimpleNamespace(summary_source=lambda pid, row: {
+        "basis": "desc", "title": "图文标题", "desc": "#标签", "duration": 0})
+    row = {"id": "xiaohongshu:note:2", "platform": "xiaohongshu", "title": "图文标题",
+           "text": "", "duration": 0}
+
+    before_slot = summary_mod.media_mod.read_slot_image
+    before_load = summary_mod.settings_mod.load
+    fetched: list[str] = []
+
+    def fake_slot(item_id, slot, payload, plugin_id):
+        fetched.append(slot)
+        return png, "image/png"
+
+    captured: list = []
+
+    def fake_ok(messages, max_tokens=900, temperature=0.5):
+        captured.append(messages)
+        return ('{"tldr":"只读文字","points":[{"text":"p"}],"caveat":""}',
+                {"name": "MiniMax", "model": "MiniMax-M3.1-Flash"})
+
+    summary_mod.media_mod.read_slot_image = fake_slot
+    summary_mod.settings_mod.load = lambda: {"vision_summary": False}
+    try:
+        with _Patched(fake_ok):
+            out = summary_mod.build(store, host, row)
+    finally:
+        summary_mod.media_mod.read_slot_image = before_slot
+        summary_mod.settings_mod.load = before_load
+
+    check(fetched == [], "关掉读图后一张都不取")
+    check(out["images"] == 0, "结果里 images 记 0")
+    check(isinstance(captured[0][1]["content"], str), "消息退回纯文本")
+
+
 def test_store_and_api() -> None:
     tmp = Path(__file__).resolve().parents[1] / ".onefeed" / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)
@@ -300,6 +439,9 @@ def main() -> int:
     test_build_llm_and_fallback()
     test_parse_lines()
     test_stream_build()
+    test_reasoning_hint()
+    test_images_into_messages()
+    test_vision_setting_off()
     test_store_and_api()
     print(f"✅ test_summary: {CHECKS} 项通过")
     return 0

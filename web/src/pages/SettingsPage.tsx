@@ -622,6 +622,20 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   onChange={(next) => setForm({ ...form, ai_providers: next })}
                   status={ai}
                 />
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line px-3.5 py-3">
+                  <input
+                    type="checkbox"
+                    checked={form.vision_summary}
+                    onChange={(e) => setForm({ ...form, vision_summary: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 accent-black"
+                  />
+                  <span>
+                    <span className="text-[13px] font-medium">总结时读图</span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-fade">
+                      图文笔记取前三张、视频取封面一起交给多模态模型；关掉只读文字，省 token。
+                    </span>
+                  </span>
+                </label>
                 <div className="flex items-center gap-2">
                   <button onClick={() => void clearKeys()} className="ml-auto h-8 rounded-lg border border-line px-3 text-[12px] text-muted hover:text-ink">
                     清除所有 key

@@ -145,6 +145,8 @@ export interface SettingsValues {
   default_sort: string;
   prune_days: number;
   auto_update: boolean;
+  /** 总结时是否把图片交给多模态模型（关掉只读文字，省钱） */
+  vision_summary: boolean;
   ai_base_url: string;
   ai_model: string;
   /** 只写不读：后端返回时永远为空串 */
@@ -597,14 +599,16 @@ export interface SummaryPayload {
   points: SummaryPoint[];
   chapters?: SummaryChapter[];
   caveat?: string;
-  /** 依据哪一档素材：完整字幕 / 平台自带总结 / 只有标题与简介 */
-  basis: "transcript" | "official" | "desc" | string;
+  /** 依据哪一档素材：完整字幕 / 平台自带总结 / 只有标题与简介 / 图片 */
+  basis: "transcript" | "official" | "desc" | "visual" | string;
   basis_text?: string;
   duration?: number;
   engine: string;
   provider?: string;
   model?: string;
   source_chars: number;
+  /** 真正送进模型的图片张数（0 或不填表示纯文本） */
+  images?: number;
   ms: number;
   generated_at: number;
   note?: string;
@@ -624,7 +628,7 @@ export function getSummary(id: string, refresh = false, signal?: AbortSignal): P
 }
 /** 流式总结的进度回调。done 之后调用方就不用再发请求了，整份 payload 会一起给到。 */
 export interface SummaryStreamHandlers {
-  onMeta?: (meta: { basis: string; basis_text?: string; duration?: number; source_chars?: number }) => void;
+  onMeta?: (meta: { basis: string; basis_text?: string; duration?: number; source_chars?: number; images?: number }) => void;
   /** 推理型模型先想后写：收到一次 thinking 就够，用来把「卡住了」变成「在干活」 */
   onStatus?: (phase: string) => void;
   onDelta: (text: string) => void;

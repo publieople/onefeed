@@ -19,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 
@@ -162,13 +162,28 @@ CREATE TABLE IF NOT EXISTS agent_steps (             -- 事件流水：回放 + 
     at            INTEGER NOT NULL,
     PRIMARY KEY (run_id, seq)
 );
-CREATE TABLE IF NOT EXISTS item_marks (              -- 收藏 / 已读 / 隐藏
+CREATE TABLE IF NOT EXISTS item_marks (              -- 稍后再看 / 已读 / 隐藏
     item_id       TEXT PRIMARY KEY,
     saved         INTEGER NOT NULL DEFAULT 0,
     read_at       INTEGER NOT NULL DEFAULT 0,
     hidden        INTEGER NOT NULL DEFAULT 0,
     updated_at    INTEGER NOT NULL DEFAULT 0
 );
+"""
+
+# 收藏夹与「稍后再看」是两件事，故意不共用 item_marks：
+#   · 稍后再看 = 临时的「等会儿看」，卡片上一键加/减，没有备注，加入即排到最前；
+#   · 收藏夹   = 长期留档，只在详情页收藏、必须写一句为什么留，移出要二次确认。
+# 两者共表就会互相污染（标记一改，两边的排序和时间都没了），所以各走一张表、各走一套接口。
+FAVORITES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS item_favorites (          -- 收藏夹：长期留档 + 一句备注
+    item_id       TEXT PRIMARY KEY,
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL DEFAULT 0,
+    updated_at    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_favorites_created
+    ON item_favorites(created_at DESC);
 """
 
 
@@ -203,6 +218,23 @@ def decode_cursor(cursor: str | None) -> tuple[int, str] | None:
     ts, _, ident = cursor.partition("|")
     try:
         return int(ts), ident
+    except ValueError:
+        return None
+
+
+def decode_mix_cursor(cursor: str | None) -> tuple[int, int, str, str] | None:
+    """交错排序的游标：轮次 | 轮内次序 | 平台 | id。
+
+    普通游标是「时间戳|id」，交错排序的排序键不是某一列（是各平台里自己的名次），
+    所以游标里得带上轮次和轮内次序，否则下一页会被算成别的轮次。
+    """
+    if not cursor:
+        return None
+    parts = cursor.split("|", 3)
+    if len(parts) != 4:
+        return None
+    try:
+        return int(parts[0]), int(parts[1]), parts[2], parts[3]
     except ValueError:
         return None
 
@@ -286,6 +318,8 @@ class Store:
                 # 老收藏没有收藏时刻，用最后一次改标记的时间兜底，别让它们全排到最后
                 conn.execute("UPDATE item_marks SET saved_at = updated_at "
                              "WHERE saved = 1 AND saved_at = 0")
+            if version < 7:
+                conn.executescript(FAVORITES_SCHEMA)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
         self.recompute_engage()
@@ -360,8 +394,13 @@ class Store:
     def page(self, platforms: Sequence[str] | None = None, kind: str | None = None,
              sort: str = "freshness", cursor: str | None = None,
              limit: int = 30, keyword: str | None = None,
-             since: int | None = None, saved: bool = False) -> tuple[list[dict[str, Any]], str | None]:
-        """游标分页：返回 (rows, next_cursor)。next_cursor 为 None 表示到底了。"""
+             since: int | None = None, saved: bool = False,
+             mix: bool = True) -> tuple[list[dict[str, Any]], str | None]:
+        """游标分页：返回 (rows, next_cursor)。next_cursor 为 None 表示到底了。
+
+        mix=True 时按平台轮流取（每个平台各排各的队，整体按「第 1 名、第 2 名…」
+        拼），因为各平台采集时刻相近，只按时间排会整屏整屏都是同一个平台。
+        只是「稍后再看」那种自己的清单不交错 —— 那是个人的收藏时刻顺序。"""
         limit = max(1, min(int(limit), 100))
         order = SORTS.get(sort, SORTS["freshness"])
         where: list[str] = []
@@ -382,14 +421,56 @@ class Store:
         if saved:
             # 只看我收藏的：Agent 存的条目、手点星标的条目都在这里
             where.append("m.saved = 1")
-        decoded = decode_cursor(cursor)
+        key = SORT_KEYS.get(sort, FRESH_KEY)
+        mix = bool(mix) and not saved and sort != "saved"
+        decoded_mix = decode_mix_cursor(cursor) if mix else None
+        decoded = None if mix else decode_cursor(cursor)
         if decoded:
             ts, ident = decoded
-            key = SORT_KEYS.get(sort, FRESH_KEY)
             where.append(f"({key} < ? OR ({key} = ? AND i.id < ?))")
             params.extend([ts, ts, ident])
         where.append("COALESCE(m.hidden, 0) = 0")  # 「不感兴趣」的条目默认不进流
         clause = "WHERE " + " AND ".join(where)
+
+        if mix:
+            # 交错：先给每条算出「本平台内第几名」（prn），再按 prn 升序铺开。
+            # 于是第 1 屏是各平台的第 1 条、第 2 屏是各平台的第 2 条……同平台不会连排。
+            base_sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
+                        f"m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, "
+                        f"m.note AS mark_note, {key} AS sort_key "
+                        f"FROM items i LEFT JOIN item_marks m ON m.item_id = i.id {clause}")
+            cursor_sql, cursor_params = "", []
+            if decoded_mix:
+                prn, rot, plat, ident = decoded_mix
+                cursor_sql = ("WHERE prn > ? OR (prn = ? AND rot > ?) "
+                              "OR (prn = ? AND rot = ? AND platform > ?) "
+                              "OR (prn = ? AND rot = ? AND platform = ? AND id > ?)")
+                cursor_params = [prn, prn, rot, prn, rot, plat, prn, rot, plat, ident]
+            # rot 让每一轮的平台出场顺序都不一样：纯字母序每屏都是同一个平台打头，
+            # 看着像固定模板。rot 只跟轮次和平台名有关，所以同一批数据翻页仍然稳定。
+            sql = (f"WITH base AS ({base_sql}), "
+                   f"ranked AS (SELECT base.*, ROW_NUMBER() OVER ("
+                   f"PARTITION BY platform ORDER BY sort_key DESC, id DESC) AS prn FROM base), "
+                   f"mixed AS (SELECT ranked.*, "
+                   f"((prn * 31 + LENGTH(platform) * 7) % 97) AS rot FROM ranked) "
+                   f"SELECT * FROM mixed {cursor_sql} "
+                   f"ORDER BY prn ASC, rot ASC, platform ASC, id ASC LIMIT ?")
+            rows = [dict(r) for r in
+                    self.conn.execute(sql, list(params) + cursor_params + [limit + 1]).fetchall()]
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            next_cursor = None
+            if has_more and rows:
+                last = rows[-1]
+                next_cursor = (f"{int(last['prn'])}|{int(last['rot'])}|"
+                               f"{last['platform']}|{last['id']}")
+            for row in rows:
+                row.pop("sort_key", None)
+                row.pop("prn", None)
+                row.pop("rot", None)
+                self._decode_row(row)
+            return rows, next_cursor
+
         sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
                f"m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, "
                f"m.note AS mark_note "
@@ -518,12 +599,17 @@ class Store:
         # 收藏时刻与备注：右栏「稍后再看」按时间排，也能显示那句「为什么留」
         row["saved_at"] = int(row.pop("mark_saved_at", 0) or 0)
         row["note"] = str(row.pop("mark_note", "") or "")
+        # 收藏夹是另一张表：favorited 与 note 互不干扰
+        row["favorited"] = bool(row.pop("fav_at", 0) or 0)
+        row["favorite_note"] = str(row.pop("fav_note", "") or "")
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(
             "SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
-            "m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, m.note AS mark_note "
-            "FROM items i LEFT JOIN item_marks m ON m.item_id = i.id WHERE i.id = ?",
+            "m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, m.note AS mark_note, "
+            "f.created_at AS fav_at, f.note AS fav_note "
+            "FROM items i LEFT JOIN item_marks m ON m.item_id = i.id "
+            "LEFT JOIN item_favorites f ON f.item_id = i.id WHERE i.id = ?",
             (item_id,)).fetchone()
         if row is None:
             return None

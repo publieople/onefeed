@@ -16,6 +16,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -143,7 +144,23 @@ def status() -> dict[str, Any]:
     }
 
 
-def _post(provider: dict[str, Any], messages: list[dict[str, str]],
+def _reasoning_hint(provider: dict[str, Any]) -> dict[str, Any]:
+    """给推理型模型降思考档位。
+
+    MiniMax-M3 系默认会把 max_tokens 全花在思维链上：实测 3 张图 + 2200 tokens
+    跑了 14.8 秒、381 段 reasoning、正文 0 字。加上 reasoning_effort=low 后
+    4.1 秒出正文。别的网关不认这个字段（会 400），所以只对确知的端点加。
+    """
+    explicit = str(provider.get("reasoning_effort") or "").strip()
+    if explicit:
+        return {"reasoning_effort": explicit}
+    host = (urllib.parse.urlparse(str(provider.get("base_url") or "")).hostname or "").lower()
+    if "minimaxi" in host or "minimax" in host:
+        return {"reasoning_effort": "low"}
+    return {}
+
+
+def _post(provider: dict[str, Any], messages: list[dict[str, Any]],
           max_tokens: int = 300, temperature: float = 0.2) -> str:
     if not provider.get("key"):
         raise RuntimeError("没有配置模型 key")
@@ -153,6 +170,7 @@ def _post(provider: dict[str, Any], messages: list[dict[str, str]],
         "temperature": temperature,
         "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
+        **_reasoning_hint(provider),
     }).encode("utf-8")
     req = urllib.request.Request(
         str(provider["base_url"]).rstrip("/") + "/chat/completions", data=body, method="POST",
@@ -163,11 +181,11 @@ def _post(provider: dict[str, Any], messages: list[dict[str, str]],
     return str(payload["choices"][0]["message"]["content"])
 
 
-def _chat(provider: dict[str, Any], messages: list[dict[str, str]]) -> str:
+def _chat(provider: dict[str, Any], messages: list[dict[str, Any]]) -> str:
     return _post(provider, messages)
 
 
-def complete(messages: list[dict[str, str]], max_tokens: int = 900,
+def complete(messages: list[dict[str, Any]], max_tokens: int = 900,
              temperature: float = 0.3) -> tuple[str, dict[str, Any]]:
     """要一段长回答（总结用）：按顺序表挨个试，返回原文和命中的那个模型。
 
@@ -191,7 +209,7 @@ def complete(messages: list[dict[str, str]], max_tokens: int = 900,
     raise RuntimeError("、".join(tried) + " 都不可用")
 
 
-def _stream_post(provider: dict[str, Any], messages: list[dict[str, str]],
+def _stream_post(provider: dict[str, Any], messages: list[dict[str, Any]],
                  max_tokens: int = 900, temperature: float = 0.3):
     """逐块读 OpenAI 兼容的 SSE。刻意不传 response_format——要的是一段能边生成边显示的话。"""
     if not provider.get("key"):
@@ -202,6 +220,7 @@ def _stream_post(provider: dict[str, Any], messages: list[dict[str, str]],
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": True,
+        **_reasoning_hint(provider),
     }).encode("utf-8")
     req = urllib.request.Request(
         str(provider["base_url"]).rstrip("/") + "/chat/completions", data=body, method="POST",
@@ -233,7 +252,7 @@ def _stream_post(provider: dict[str, Any], messages: list[dict[str, str]],
                 yield "content", str(piece)
 
 
-def stream_complete(messages: list[dict[str, str]], max_tokens: int = 900,
+def stream_complete(messages: list[dict[str, Any]], max_tokens: int = 900,
                     temperature: float = 0.3):
     """逐块要一段长回答，yield (种类, 文本块, provider)。种类是 "content" 或 "thinking"。
 
@@ -369,7 +388,7 @@ def _is_refine(message: str) -> bool:
     return not _REFINE_NOISE.sub("", message).strip()
 
 
-def _previous_plan(history: list[dict[str, str]] | None) -> dict[str, Any] | None:
+def _previous_plan(history: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """从历史里捞上一轮的检索计划：前端会把它挂在 assistant 那条上。"""
     for turn in reversed(history or []):
         raw = turn.get("plan")
@@ -385,7 +404,7 @@ def _previous_plan(history: list[dict[str, str]] | None) -> dict[str, Any] | Non
     return None
 
 
-def _rule_plan(message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
+def _rule_plan(message: str, history: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     parsed = smart.parse_query(message)
     lowered = message.lower()
     mode = "browse" if re.search(r"随便|换一批|无聊|刷刷|刷一刷|来点|换着|别老|都来点|随机", lowered) else "find"
@@ -432,7 +451,7 @@ def _rule_plan(message: str, history: list[dict[str, str]] | None = None) -> dic
     return out
 
 
-def plan(message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
+def plan(message: str, history: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """一句话 -> 检索计划。模型不可用时静默落回规则，绝不把错误抛给用户。"""
     message = (message or "").strip()[:200]
     if not message:
@@ -441,7 +460,7 @@ def plan(message: str, history: list[dict[str, str]] | None = None) -> dict[str,
     fallback = _rule_plan(message, history)
     if not chain:
         return fallback
-    messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for turn in (history or [])[-MAX_HISTORY:]:
         role = "user" if turn.get("role") == "user" else "assistant"
         content = str(turn.get("text") or turn.get("content") or "")[:200]
@@ -547,7 +566,7 @@ def _decorate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def chat(store, message: str, history: list[dict[str, str]] | None = None,
+def chat(store, message: str, history: list[dict[str, Any]] | None = None,
          limit: int = 12, exclude: list[str] | None = None) -> dict[str, Any]:
     """一句话找内容。优先走 agent（能自己搜、看结果、换词），失败静默退回旧路径。"""
     conf = settings_mod.load()
@@ -568,7 +587,7 @@ def chat(store, message: str, history: list[dict[str, str]] | None = None,
     return _chat_legacy(store, message, history=history, limit=limit, exclude=exclude)
 
 
-def _chat_legacy(store, message: str, history: list[dict[str, str]] | None = None,
+def _chat_legacy(store, message: str, history: list[dict[str, Any]] | None = None,
                  limit: int = 12, exclude: list[str] | None = None) -> dict[str, Any]:
     pl = plan(message, history)
     kind = pl["kinds"][0] if pl["kinds"] else None

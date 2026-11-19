@@ -35,6 +35,9 @@ DEFAULTS: dict[str, Any] = {
     # 多模型顺序表：按顺序试，前一个超时 / 报错 / 额度用光就换下一个。
     # 留空时退回上面那组单模型字段（兼容旧配置）。
     "ai_providers": [],
+    # 读图总结：图文笔记 / 视频封面会作为图片喂给多模态模型。
+    # 关掉能省钱、也能避开不支持视觉的网关。
+    "vision_summary": True,
     # Agent 化：模型拿工具自己搜、看结果、换词，而不是一次 JSON 计划 + 盲目 LIKE。
     # 出问题一键关掉就退回旧路径；ONEFEED_AI_AGENT=0 也能关（环境变量优先）。
     "ai_agent": True,
@@ -170,6 +173,12 @@ def validate(patch: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, bool):
             raise ValueError("auto_update 必须是 true / false")
         out["auto_update"] = value
+
+    if "vision_summary" in patch:
+        value = patch["vision_summary"]
+        if not isinstance(value, bool):
+            raise ValueError("vision_summary 必须是 true / false")
+        out["vision_summary"] = value
 
     if "default_sort" in patch:
         value = str(patch["default_sort"] or "")

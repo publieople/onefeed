@@ -80,6 +80,100 @@ def _host_allowed(host: str, patterns: list[str]) -> bool:
     return False
 
 
+IMAGE_CACHE_TTL = 6 * 3600      # 图片字节缓存 6 小时：签名直链会过期，重取一次比整条总结失败划算
+IMAGE_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _image_cache_dir() -> Path:
+    target = state_root() / "image-cache"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _read_cached_image(key: str) -> tuple[bytes, str] | None:
+    import hashlib
+    import time
+
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
+    path = _image_cache_dir() / (digest + ".bin")
+    try:
+        if not path.is_file():
+            return None
+        if time.time() - path.stat().st_mtime > IMAGE_CACHE_TTL:
+            return None
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    return raw, _sniff_mime(raw)
+
+
+def _write_cached_image(key: str, raw: bytes) -> None:
+    import hashlib
+
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
+    try:
+        (_image_cache_dir() / (digest + ".bin")).write_bytes(raw)
+    except OSError:
+        pass
+
+
+def _sniff_mime(raw: bytes) -> str:
+    """按文件头判断类型：CDN 返回的 Content-Type 经常是 application/octet-stream。"""
+    head = raw[:12]
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if head.startswith(b"\x89PNG"):
+        return "image/png"
+    if head.startswith(b"GIF8"):
+        return "image/gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
+def fetch_image(url: str, referer: str = "", plugin_id: str = "",
+                cache_key: str = "") -> tuple[bytes, str] | None:
+    """取一张图并缓存字节。失败返回 None——少一张图不该让整条总结失败。"""
+    key = cache_key or url
+    cached = _read_cached_image(key)
+    if cached:
+        return cached
+    cookie = cookie_header(plugin_id) if plugin_id else ""
+    for attempt in range(2):
+        status, _headers, resp = open_stream(url, referer=referer, cookie=cookie)
+        try:
+            raw = resp.read(IMAGE_MAX_BYTES)
+        except Exception:  # noqa: BLE001 - 网络抖动按失败处理
+            raw = b""
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+        if status < 400 and raw:
+            mime = _sniff_mime(raw)
+            if mime.startswith("image/"):
+                _write_cached_image(key, raw)
+                return raw, mime
+        # 第一次失败多半是签名过期；调用方会先把 detail 刷新一遍再传新 URL，这里只重试一次
+        if attempt == 0:
+            continue
+        break
+    return None
+
+
+def read_slot_image(item_id: str, slot: str, detail: dict[str, Any],
+                    plugin_id: str) -> tuple[bytes, str] | None:
+    """按 slot 取图：img-N 走详情里的 images，poster 走 media.poster。"""
+    target = resolve_slot(detail, slot)
+    if not target:
+        return None
+    return fetch_image(target["url"], referer=target.get("referer", ""),
+                       plugin_id=plugin_id, cache_key=item_id + ":" + slot)
+
+
 def cookie_header(plugin_id: str) -> str:
     """读宿主持有的 cookie（插件自己永远看不到），拼成 Cookie 头。"""
     path = state_root() / "cookies" / (plugin_id + ".json")
