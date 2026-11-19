@@ -34,6 +34,11 @@ export default function AgentConsole({
   onAnswer,
 }: Props) {
   const plan = events.find((event) => event.kind === "plan");
+  // 正在等用户回答时，底部不该再说「下一步…」——下一步是用户
+  const openAsk = events
+    .filter((event) => event.kind === "need_answer")
+    .filter((event) => answeredAsk[String(event.data.ask_id)] === undefined)
+    .pop();
   const steps: string[] = Array.isArray(plan?.data?.steps) ? plan.data.steps.map(String) : [];
   const rows = events.filter(
     (event) =>
@@ -110,7 +115,7 @@ export default function AgentConsole({
       {running ? (
         <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-fade">
           <span className="h-1 w-1 animate-pulse rounded-full bg-ink/60" />
-          下一步…
+          {openAsk ? "等你选一下，或直接回一句" : "下一步…"}
         </div>
       ) : null}
     </div>
