@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -339,6 +340,59 @@ def main() -> int:
     check(any('"cancelled"' in f for f in frames), "SSE 收尾把 cancelled 帧发出去")
     check(rt.cancel("no-such-run") is False, "不存在的 run 叫停返回 False")
 
+    # 询问工具 + 计划：模型先说打算，再停下来问一句，拿到答复才继续
+    def scripted_ask(messages, info):
+        returned = [p for m in messages for p in getattr(m, "parts", [])
+                    if isinstance(p, ToolReturnPart)]
+        if not returned:
+            return ModelResponse(parts=[
+                ToolCallPart("set_plan", {"steps": ["翻今天 AI 相关", "各写一句总结"]}),
+                ToolCallPart("ask_user", {"question": "要哪个平台？",
+                                          "options": ["B站", "知乎"]})])
+        said = [p.content for p in returned
+                if isinstance(p.content, dict) and p.content.get("answered")]
+        picked = (said[0].get("selected") or ["默认"])[0] if said else "默认"
+        return ModelResponse(parts=[answer_part(info, f"按「{picked}」来。", [])])
+
+    started_a = rt.start(store, "问一句再动手", chain=CHAIN,
+                         model=FunctionModel(scripted_ask), timeout=30)
+    ask_id = ""
+    deadline = time.time() + 10
+    while time.time() < deadline and not ask_id:
+        for ev in store.get_agent_run(started_a["run_id"])["events"]:
+            if ev["kind"] == "need_answer":
+                ask_id = str(ev["data"].get("ask_id") or "")
+        time.sleep(0.05)
+    check(bool(ask_id), "ask_user 发出 need_answer 事件")
+    ask_ev = [e for e in store.get_agent_run(started_a["run_id"])["events"]
+              if e["kind"] == "need_answer"][0]
+    check(ask_ev["data"]["options"] == ["B站", "知乎"], "提问带选项")
+    plan_ev = [e for e in store.get_agent_run(started_a["run_id"])["events"]
+               if e["kind"] == "plan"]
+    check(plan_ev and plan_ev[0]["data"]["steps"][0].startswith("翻今天"),
+          "set_plan 开跑就落成 plan 事件")
+    check(rt.resolve_answer(started_a["run_id"], ask_id, ["知乎"]) is True, "答复能塞回等待中那轮")
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        row_a = store.get_agent_run(started_a["run_id"], steps=False)
+        if row_a and row_a["status"] != "running":
+            break
+        time.sleep(0.05)
+    row_a = store.get_agent_run(started_a["run_id"])
+    done_a = [e for e in row_a["events"] if e["kind"] == "done"]
+    check(row_a["status"] == "done" and bool(done_a), "问到答复后跑完")
+    check("知乎" in (done_a[0]["data"].get("reply") or ""), "模型按用户选的选项执行")
+    check(done_a[0]["data"].get("plan_steps") == ["翻今天 AI 相关", "各写一句总结"],
+          "done 里带回计划清单（回放也能显示）")
+    check(rt.resolve_answer("no-such-run", ask_id, ["B站"]) is False,
+          "不存在的 run 答复返回 False")
+
+    # 会话：一轮 run 就是一段线程里的一个问答对
+    threads = store.recent_threads(limit=10)
+    check(bool(threads) and threads[0]["runs"] >= 1, "recent_threads 能列出会话与轮数")
+    runs_in_thread = store.thread_runs(threads[0]["id"])
+    check(bool(runs_in_thread) and "input" in runs_in_thread[0], "thread_runs 给问答对")
+
     # ---------------------------------------------------------------- 4) HTTP
     settings_mod.save({"ai_agent": True})
     client = TestClient(create_app(store))
@@ -362,6 +416,19 @@ def main() -> int:
     check(resp.status_code == 404, "不存在的 confirm 被拒")
     resp = client.get("/api/agent/runs")
     check(resp.status_code == 200 and resp.json()["count"] >= 1, "GET /agent/runs 列表")
+    resp = client.get("/api/agent/threads")
+    check(resp.status_code == 200 and resp.json()["count"] >= 1, "GET /agent/threads 会话列表")
+    resp = client.get(f"/api/agent/threads/{threads[0]['id']}")
+    check(resp.status_code == 200 and resp.json()["count"] >= 1,
+          "GET /agent/threads/{id} 能回放问答")
+    resp = client.post("/api/agent/save", json={"id": "bilibili:ai1", "on": True})
+    check(resp.status_code == 200 and resp.json()["saved"] is True,
+          "POST /agent/save 不经模型收藏")
+    resp = client.post("/api/agent/save", json={"id": "bilibili:ai1", "on": False})
+    check(resp.json()["saved"] is False, "POST /agent/save 能取消")
+    resp = client.post(f"/api/agent/runs/{res['run_id']}/answer",
+                       json={"ask_id": "nope", "selected": ["B站"]})
+    check(resp.status_code == 404, "不存在的 ask_id 被拒")
 
     # 关掉开关 → 409，且不 import pydantic_ai 也照样回 409（这里已经 import 过了，看状态码）
     settings_mod.save({"ai_agent": False})

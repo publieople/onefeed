@@ -44,7 +44,13 @@ INSTRUCTIONS = """你是 OneFeed 的助手，能操作这个应用，不只是�
    → 紧接着 export_markdown。中间不要再搜一遍、不要再刷新采集；回报里给出文件路径即可，
    别把正文念一遍。总结失败或某条没正文时，说清是哪条没成，不要编内容。
 9. 用户没明说「刷新 / 更新 / 再抓一次」，就不要调 refresh_feed：它会等确认、耽误几十秒。
-   检索结果不够时，先换词、放宽条件，或在 reply 里说明。"""
+   检索结果不够时，先换词、放宽条件，或在 reply 里说明。
+10. 一句话里有多个方向要做时，先调 set_plan 把步骤摊开（3-5 条短句，用「动词 + 对象」，
+   例：「翻今天 AI 相关」「各写一句总结」），再一条条做。只做一件事就别调。
+11. 只有这两种情况才 ask_user：① 平台 / 时间 / 条数这几个关键条件都说得通、猜错要重跑；
+   ② 想顺手做个用户没要求的事（例如顺手收藏、顺手导出）。一个问题 2-5 个选项，能点就别让人打字。
+   一轮最多问 2 次；能自己判断的（用户说了「随便」「你看着办」）就别问。
+12. 用户回的是选项文字或一句话，直接按它执行；不要复述问卷。"""
 
 
 # ---------------------------------------------------------------- 运行状态
@@ -57,6 +63,8 @@ class RunState:
     started: float = field(default_factory=time.time)
     pending: dict[str, threading.Event] = field(default_factory=dict)
     decisions: dict[str, bool] = field(default_factory=dict)
+    answers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    plan_steps: list[str] = field(default_factory=list)
 
 
 class Cancelled(Exception):
@@ -88,6 +96,21 @@ def resolve_confirm(run_id: str, confirm_id: str, allow: bool) -> bool:
         return False
     state.decisions[confirm_id] = bool(allow)
     event = state.pending.get(confirm_id)
+    if event is None:
+        return False
+    event.set()
+    return True
+
+
+def resolve_answer(run_id: str, ask_id: str, selected: list[str],
+                   text: str = "") -> bool:
+    """用户回了 Agent 的问题：把答案塞回等待中的那一轮。"""
+    state = get_state(run_id)
+    if state is None:
+        return False
+    state.answers[ask_id] = {"selected": [str(x) for x in selected if str(x).strip()],
+                             "text": str(text or "")[:500]}
+    event = state.pending.get(ask_id)
     if event is None:
         return False
     event.set()
@@ -199,6 +222,9 @@ def _run_action(deps: Deps, writer: EventWriter, name: str,
     # 每次动作前看一眼停止位：模型一次会连发好几个工具调用，这里是最密的检查点
     if writer.state.cancel:
         raise Cancelled("cancelled")
+    # set_plan 只是把打算说出来，不碰数据也不算预算：开局就该先看到它
+    if name == "set_plan":
+        return _take_plan(writer, args)
     # 模型会并发发多个工具调用；预算判断与计数必须在锁里，否则会同时超限、提示两遍
     with _ACTION_LOCK:
         over = deps.calls >= deps.max_tool_calls
@@ -232,7 +258,10 @@ def _run_action(deps: Deps, writer: EventWriter, name: str,
     writer.emit("step", name, {"title": _title_for(name, args), "kind": "tool",
                                "detail": preview})
     try:
-        result = act_mod.call(deps.ctx, name, args)
+        if name == "ask_user":
+            result = _await_answer(deps, writer, args)
+        else:
+            result = act_mod.call(deps.ctx, name, args)
     except act_mod.ConfirmRequired as need:
         _await_confirm(deps, writer, need)
         return {"ok": False, "error": f"用户没允许 {need.action}，用现有数据继续"}
@@ -284,10 +313,63 @@ def _title_for(name: str, args: dict[str, Any]) -> str:
     if name == "summarize_batch":
         count = len(args.get("ids") or [])
         return f"批量总结 {count} 条"
+    if name == "ask_user":
+        return "问你一句"
+    if name == "set_plan":
+        return "先说打算怎么做"
     if name == "export_markdown":
         title = str(args.get("title") or "").strip()
         return f"导出 md{('「' + title + '」') if title else ''}"
     return name
+
+
+def _take_plan(writer: EventWriter, args: dict[str, Any]) -> dict[str, Any]:
+    """模型自己说要走几步。落成 plan 事件：前端一开跑就能列出清单，而不是等收尾。"""
+    steps = [str(s).strip() for s in (args.get("steps") or []) if str(s).strip()][:6]
+    if not steps:
+        return {"ok": False, "error": "steps 不能为空，写 3-5 条短句"}
+    writer.state.plan_steps = steps
+    writer.emit("plan", "plan", {"steps": steps})
+    return {"ok": True, "steps": steps,
+            "note": "计划已展示给用户；照着做，做完在 reply 里对一下"}
+
+
+def _await_answer(deps: Deps, writer: EventWriter, args: dict[str, Any],
+                  timeout: float = 120.0) -> dict[str, Any]:
+    """问用户一句，阻塞等答复。
+
+    和 L3 确认走同一套等待回路（pending 事件表 + 停止位），区别只在
+    「是/否」换成了选项 / 自由文本——所以点停止、断线超时都能干净地退出。
+    """
+    state = writer.state
+    if state.cancel:
+        raise Cancelled("cancelled")
+    question = str(args.get("question") or "").strip()[:200]
+    if not question:
+        return {"ok": False, "error": "question 不能为空"}
+    options = [str(o).strip()[:40] for o in (args.get("options") or []) if str(o).strip()][:5]
+    ask_id = uuid.uuid4().hex[:12]
+    event = threading.Event()
+    state.pending[ask_id] = event
+    writer.emit("need_answer", "ask_user", {
+        "ask_id": ask_id, "question": question, "options": options,
+        "multi": bool(args.get("multi", False)),
+        "allow_free": bool(args.get("allow_free", True))})
+    wait = timeout
+    if deps.deadline:
+        wait = max(5.0, min(timeout, deps.deadline - time.time() - 10.0))
+    event.wait(wait)
+    state.pending.pop(ask_id, None)
+    if state.cancel:
+        raise Cancelled("cancelled")
+    answer = state.answers.pop(ask_id, None)
+    if not answer:
+        writer.emit("step", "ask_timeout", {"title": "没等到回答，先按最合理的猜", "kind": "note"})
+        return {"ok": False, "answered": False,
+                "error": "用户没回（可能只是暂时离开）。按最合理的默认继续，并在 reply 里说一句你假设了什么。"}
+    picked = answer.get("selected") or []
+    text = answer.get("text") or ""
+    return {"ok": True, "answered": True, "selected": picked, "text": text}
 
 
 def _await_confirm(deps: Deps, writer: EventWriter, need: act_mod.ConfirmRequired,
@@ -326,6 +408,19 @@ def _await_confirm(deps: Deps, writer: EventWriter, need: act_mod.ConfirmRequire
 def build_agent(model: Any, deps: Deps, writer: EventWriter, max_tools: int) -> Any:
     agent = Agent(model, output_type=Answer, deps_type=Deps, instructions=INSTRUCTIONS,
                   model_settings={"temperature": 0.2})
+
+    @agent.tool
+    def set_plan(ctx: RunContext[Deps], steps: list[str]) -> dict[str, Any]:
+        """动手前先把打算做几步摊给用户看（3-5 条短句）。用户会立刻看到清单。"""
+        return _run_action(deps, writer, "set_plan", {"steps": steps})
+
+    @agent.tool
+    def ask_user(ctx: RunContext[Deps], question: str, options: list[str] | None = None,
+                 multi: bool = False, allow_free: bool = True) -> dict[str, Any]:
+        """拿不准时问用户一句（选项 2-5 个）。这一轮会暂停，等用户点选或打字。"""
+        return _run_action(deps, writer, "ask_user", {
+            "question": question, "options": options,
+            "multi": multi, "allow_free": allow_free})
 
     @agent.tool
     def search_items(ctx: RunContext[Deps], terms: list[str] | None = None,
@@ -568,6 +663,7 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
     payload = {"reply": reply, "items": items, "plan": plan,
                "suggestions": suggestions, "understood": understood,
                "provider": provider, "actions": deps.applied,
+               "plan_steps": list(state.plan_steps),
                "usage": {"steps": deps.calls, "ms": ms, "tokens": tokens}}
     if cancelled:
         writer.emit("step", "stop", {"title": "已按你的要求停下", "kind": "note"})

@@ -531,9 +531,16 @@ export default function ItemPage() {
     const from = (location.state as { from?: string } | null)?.from || "/";
     runNav("back", () => navigate(from, { state: { vt: true, back: 1, fromId: item?.id } }));
   };
-  // 悬停预取过就直接拿它垫首屏：转场把卡片放大成页面的那 0.42s 里，
-  // 页面已经是有内容的了，而不是一张正在转圈的骨架屏。
-  const [data, setData] = useState<ItemResponse | null>(() => peekItem(id)?.item ?? null);
+  // 首屏垫底优先级：点卡片带过来的数据 > 悬停预取 > 空（骨架屏）。
+  // 带过来的那份最关键：转场那 0.42s 里页面必须已经有媒体框和标题，
+  // 否则新快照没有共享元素可以接，动画就退化成整页淡出——「只有打开过的卡片才有动效」就是这么来的。
+  const seedItem = (location.state as { item?: FeedItem } | null)?.item ?? null;
+  const seedData = (): ItemResponse | null => {
+    const cached = peekItem(id)?.item;
+    if (cached) return cached;
+    return seedItem ? { item: seedItem, siblings: [] } : null;
+  };
+  const [data, setData] = useState<ItemResponse | null>(seedData);
   const [itemError, setItemError] = useState("");
   const [detail, setDetail] = useState<DetailResponse | null>(() => peekItem(id)?.detail ?? null);
   const [detailLoading, setDetailLoading] = useState(() => !peekItem(id)?.detail);
@@ -555,7 +562,7 @@ export default function ItemPage() {
   useEffect(() => {
     if (!id) return;
     let alive = true;
-    setData(peekItem(id)?.item ?? null);
+    setData(seedData());
     setItemError("");
     getJSON<ItemResponse>("/api/item/" + encodeURIComponent(id))
       .then((d) => {
@@ -619,10 +626,27 @@ export default function ItemPage() {
   const summaryStop = useRef<(() => void) | null>(null);
   const streamStart = useRef(0);
   const [streamRaw, setStreamRaw] = useState("");
+  /** 打字机已经铺出去的那一段。delta 是一次到达的，直接塞进 DOM 就是「一亮就是整篇」。 */
+  const [shownRaw, setShownRaw] = useState("");
+  const shownCount = useRef(0);
+  const typeTimer = useRef<number | null>(null);
+  const rawRef = useRef("");
+  /** done 已经到达但字还没铺完的正稿：铺完再换上，不然会凭空跳成整篇 */
+  const pendingSummary = useRef<SummaryResponse | null>(null);
   const [streaming, setStreaming] = useState(false);
   /** thinking = 模型在通读素材还没吐正文；writing = 已经在出字 */
   const [streamPhase, setStreamPhase] = useState<"thinking" | "writing" | "">("");
   const [streamSeconds, setStreamSeconds] = useState(0);
+
+  /* 打字机铺完最后一段时，把等着的正稿换上去。
+     直接一点就换会让版面从半篇跳成整篇，比慢更难受。 */
+  const promoteSummary = useCallback(() => {
+    const pending = pendingSummary.current;
+    if (!pending) return;
+    pendingSummary.current = null;
+    setSummary(pending);
+    setStreaming(false);
+  }, []);
 
   const loadSummary = useCallback((targetId: string, refresh: boolean) => {
     summaryStop.current?.();
@@ -630,6 +654,10 @@ export default function ItemPage() {
     setSummaryError("");
     setSummaryLoading(true);
     setStreamRaw("");
+    setShownRaw("");
+    shownCount.current = 0;
+    rawRef.current = "";
+    pendingSummary.current = null;
     setStreamPhase("");
     setStreamSeconds(0);
     setStreaming(true);
@@ -641,13 +669,16 @@ export default function ItemPage() {
       onDelta: (text) => {
         if (!summaryAlive.current) return;
         setStreamPhase("writing");
-        setStreamRaw((prev) => prev + text);
+        // 同步写缓冲：delta 与 done 可能在同一轮事件里到达，onDone 要用最新长度判断
+        rawRef.current += text;
+        setStreamRaw(rawRef.current);
       },
       onDone: (payload) => {
         if (!summaryAlive.current) return;
-        setSummary({ ok: true, summary: payload });
+        pendingSummary.current = { ok: true, summary: payload };
         setSummaryLoading(false);
-        setStreaming(false);
+        // 已经铺完了就立刻收；还有字没铺完，留给打字机收尾
+        if (shownCount.current >= rawRef.current.length) promoteSummary();
       },
       onError: (message) => {
         if (!summaryAlive.current) return;
@@ -673,6 +704,48 @@ export default function ItemPage() {
     summaryAlive.current = true;
     loadSummary(id, true);
   }, [id, loadSummary]);
+
+  /* delta 一次到达就是几十上百字，直接渲染等于「等几秒然后整篇弹出」。
+     按字数匀速铺开：至少 56 字/秒，积压超过 1.2 秒的量就自动提速追平，
+     既看得出在写，又不会让长文比模型还慢。用 setInterval 而不是 rAF —
+     标签页不可见时 rAF 会被节流到近乎停摆，字就卡在半截。 */
+  useEffect(() => {
+    rawRef.current = streamRaw;
+    if (typeTimer.current !== null) return;
+    if (shownCount.current >= streamRaw.length) return;
+    let last = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const tick = () => {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const dt = Math.max(0.016, Math.min(0.6, (now - last) / 1000));
+      last = now;
+      const target = rawRef.current;
+      let n = shownCount.current;
+      if (n < target.length) {
+        const backlog = target.length - n;
+        const rate = Math.max(60, backlog / 1.6);
+        n = Math.min(target.length, n + Math.max(1, Math.round(rate * dt)));
+        shownCount.current = n;
+        setShownRaw(target.slice(0, n));
+      }
+      if (n >= rawRef.current.length && typeTimer.current !== null) {
+        window.clearInterval(typeTimer.current);
+        typeTimer.current = null;
+        // 字铺完了：done 早就到的话，现在才换正稿
+        promoteSummary();
+      }
+    };
+    typeTimer.current = window.setInterval(tick, 50);
+  }, [streamRaw, promoteSummary]);
+
+  useEffect(
+    () => () => {
+      if (typeTimer.current !== null) {
+        window.clearInterval(typeTimer.current);
+        typeTimer.current = null;
+      }
+    },
+    [],
+  );
 
   /* 等待秒数要走字：模型先想七八秒才开口，有个数字在动，用户才知道没卡死 */
   useEffect(() => {
@@ -924,7 +997,7 @@ export default function ItemPage() {
           data={summary}
           loading={summaryLoading}
           error={summaryError}
-          streamRaw={streamRaw}
+          streamRaw={shownRaw}
           streaming={streaming}
           phase={streamPhase}
           seconds={streamSeconds}

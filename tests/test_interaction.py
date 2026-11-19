@@ -32,6 +32,7 @@ HELP = read("components", "ShortcutHelp.tsx")
 SETTINGS = read("pages", "SettingsPage.tsx")
 MARKET = read("pages", "MarketPage.tsx")
 PROVIDERS = read("components", "AiProviders.tsx")
+CONSOLE = read("components", "AgentConsole.tsx")
 
 CASES = []
 
@@ -43,9 +44,10 @@ def case(fn):
 
 @case
 def test_global_scope_survives_list() -> None:
-    # 列表压栈时全局键（? / t / r / ⌘K）必须还能用
+    # 列表压栈时全局键（? / t / r / ⌘⇧K）必须还能用
+    # 注意不能再用 mod+k：Chrome 的地址栏搜索把它占了，页面收不到
     assert 'scope === "global" ? top === "dialog" : top !== scope' in HOTKEYS
-    for key in ('"/"', '"mod+k"', '"?"', "t:", "r:"):
+    for key in ('"/"', '"mod+shift+k"', '"?"', "t:", "r:"):
         assert key in APP, "App 全局快捷键缺 " + key
     assert "pushScope" in APP and "ShortcutHelp" in APP
 
@@ -132,8 +134,27 @@ def test_list_keyboard_model() -> None:
 
 
 @case
+def test_ask_user_answer_round_trip() -> None:
+    # 单选：点一下就算答完，别再让用户找第二次「就这个」
+    assert 'send([option], "")' in CONSOLE
+    # 答过的提问不能在新一轮开始时变回可点（历史里的选项会重新亮起来）
+    assert "setAnsweredAsk({})" not in DOCK
+    assert "answeredAsk" in DOCK and "onAnswer" in DOCK
+
+
+@case
+def test_threads_are_resumable_and_saved() -> None:
+    # 线程跟页面刷新走：同一段对话才能接着说
+    assert "onefeed.agent.thread" in DOCK
+    assert "开一段新的" in DOCK
+    assert "listThreads" in DOCK and "getThread" in DOCK
+    # 结果卡片带收藏入口（后端 item_marks，不经模型）
+    assert "agentSave" in DOCK and 'aria-pressed={saved}' in DOCK
+
+
+@case
 def test_shortcut_help_is_the_single_source() -> None:
-    for key in ("/ 或 ⌘K", "Esc", "?", "j / k", "← / →"):
+    for key in ("/", "⌘ / Ctrl + Shift + K", "Esc", "?", "j / k", "← / →"):
         assert key in HELP, "快捷键表里没写 " + key
 
 

@@ -154,6 +154,19 @@ def _p(type_: str, desc: str, **extra: Any) -> dict[str, Any]:
     return {"type": type_, "desc": desc, **extra}
 
 
+# 两个不进 REGISTRY 的「对话动作」：它们不碰数据，只跟用户打交道。
+# 放在运行器里（要阻塞等待事件），但设置页的「Agent 能做什么」也该看得见。
+TALK_ACTIONS = [
+    {"name": "set_plan", "level": L1, "summary": "动手前先把打算做几步摊给用户看",
+     "params": {"steps": _p("list", "步骤清单，3-5 条短句")}},
+    {"name": "ask_user", "level": L1, "summary": "关键条件拿不准时问一句，等用户点选或打字",
+     "params": {"question": _p("str", "一句话问题"),
+                "options": _p("list", "2-5 个选项，能点就不用打字"),
+                "multi": _p("bool", "能不能多选"),
+                "allow_free": _p("bool", "允不允许自由输入，默认允许")}},
+]
+
+
 def catalog(level: str | None = None) -> list[dict[str, Any]]:
     out = []
     for act in REGISTRY.values():
@@ -161,6 +174,10 @@ def catalog(level: str | None = None) -> list[dict[str, Any]]:
             continue
         out.append({"name": act.name, "level": act.level, "summary": act.summary,
                     "params": act.params})
+    for act in TALK_ACTIONS:
+        if level and act["level"] != level:
+            continue
+        out.append(dict(act))
     return out
 
 

@@ -299,6 +299,51 @@ def agent_run_confirm(request: Request, run_id: str,
     return {"ok": True, "allow": bool(payload.get("allow"))}
 
 
+@router.post("/agent/runs/{run_id}/answer")
+def agent_run_answer(request: Request, run_id: str,
+                     payload: dict[str, Any] = Body(default={})) -> dict:
+    """用户回答 Agent 的提问：选项 + 可选自由文本，一起塞回等待中的那一轮。"""
+    ask_id = str(payload.get("ask_id") or "")
+    if not ask_id:
+        raise HTTPException(status_code=400, detail={"code": "no_ask",
+                                                     "message": "缺 ask_id"})
+    selected = payload.get("selected")
+    ok = _agent_runtime().resolve_answer(
+        run_id, ask_id,
+        [str(x) for x in selected] if isinstance(selected, list) else [],
+        str(payload.get("text") or ""))
+    if not ok:
+        raise HTTPException(status_code=404, detail={"code": "ask_expired",
+                                                     "message": "这条提问已经收尾了"})
+    return {"ok": True}
+
+
+@router.get("/agent/threads")
+def agent_threads(request: Request, limit: int = Query(20, ge=1, le=100)) -> dict:
+    """会话列表：侧栏「最近」用。"""
+    threads = _store(request).recent_threads(limit=limit)
+    return {"threads": threads, "count": len(threads)}
+
+
+@router.get("/agent/threads/{thread_id}")
+def agent_thread(request: Request, thread_id: str, limit: int = Query(40, ge=1, le=100)) -> dict:
+    """一段对话的完整问答对：点开就能接着聊，不用重放事件。"""
+    store = _store(request)
+    runs = store.thread_runs(thread_id, limit=limit)
+    return {"thread_id": thread_id, "runs": runs, "count": len(runs)}
+
+
+@router.post("/agent/save")
+def agent_save(request: Request, payload: dict[str, Any] = Body(default={})) -> dict:
+    """卡片 / 结果列表上的收藏按钮（不经过模型）。"""
+    item_id = str(payload.get("id") or "").strip()
+    if not item_id:
+        raise HTTPException(status_code=400, detail={"code": "no_id", "message": "缺 id"})
+    on = bool(payload.get("on", True))
+    mark = _store(request).mark_item(item_id, saved=on)
+    return {"ok": True, "id": item_id, "saved": bool(mark.get("saved"))}
+
+
 @router.post("/agent/runs/{run_id}/cancel")
 def agent_run_cancel(request: Request, run_id: str) -> dict:
     """置停止位，交给跑着的那条线程自己收尾（它会写 cancelled 事件并落库）。
@@ -468,6 +513,34 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
     return payload
 
 
+def _cache_chunks(payload: dict, size: int = 18) -> list[str]:
+    """把已缓存的结构化小结拼回行协议文本，切块后逐块发。
+
+    行协议与 summary_mod.stream_build 的正文格式保持一致：tldr 一行、要点一行一条、
+    备注一行。前端 parseStreamText 就是按这个解，缓存命中和新生成才会长得一样。
+    """
+    lines: list[str] = []
+    tldr = str(payload.get("tldr") or "").strip()
+    if tldr:
+        lines.append("TLDR: " + tldr)
+    for point in payload.get("points") or []:
+        if not isinstance(point, dict):
+            continue
+        text = str(point.get("text") or "").strip()
+        if not text:
+            continue
+        at = point.get("t")
+        prefix = ""
+        if isinstance(at, (int, float)) and at >= 0:
+            prefix = f"[{int(at) // 60}:{int(at) % 60:02d}] "
+        lines.append("- " + prefix + text)
+    caveat = str(payload.get("caveat") or "").strip()
+    if caveat:
+        lines.append("注意：" + caveat)
+    raw = "\n".join(lines)
+    return [raw[i:i + size] for i in range(0, len(raw), size)] or [""]
+
+
 @router.get("/item/{item_id}/summary")
 def item_summary(request: Request, item_id: str, refresh: bool = Query(False)) -> dict:
     """AI 总结：插件交素材、宿主出摘要，模型不可用时按素材顺序摘原句。"""
@@ -516,7 +589,13 @@ def item_summary_stream(request: Request, item_id: str,
             cached = store.get_summary(item_id)
             if cached and isinstance(cached.get("payload"), dict) \
                     and cached["payload"].get("tldr") is not None:
-                yield _sse({"type": "done", "from_cache": True, "summary": cached["payload"]})
+                payload = cached["payload"]
+                # 缓存命中也要发 delta：只发 done 的话前端那边是「一亮就是整篇」，
+                # 和未缓存条目（逐字出来）观感不一致，用户会以为卡了一下才蹦出来。
+                yield _sse({"type": "status", "phase": "writing"})
+                for chunk in _cache_chunks(payload):
+                    yield _sse({"type": "delta", "text": chunk})
+                yield _sse({"type": "done", "from_cache": True, "summary": payload})
                 return
         try:
             for event in summary_mod.stream_build(store, host, row):

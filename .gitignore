@@ -34,6 +34,7 @@ probes/*.png
 # 设计稿导出物（本地分享用，不进仓库）
 design/guizang/*.pdf
 design/guizang/*.png
+design/review/
 
 # 编辑器
 .vscode/

@@ -1,4 +1,5 @@
-import { Check, Loader2, ShieldAlert, X } from "lucide-react";
+import { Check, ListChecks, Loader2, ShieldAlert, X } from "lucide-react";
+import { useState } from "react";
 import type { AgentEvent } from "../api";
 import { platform } from "../platform";
 
@@ -18,16 +19,49 @@ interface Props {
   /** 已答复的确认，避免重复点 */
   answered?: Record<string, boolean>;
   onConfirm?: (confirmId: string, allow: boolean) => void;
+  /** 客户端回过的提问：ask_id → 选了什么（回放时用来显示结果） */
+  answeredAsk?: Record<string, string[]>;
+  onAnswer?: (askId: string, selected: string[], text: string) => void;
 }
 
-/** 一轮 Agent 的轨迹：想什么、查了什么、动了什么、要你确认什么。 */
-export default function AgentConsole({ events, running, answered = {}, onConfirm }: Props) {
-  const rows = events.filter((event) =>
-    event.kind === "step" || event.kind === "action" || event.kind === "need_confirm" || event.kind === "error",
+/** 一轮 Agent 的轨迹：打算怎么做、想什么、查了什么、动了什么、问你什么。 */
+export default function AgentConsole({
+  events,
+  running,
+  answered = {},
+  onConfirm,
+  answeredAsk = {},
+  onAnswer,
+}: Props) {
+  const plan = events.find((event) => event.kind === "plan");
+  const steps: string[] = Array.isArray(plan?.data?.steps) ? plan.data.steps.map(String) : [];
+  const rows = events.filter(
+    (event) =>
+      event.kind === "step" ||
+      event.kind === "action" ||
+      event.kind === "need_confirm" ||
+      event.kind === "need_answer" ||
+      event.kind === "error",
   );
 
   return (
     <div className="space-y-1.5 rounded-xl border border-line/70 bg-wash/40 px-2.5 py-2">
+      {steps.length ? (
+        <div className="mb-1 space-y-1 border-b border-line/60 pb-1.5">
+          <div className="flex items-center gap-1.5 text-[11.5px] text-muted">
+            <ListChecks size={12} />
+            <span>打算这么做</span>
+          </div>
+          <ol className="space-y-0.5 pl-[18px] text-[11.5px] leading-snug text-ink/85">
+            {steps.map((step, i) => (
+              <li key={i} className="list-decimal">
+                {step}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
       {rows.length === 0 ? (
         <div className="flex items-center gap-1.5 text-[11.5px] text-fade">
           <Loader2 size={11} className="animate-spin" />
@@ -42,6 +76,14 @@ export default function AgentConsole({ events, running, answered = {}, onConfirm
             event={event}
             answered={answered[String(event.data.confirm_id)]}
             onConfirm={onConfirm}
+          />
+        ) : event.kind === "need_answer" ? (
+          <AskRow
+            key={event.seq}
+            event={event}
+            picked={answeredAsk[String(event.data.ask_id)]}
+            running={running}
+            onAnswer={onAnswer}
           />
         ) : event.kind === "error" ? (
           <div key={event.seq} className="text-[11.5px] leading-snug text-[color:var(--warn,#b4432b)]">
@@ -90,6 +132,111 @@ function actionText(event: AgentEvent): string {
   if (event.name === "ui_open_item" && payload.id) return label + " · " + String(payload.id);
   if (event.name === "ui_toast" && payload.text) return label + " · " + String(payload.text);
   return label;
+}
+
+function AskRow({
+  event,
+  picked,
+  running,
+  onAnswer,
+}: {
+  event: AgentEvent;
+  picked?: string[];
+  running?: boolean;
+  onAnswer?: (askId: string, selected: string[], text: string) => void;
+}) {
+  const askId = String(event.data.ask_id ?? "");
+  const options: string[] = Array.isArray(event.data.options)
+    ? event.data.options.map(String)
+    : [];
+  const multi = Boolean(event.data.multi);
+  const allowFree = event.data.allow_free !== false;
+  const settled = picked !== undefined;
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [free, setFree] = useState("");
+  const [sent, setSent] = useState(false);
+
+  const send = (selected: string[], text: string) => {
+    if (sent) return;
+    setSent(true);
+    onAnswer?.(askId, selected, text);
+  };
+
+  const toggle = (option: string) => {
+    if (settled) return;
+    if (!multi) {
+      // 单选一问一答：点一下就算答完，别让用户再找一次「就这个」
+      setChosen([option]);
+      send([option], "");
+      return;
+    }
+    setChosen((prev) =>
+      prev.includes(option) ? prev.filter((x) => x !== option) : [...prev, option],
+    );
+  };
+
+  return (
+    <div className="rounded-lg border border-line bg-paper px-2.5 py-2">
+      <div className="flex items-start gap-1.5 text-[11.5px]">
+        <span className="mt-[3px] h-1.5 w-1.5 shrink-0 rounded-full bg-ink/70" />
+        <span className="min-w-0 text-ink">{String(event.data.question ?? "")}</span>
+      </div>
+
+      {settled ? (
+        <div className="mt-1.5 flex items-center gap-1 text-[11px] text-fade">
+          <Check size={11} />
+          你回了：{picked.length ? picked.join("、") : "（没选）"}
+        </div>
+      ) : (
+        <>
+          {options.length ? (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {options.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => toggle(option)}
+                  aria-pressed={chosen.includes(option)}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                    chosen.includes(option)
+                      ? "border-ink bg-solid text-solid-fg"
+                      : "border-line text-muted hover:border-ink/25 hover:text-ink"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="mt-1.5 flex items-center gap-1.5">
+            {allowFree || !options.length ? (
+              <input
+                value={free}
+                onChange={(e) => setFree(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    send(chosen, free.trim());
+                  }
+                }}
+                aria-label="直接回一句"
+                placeholder={options.length ? "或者直接说" : "回一句"}
+                className="h-7 min-w-0 flex-1 rounded border border-line bg-transparent px-2 text-[11.5px] outline-none placeholder:text-fade focus:border-ink/30"
+              />
+            ) : null}
+            <button
+              type="button"
+              onClick={() => send(chosen, free.trim())}
+              disabled={!chosen.length && !free.trim()}
+              className="shrink-0 rounded-full bg-solid px-2.5 py-1 text-[11px] text-solid-fg disabled:opacity-40"
+            >
+              {running === false ? "回一句" : "就这个"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function ConfirmRow({

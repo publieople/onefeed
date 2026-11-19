@@ -1,9 +1,20 @@
-import { ArrowUp, Loader2, Sparkles, Square, Wand2, X } from "lucide-react";
+import { ArrowUp, History, Loader2, Sparkles, Square, Star, Wand2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import type { AgentEvent, AiResponse, FeedItem } from "../api";
-import { agentCancel, agentConfirm, agentStart, agentStream, aiChat, ApiError } from "../api";
+import type { AgentEvent, AgentThread, AiResponse, FeedItem } from "../api";
+import {
+  agentAnswer,
+  agentCancel,
+  agentConfirm,
+  agentSave,
+  agentStart,
+  agentStream,
+  aiChat,
+  ApiError,
+  getThread,
+  listThreads,
+} from "../api";
 import { platform } from "../platform";
 import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
 import { DUR, EASE, SPRING_SOFT } from "../motion/tokens";
@@ -41,6 +52,34 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
   const [stopping, setStopping] = useState(false);
   const [focused, setFocused] = useState(false);
   const [hintIndex, setHintIndex] = useState(0);
+  /** 回过的提问：ask_id → 选了什么。Agent 停下等答复时要立刻能看到它。 */
+  const [answeredAsk, setAnsweredAsk] = useState<Record<string, string[]>>({});
+  const setThread = (id: string) => {
+    setThreadId(id);
+    try {
+      if (id) localStorage.setItem("onefeed.agent.thread", id);
+      else localStorage.removeItem("onefeed.agent.thread");
+    } catch {
+      /* 隐私模式下存不了就算了，退化成刷新即新对话 */
+    }
+  };
+
+  /** 这一轮挂在哪条会话上：接着上一段聊，模型才知道「再来几条」是接着哪儿 */
+  const [threadId, setThreadId] = useState(() => {
+    // 刷新页面别把「正在聊的这段」丢掉：同一个 thread 才能接着说
+    try {
+      return localStorage.getItem("onefeed.agent.thread") ?? "";
+    } catch {
+      return "";
+    }
+  });
+  /** 结果卡片上的星标（本地乐观更新，后端是 item_marks） */
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [history, setHistory] = useState<{ open: boolean; items: AgentThread[]; loading: boolean }>({
+    open: false,
+    items: [],
+    loading: false,
+  });
   const streamRef = useRef<null | (() => void)>(null);
   const settledRef = useRef(false);
   const cancelledRef = useRef(false);
@@ -99,7 +138,7 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
     return () => window.clearInterval(timer);
   }, [focused, text]);
 
-  // 全局 ⌘K / "/" 由 App 派发，这里只负责展开并聚焦
+  // 全局 "/" 与 ⌘/Ctrl+Shift+K 由 App 派发，这里只负责展开并聚焦
   useEffect(() => {
     const onAsk = () => {
       setOpen(true);
@@ -211,6 +250,8 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
     settledRef.current = false;
     cancelledRef.current = false;
     setAnswered({});
+    // 不回滚 answeredAsk：一轮新对话开始时，上一轮问过的卡片要保持「你回了」
+    // 的收束状态，否则历史里的选项会重新变成可点的。
     setLive({ run_id: runId, events: [] });
     streamRef.current?.();
     streamRef.current = agentStream(
@@ -268,7 +309,8 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
       plan: t.data?.plan,
     }));
     try {
-      const started = await agentStart(said, { exclude, history });
+      const started = await agentStart(said, { exclude, history, thread_id: threadId || undefined });
+      if (started.thread_id) setThread(started.thread_id);
       listen(started.run_id);
     } catch (err) {
       // 后端关掉 Agent 或旧版本没有这条路由：退回一次出计划的老路径
@@ -289,6 +331,70 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
       await agentConfirm(runId, confirmId, allow);
     } catch {
       /* 过期了就按后端拒绝处理，不打扰用户 */
+    }
+  };
+
+  /** 回 Agent 的提问：选选项、或直接说一句，都走这一条路 */
+  const answer = async (askId: string, selected: string[], text: string) => {
+    if (!live) return;
+    const show = selected.length ? selected : text ? [text] : [];
+    setAnsweredAsk((prev) => ({ ...prev, [askId]: show }));
+    try {
+      await agentAnswer(live.run_id, askId, selected, text);
+      inputRef.current?.focus();
+    } catch {
+      say("这条提问已经收尾了，我把这轮留给你，重新说一句就行。");
+    }
+  };
+
+  const toggleSave = async (id: string) => {
+    const on = !saved.has(id);
+    setSaved((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    try {
+      await agentSave(id, on);
+    } catch {
+      setSaved((prev) => {
+        const next = new Set(prev);
+        if (on) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    }
+  };
+
+  const toggleHistory = async () => {
+    const next = !history.open;
+    setHistory((h) => ({ ...h, open: next }));
+    if (!next) return;
+    setHistory((h) => ({ ...h, loading: true }));
+    try {
+      const data = await listThreads(6);
+      setHistory({ open: true, items: data.threads ?? [], loading: false });
+    } catch {
+      setHistory({ open: true, items: [], loading: false });
+    }
+  };
+
+  /** 接着上一段聊：把历史问答铺回面板，再发消息就落进同一条线程 */
+  const resumeThread = async (thread: AgentThread) => {
+    try {
+      const data = await getThread(thread.id);
+      const next: Turn[] = [];
+      for (const run of data.runs ?? []) {
+        if (run.input) next.push({ role: "user", text: run.input });
+        if (run.reply) next.push({ role: "ai", text: run.reply });
+      }
+      setTurns(next);
+      setThread(thread.id);
+      setHistory((h) => ({ ...h, open: false }));
+      setOpen(true);
+    } catch {
+      say("这段对话没读到，稍后再试。");
     }
   };
 
@@ -382,8 +488,17 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                 <Sparkles size={14} className="text-ink" />
                 <span className="text-[13px] font-medium">找内容</span>
                 <button
-                  onClick={close}
+                  onClick={() => void toggleHistory()}
+                  aria-expanded={history.open}
                   className="ml-auto rounded p-1 text-fade transition hover:bg-wash hover:text-ink"
+                  aria-label="最近的对话"
+                  title="最近的对话"
+                >
+                  <History size={15} />
+                </button>
+                <button
+                  onClick={close}
+                    className="rounded p-1 text-fade transition hover:bg-wash hover:text-ink"
                   aria-label="收起"
                   title="收起（Esc）"
                 >
@@ -397,6 +512,44 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                 aria-relevant="additions text"
                 className="min-h-[180px] flex-1 space-y-4 overflow-y-auto px-4 py-4"
               >
+                {history.open ? (
+                  <div className="space-y-1.5 border-b border-line/60 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11.5px] text-fade">
+                        {history.loading
+                          ? "正在翻…"
+                          : history.items.length
+                            ? "接着上一段聊："
+                            : "还没有别的对话。"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTurns([]);
+                          setThread("");
+                          setHistory((h) => ({ ...h, open: false }));
+                          inputRef.current?.focus();
+                        }}
+                        className="ml-auto text-[11px] text-fade underline-offset-2 transition hover:text-ink hover:underline"
+                      >
+                        开一段新的
+                      </button>
+                    </div>
+                    {history.items.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => void resumeThread(item)}
+                        className="flex w-full items-center gap-2 rounded-lg border border-line/70 px-2.5 py-1.5 text-left transition hover:border-ink/20 hover:bg-wash/40"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-[12.5px]">
+                          {item.title || "新对话"}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-fade">{item.runs} 轮</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
                 {turns.length === 0 ? (
                   <div className="space-y-2">
                     <p className="text-[13px] text-muted">你可以直接说要什么，平台、时间、类型都算数。</p>
@@ -452,14 +605,24 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
 
                       {turn.trace?.length ? (
                         <div className="pl-8">
-                          <AgentConsole events={turn.trace} answered={answered} />
+                          <AgentConsole
+                            events={turn.trace}
+                            answered={answered}
+                            answeredAsk={answeredAsk}
+                          />
                         </div>
                       ) : null}
 
                       {turn.data?.items.length ? (
                         <div className="space-y-1.5 pl-8">
                           {turn.data.items.slice(0, 8).map((item) => (
-                            <MiniRow key={item.id} item={item} onOpen={() => onOpenItem(item.id)} />
+                            <MiniRow
+                              key={item.id}
+                              item={item}
+                              saved={saved.has(item.id)}
+                              onToggleSave={() => void toggleSave(item.id)}
+                              onOpen={() => onOpenItem(item.id)}
+                            />
                           ))}
                         </div>
                       ) : null}
@@ -500,6 +663,8 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
                       running
                       answered={answered}
                       onConfirm={confirm}
+                      answeredAsk={answeredAsk}
+                      onAnswer={(askId, selected, free) => void answer(askId, selected, free)}
                     />
                     <div className="flex items-center gap-2 pl-1">
                       <button
@@ -659,13 +824,24 @@ export default function AiDock({ onOpenItem }: { onOpenItem: (id: string) => voi
   );
 }
 
-function MiniRow({ item, onOpen }: { item: FeedItem; onOpen: () => void }) {
+function MiniRow({
+  item,
+  saved,
+  onOpen,
+  onToggleSave,
+}: {
+  item: FeedItem;
+  saved: boolean;
+  onOpen: () => void;
+  onToggleSave: () => void;
+}) {
   const p = platform(item.platform);
   return (
-    <button
-      onClick={onOpen}
-      className="flex w-full items-start gap-2.5 rounded-lg border border-line/70 px-2 py-1.5 text-left transition hover:border-ink/20 hover:bg-wash/40"
-    >
+    <div className="flex w-full items-start gap-1 rounded-lg border border-line/70 transition hover:border-ink/20 hover:bg-wash/40">
+      <button
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 items-start gap-2.5 px-2 py-1.5 text-left"
+      >
       {item.cover ? (
         <img src={item.cover} alt="" loading="lazy" referrerPolicy="no-referrer"
           className="h-12 w-16 shrink-0 rounded object-cover" />
@@ -683,6 +859,19 @@ function MiniRow({ item, onOpen }: { item: FeedItem; onOpen: () => void }) {
           ))}
         </span>
       </span>
-    </button>
+      </button>
+      <button
+        type="button"
+        onClick={onToggleSave}
+        aria-pressed={saved}
+        aria-label={saved ? "取消收藏" : "收藏这条"}
+        title={saved ? "取消收藏" : "收藏"}
+        className={`mr-1 mt-1.5 shrink-0 rounded p-1 transition hover:bg-wash ${
+          saved ? "text-ink" : "text-fade hover:text-ink"
+        }`}
+      >
+        <Star size={13} fill={saved ? "currentColor" : "none"} />
+      </button>
+    </div>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import type { OutletCtx } from "../App";
-import { useFeed } from "../api";
+import { useFeed, type FeedItem } from "../api";
 import AiDock from "../components/AiDock";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
@@ -72,7 +72,7 @@ export default function FeedPage({ ctx }: Props) {
   };
   // 卡片先放大再进详情：把被点的元素作为过渡的那一层。
   // 同时把现在的地址（含筛选条件）交给详情页，返回时才能回到同一屏。
-  const openItem = (id: string, el?: HTMLElement) => {
+  const openItem = (id: string, el?: HTMLElement, seed?: FeedItem) => {
     // 卡片里的媒体框和标题是共享元素的两端：给它们挂上名字，浏览器才知道这两块要「长大」
     const media = el?.querySelector<HTMLElement>('[data-vt="media"]') ?? null;
     const title = el?.querySelector<HTMLElement>('[data-vt="title"]') ?? null;
@@ -80,7 +80,9 @@ export default function FeedPage({ ctx }: Props) {
       "push",
       () => {
         navigate("/item/" + encodeURIComponent(id), {
-          state: { vt: true, from: location.pathname + location.search, fromId: id },
+          // seed：卡片手里已经有这条数据，详情页拿它垫首屏 —— 新快照里立刻就有
+          // 媒体框和标题这两个共享元素，转场才有两端可插值（不然只剩整页淡出）
+          state: { vt: true, from: location.pathname + location.search, fromId: id, item: seed },
         });
         // 进详情从头看；App 的切页滚动对 vt 跳转已让位，这里在快照前滚好
         window.scrollTo({ top: 0, behavior: "auto" });

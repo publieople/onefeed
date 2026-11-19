@@ -628,6 +628,26 @@ class Store:
                 run["events"] = [self._decode_step(dict(r)) for r in events]
         return out
 
+    def recent_threads(self, limit: int = 20) -> list[dict[str, Any]]:
+        """会话列表：一条线 = 一段连续的对话。标题取第一句话，附轮数与最后一次时间。"""
+        limit = max(1, min(int(limit), 100))
+        rows = self.conn.execute(
+            "SELECT t.id, t.title, t.created_at, t.updated_at, "
+            "(SELECT COUNT(*) FROM agent_runs r WHERE r.thread_id = t.id) AS runs, "
+            "(SELECT reply FROM agent_runs r WHERE r.thread_id = t.id AND r.reply != '' "
+            " ORDER BY r.created_at DESC LIMIT 1) AS last_reply "
+            "FROM agent_threads t ORDER BY t.updated_at DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def thread_runs(self, thread_id: str, limit: int = 40) -> list[dict[str, Any]]:
+        """一轮对话里每一问一答：时间正序，方便直接铺成聊天记录。"""
+        limit = max(1, min(int(limit), 100))
+        rows = self.conn.execute(
+            "SELECT id, input, reply, status, steps, ms, error, created_at, finished_at "
+            "FROM agent_runs WHERE thread_id = ? ORDER BY created_at ASC LIMIT ?",
+            (thread_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+
     def get_mark(self, item_id: str) -> dict[str, Any]:
         row = self.conn.execute("SELECT * FROM item_marks WHERE item_id = ?",
                                 (item_id,)).fetchone()

@@ -8,8 +8,10 @@ import { duration, num, timeAgo } from "../format";
 
 interface Props {
   item: FeedItem;
-  /** 一起把被点的卡片元素交出去：跳页时要给里面的媒体框和标题挂共享元素名字 */
-  onOpen: (id: string, el: HTMLElement) => void;
+  /** 一起把被点的卡片元素和自己的数据交出去：转场要给媒体框/标题挂名字，
+      详情页也能拿这条数据垫首屏（不必等接口回来才长出共享元素） */
+  /** onOpen(id, el, item) */
+  onOpen: (id: string, el: HTMLElement, item?: FeedItem) => void;
   /** 从详情页返回时，给目标卡片的媒体框和标题挂上 of-media / of-title，让详情页缩回它的位置 */
   vtNames?: { media?: string | null; title?: string | null };
 }
@@ -235,7 +237,7 @@ export default function Card({ item, onOpen, vtNames }: Props) {
         // 聚合器的核心用法就是一次开一堆标签页，不能因为做了转场就把这条路堵死。
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
-        onOpen(item.id, e.currentTarget);
+        onOpen(item.id, e.currentTarget, item);
       }}
       onPointerEnter={schedulePrefetch}
       onPointerLeave={cancelPrefetch}

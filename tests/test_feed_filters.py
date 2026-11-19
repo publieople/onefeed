@@ -46,7 +46,9 @@ def test_return_keeps_context() -> None:
     # 进详情时把当前地址与卡片 id 带过去
     assert "from: location.pathname + location.search" in FEED, "进详情没带返回地址"
     assert "fromId: id" in FEED, "进详情没带卡片 id，返回时没有落点"
-    assert 'state: { vt: true, from: location.pathname + location.search, fromId: id }' in FEED
+    # 还要把这条卡片的快照带过去，详情首屏才有共享元素（冷卡片也能有转场）
+    assert "item: seed" in FEED, "进详情没带卡片快照，冷卡片转场会退化成整页淡出"
+    assert "fromId: id, item: seed" in FEED
     # 返回后按 id 找卡片并滚回视野
     assert 'data-vt-item="' in FEED and "scrollIntoView" in FEED
     assert "block: \"center\"" in FEED or 'block: "center"' in FEED

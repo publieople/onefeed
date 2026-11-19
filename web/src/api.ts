@@ -292,7 +292,19 @@ export function aiChat(message: string, extra: Record<string, unknown> = {}): Pr
 /** 运行事件：SSE 的每一帧，和回放读的是同一份 */
 export interface AgentEvent {
   seq: number;
-  kind: "run_start" | "step" | "tool" | "action" | "need_confirm" | "delta" | "done" | "error" | string;
+  kind:
+    | "run_start"
+    | "plan"
+    | "step"
+    | "tool"
+    | "action"
+    | "need_confirm"
+    | "need_answer"
+    | "delta"
+    | "done"
+    | "cancelled"
+    | "error"
+    | string;
   name: string;
   data: Record<string, any>;
   undo_token?: string;
@@ -350,6 +362,49 @@ export function agentConfirm(runId: string, confirmId: string, allow: boolean): 
 
 export function agentCancel(runId: string): Promise<{ ok: boolean }> {
   return postJSON("/api/agent/runs/" + encodeURIComponent(runId) + "/cancel", {});
+}
+
+/** 回答 Agent 的提问：选中的选项 + 可选自由文本，一起塞回等待中的那一轮 */
+export function agentAnswer(
+  runId: string,
+  askId: string,
+  selected: string[],
+  text = "",
+): Promise<{ ok: boolean }> {
+  return postJSON("/api/agent/runs/" + encodeURIComponent(runId) + "/answer", {
+    ask_id: askId,
+    selected,
+    text,
+  });
+}
+
+export interface AgentThread {
+  id: string;
+  title: string;
+  runs: number;
+  updated_at: number;
+}
+
+export interface AgentThreadRun {
+  id: string;
+  input: string;
+  reply: string;
+  status: string;
+  created_at: number;
+}
+
+/** 会话列表：面板里「最近」用，接着上一段聊不必重说条件 */
+export function listThreads(limit = 8): Promise<{ threads: AgentThread[] }> {
+  return getJSON("/api/agent/threads?limit=" + limit);
+}
+
+export function getThread(threadId: string): Promise<{ thread_id: string; runs: AgentThreadRun[] }> {
+  return getJSON("/api/agent/threads/" + encodeURIComponent(threadId));
+}
+
+/** 结果卡片上的收藏，不经过模型 */
+export function agentSave(id: string, on: boolean): Promise<{ ok: boolean; saved: boolean }> {
+  return postJSON("/api/agent/save", { id, on });
 }
 
 export interface AgentMark {

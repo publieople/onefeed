@@ -127,10 +127,11 @@ export default function App() {
     void reloadSettings();
   }, [loadSummary, reloadSettings]);
 
-  // 全局快捷键：⌘K / 「/」叫出 AI 输入框，「?」看键位表，「t」换主题，「r」刷新一轮
+  // 全局快捷键：「/」叫出 AI 输入框，「?」看键位表，「t」换主题，「r」刷新一轮。
+  // 不用 ⌘/Ctrl+K —— 那是浏览器地址栏/搜索栏的保留键，页面根本收不到（用户实测按了是 Chrome 在响应）。
   useHotkeys("global", {
     "/": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
-    "mod+k": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
+    "mod+shift+k": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
     "?": () => setHelp(true),
     t: () => window.dispatchEvent(new CustomEvent("onefeed:theme")),
     r: () => void refresh(),
