@@ -22,6 +22,7 @@ import { parseStreamText } from "../streamText";
 import { CommentBody } from "../components/CommentBody";
 import AgentRail from "../agent/AgentRail";
 import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
+import { createGhost } from "../motion/ghost";
 import { runNav } from "../motion/nav";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
@@ -527,11 +528,23 @@ export default function ItemPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  // 这条是 Agent 从对话里打开的：信息流里可能压根没有对应的卡片
+  const fromAgent = Boolean((location.state as { fromAgent?: boolean } | null)?.fromAgent);
   // 返回时和进来时反着来：详情页缩回列表里那张卡片的位置与大小。
   // 回到进来时那一屏（带着筛选条件），而不是无条件回首页。
   const goBack = () => {
     const from = (location.state as { from?: string } | null)?.from || "/";
-    runNav("back", () => navigate(from, { state: { vt: true, back: 1, fromId: item?.id } }));
+    // Agent 打开的条目没有卡片接它：给媒体框和标题挂一个右侧代位盒子当终点，
+    // 视频才会缩回右侧（而不是整页淡出）。代位盒子挂在 apply 里 —— 只进新快照。
+    const ghost = fromAgent ? createGhost({ media: true, title: true }) : null;
+    runNav(
+      "back",
+      () => {
+        ghost?.mount();
+        navigate(from, { state: { vt: true, back: 1, fromId: item?.id, fromAgent } });
+      },
+      { after: () => ghost?.remove() },
+    );
   };
   // 首屏垫底优先级：点卡片带过来的数据 > 悬停预取 > 空（骨架屏）。
   // 带过来的那份最关键：转场那 0.42s 里页面必须已经有媒体框和标题，

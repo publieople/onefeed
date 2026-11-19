@@ -26,6 +26,8 @@ import {
   type AiResponse,
   type FeedItem,
 } from "../api";
+import { createGhost } from "../motion/ghost";
+import { runNav } from "../motion/nav";
 import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
 
 /* ------------------------------------------------------------------ 类型 */
@@ -85,7 +87,7 @@ export interface AgentActions {
   resumeThread: (thread: AgentThread) => void;
   newThread: () => void;
   setFocus: (focus: AgentFocus | null) => void;
-  openItem: (id: string) => void;
+  openItem: (id: string, seed?: FeedItem) => void;
   setDraft: (text: string) => void;
   inputRef: RefObject<HTMLInputElement>;
 }
@@ -158,6 +160,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const onItemPage = location.pathname.startsWith("/item/");
+  const onAgentPage = location.pathname === "/agent" || location.pathname.startsWith("/agent/");
+
   /* 会话：切换形态、换页面都不重建 */
   const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [busy, setBusy] = useState(false);
@@ -222,6 +227,52 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     setTurns((prev) => [...prev, { role: "ai", text }]);
   }, []);
 
+  // 「从对话里打开一条」和「点卡片」走的是同一套共享元素转场，区别只在起点：
+  // 卡片在页面上就直接用它的媒体框／标题；不在（Agent 自己找出来的条目）就补一个右侧代位盒子，
+  // 于是视频照样从右侧长出来，而不是整页淡出。
+  const openItem = useCallback(
+    (id: string, seed?: FeedItem) => {
+      const from = location.pathname + location.search;
+      const card = Array.from(document.querySelectorAll<HTMLElement>("[data-vt-item]")).find(
+        (el) => el.getAttribute("data-vt-item") === id,
+      );
+      const media = card?.querySelector<HTMLElement>('[data-vt="media"]') ?? null;
+      const title = card?.querySelector<HTMLElement>('[data-vt="title"]') ?? null;
+      const ghost = card ? null : createGhost({ media: true, title: true });
+      ghost?.mount();
+      runNav(
+        "push",
+        () => {
+          // 旧快照已经拍完了，代位盒子在这里摘掉：留到新快照就会和新页面上的共享元素同名，
+          // 浏览器会整段取消转场（控制台报 duplicate view-transition-name）。
+          ghost?.remove();
+          navigate("/item/" + encodeURIComponent(id), {
+            // item 作为详情页的首屏种子：没有它新页面先渲染骨架，骨架里没有媒体框，
+            // 共享元素就少了一半，转场会退回整页淡出。
+            state: { vt: true, from, fromId: id, fromAgent: true, item: seed },
+          });
+        },
+        {
+          names: card
+            ? [
+                { el: media, name: "of-media" },
+                { el: title, name: "of-title" },
+              ]
+            : [],
+          after: () => ghost?.remove(),
+        },
+      );
+      if (!wide) setOpen(false);
+    },
+    [location.pathname, location.search, navigate, wide],
+  );
+
+  /** 当前这轮结果里的条目：Agent 打开时拿它当详情页首屏种子，转场才有媒体框可接 */
+  const turnsRef = useRef<AgentTurn[]>([]);
+  useEffect(() => {
+    turnsRef.current = turns;
+  }, [turns]);
+
   const applyUi = useCallback(
     (event: AgentEvent) => {
       const payload = (event.data?.payload ?? {}) as Record<string, unknown>;
@@ -239,14 +290,15 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         }
       } else if (event.name === "ui_open_item" && payload.id) {
         const id = String(payload.id);
-        // 详情页里的 Agent 打开另一条：把当前地址作为返回点，右栏不消失
-        navigate("/item/" + encodeURIComponent(id), {
-          state: { from: location.pathname + location.search, fromId: id },
-        });
-        if (!wide) setOpen(false);
+        // Agent 自己走到一条内容上：跟点卡片走同一套转场（信息流里有卡就用卡，
+        // 没有就用右侧代位盒子），种子从这一轮的结果里取，详情页首屏立刻有媒体框。
+        const seed = turnsRef.current
+          .flatMap((t) => t.data?.items ?? [])
+          .find((it) => it.id === id);
+        openItem(id, seed);
       }
     },
-    [location.pathname, location.search, navigate, wide],
+    [openItem],
   );
 
   /** 收尾：done 与 cancelled 共用一份 payload 组装，只差一句文案与标记 */
@@ -551,29 +603,51 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     [location.pathname, navigate, wide],
   );
 
-  const openItem = useCallback(
-    (id: string) => {
-      navigate("/item/" + encodeURIComponent(id), {
-        state: { from: location.pathname + location.search, fromId: id },
-      });
-      if (!wide) setOpen(false);
-    },
-    [location.pathname, location.search, navigate, wide],
-  );
-
   const close = useCallback(() => {
     const active = document.activeElement;
     if (active instanceof HTMLElement && document.querySelector('[data-agent-surface="sheet"]')?.contains(active)) {
       inputRef.current?.focus();
     }
-    setOpen(false);
-  }, []);
+    if (!open) {
+      setOpen(false);
+      return;
+    }
+    // 收起方向：抽屉/右栏缩回唤起器。唤起器是收起之后才挂上的，新快照里没有它，
+    // 所以代位盒子要挂在 apply 里 —— 那样它只进新快照，正好当终点。
+    const ghost = createGhost({ agent: onItemPage && wide ? "corner" : "pill" });
+    runNav(
+      "back",
+      () => {
+        ghost.mount();
+        setOpen(false);
+      },
+      { after: () => ghost.remove() },
+    );
+  }, [open, onItemPage, wide]);
 
-  const openWith = useCallback((prefill?: string) => {
-    if (typeof prefill === "string") setDraft(prefill);
-    setOpen(true);
-    window.setTimeout(() => inputRef.current?.focus(), 30);
-  }, []);
+  const openWith = useCallback(
+    (prefill?: string) => {
+      if (typeof prefill === "string") setDraft(prefill);
+      if (open) {
+        window.setTimeout(() => inputRef.current?.focus(), 30);
+        return;
+      }
+      // 打开方向：唤起器还在旧快照里但没有名字，给它挂个代位盒子，抽屉就从它的位置长出来。
+      const ghost = createGhost({ agent: onItemPage && wide ? "corner" : "pill" });
+      ghost.mount();
+      runNav(
+        "tab",
+        () => {
+          // 同上：这个盒子只属于旧快照（唤起器的位置），apply 一开始就摘，别带进新快照
+          ghost.remove();
+          setOpen(true);
+        },
+        { after: () => ghost.remove() },
+      );
+      window.setTimeout(() => inputRef.current?.focus(), 30);
+    },
+    [open, onItemPage, wide],
+  );
 
   const setFocus = useCallback((next: AgentFocus | null) => setFocusState(next), []);
 
@@ -604,8 +678,6 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     [clearStopTimer],
   );
 
-  const onItemPage = location.pathname.startsWith("/item/");
-  const onAgentPage = location.pathname === "/agent" || location.pathname.startsWith("/agent/");
   const mode: AgentSurfaceState["mode"] = !open
     ? "closed"
     : onItemPage && wide

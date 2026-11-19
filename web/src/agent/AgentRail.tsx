@@ -17,9 +17,13 @@ export default function AgentRail() {
     ? ["总结这一条", "跟同题的其他平台比比", "收藏这条并记一句为什么"]
     : ["今天有什么值得看的", "随便来点"];
 
+  // data-vt="agent" + 常驻名字：跟底部抽屉共用同一个名字，
+  // 从抽屉里打开一条内容时这块面板会被浏览器从抽屉位置插值到右栏位置
   return (
     <aside
       data-agent-surface="rail"
+      data-vt="agent"
+      style={{ viewTransitionName: "of-agent" }}
       aria-label="AI 助手"
       className="sticky top-[76px] flex h-[calc(100vh-96px)] min-h-[420px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_10px_30px_rgba(20,20,20,0.06)]"
     >

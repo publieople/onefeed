@@ -24,6 +24,12 @@ export interface NavName {
 export interface NavOpts {
   /** 参与变形的元素。最多 3 个；重名会被丢掉（重名会让浏览器整体降级成根转场） */
   names?: NavName[];
+  /**
+   * 转场收尾时调用（成功、失败、降级都算一次）。
+   * 给「代位元素」用：那类临时盒子必须在旧快照之后、新快照之前挂上去，
+   * 再在动画跑完之后摘掉，否则下一次转场会撞见重名。
+   */
+  after?: () => void;
 }
 
 /** 正在跑的那一次，用来做并发保护与清场 */
@@ -54,7 +60,8 @@ function clearStrayNames(keep: Element[]): void {
   const kept = new Set(keep);
   document.querySelectorAll<HTMLElement>("[data-vt]").forEach((el) => {
     if (kept.has(el)) return;
-    if (el.dataset.vt === "topbar") return; // 顶栏本来就要独立成层，一直挂着
+    // 顶栏、Agent 三形态的容器都是常驻名字：它们本来就要跨页保持同一层
+    if (el.dataset.vt === "topbar" || el.dataset.vt === "agent") return;
     el.style.viewTransitionName = "";
   });
 }
@@ -83,6 +90,7 @@ export function runNav(kind: NavKind, apply: () => void, opts: NavOpts = {}): vo
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduce || typeof doc.startViewTransition !== "function") {
     apply();
+    opts.after?.();
     return;
   }
 
@@ -91,6 +99,7 @@ export function runNav(kind: NavKind, apply: () => void, opts: NavOpts = {}): vo
     clearState(inflight);
     inflight = null;
     apply();
+    opts.after?.();
     return;
   }
 
@@ -117,10 +126,19 @@ export function runNav(kind: NavKind, apply: () => void, opts: NavOpts = {}): vo
     // React 默认批处理更新，快照可能拿到旧 DOM；强制同帧提交
     flushSync(apply);
   };
+  let closed = false;
   const done = () => {
+    if (closed) return;
+    closed = true;
     clearState(st);
     document.documentElement.classList.remove("vt-running");
     if (inflight === st) inflight = null;
+    // 代位元素在这里退场；它抛错不该影响页面本身
+    try {
+      opts.after?.();
+    } catch {
+      /* ignore */
+    }
   };
 
   try {

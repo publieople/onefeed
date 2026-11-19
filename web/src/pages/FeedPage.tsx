@@ -56,8 +56,11 @@ export default function FeedPage({ ctx }: Props) {
   const location = useLocation();
   // 从详情页返回时，详情页要缩回这张卡片：它得先在场，还要在视野里
   const backId = (location.state as { fromId?: string } | null)?.fromId ?? null;
+  // Agent 打开的条目返回时用的是右侧代位盒子，页面上那张卡不参与转场，
+  // 也就不该给它挂名字（同名会让浏览器整体跳过转场），更不用滚到它那儿。
+  const backFromAgent = Boolean((location.state as { fromAgent?: boolean } | null)?.fromAgent);
   const restoreAnchor = (): (() => void) | undefined => {
-    if (!backId) return;
+    if (!backId || backFromAgent) return;
     const find = () => document.querySelector<HTMLElement>('[data-vt-item="' + CSS.escape(backId) + '"]');
     const seek = () => find()?.scrollIntoView({ block: "center", behavior: "auto" });
     seek();
@@ -300,7 +303,9 @@ export default function FeedPage({ ctx }: Props) {
             <Card
               item={item}
               onOpen={openItem}
-              vtNames={item.id === backId ? { media: "of-media", title: "of-title" } : undefined}
+              vtNames={
+                item.id === backId && !backFromAgent ? { media: "of-media", title: "of-title" } : undefined
+              }
             />
           );
           const shell = "rise h-full";

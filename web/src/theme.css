@@ -351,3 +351,49 @@ html.nav-vt.nav-vt-back::view-transition-new(of-title) {
     opacity: 1;
   }
 }
+
+/* Agent 面板：底部抽屉与详情页右栏是同一个东西换了位置（两边都挂 of-agent 这个名字），
+   group 的盒子由浏览器插值，看到的是整块面板从底部滑到右侧；开合时再叠一点淡入淡出。
+   收起方向反过来：留在场上的是抽屉那张快照，所以动画挂在 old 侧。 */
+html.nav-vt::view-transition-group(of-agent) {
+  z-index: 5;
+  animation-duration: 0.32s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html.nav-vt::view-transition-old(of-agent) {
+  animation: none;
+  opacity: 0;
+}
+
+html.nav-vt::view-transition-new(of-agent) {
+  animation: nav-agent-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html.nav-vt.nav-vt-back::view-transition-old(of-agent) {
+  animation: nav-agent-out 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes nav-agent-in {
+  0% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes nav-agent-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+

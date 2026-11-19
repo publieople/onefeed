@@ -96,7 +96,7 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
                     item={item}
                     saved={saved.has(item.id)}
                     onToggleSave={() => void toggleSave(item.id)}
-                    onOpen={() => openItem(item.id)}
+                    onOpen={() => openItem(item.id, item)}
                   />
                 ))}
               </div>

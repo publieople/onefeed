@@ -134,7 +134,7 @@ def test_item_keeps_media_above_tabs() -> None:
     assert 'data-vt="media"' in ITEM and 'viewTransitionName: "of-media"' in ITEM
     assert 'data-vt="title"' in ITEM and 'viewTransitionName: "of-title"' in ITEM
     assert "showHero" in ITEM, "详情页没有 hero 判定"
-    assert 'runNav("back"' in ITEM, "返回没走过渡"
+    assert "runNav(" in ITEM and '"back"' in ITEM, "返回没走过渡"
     assert "peekItem" in ITEM, "进详情没用预取垫底，首屏会闪骨架"
 
 

@@ -208,6 +208,44 @@ def test_sheet_history_wrapper_is_conditional() -> None:
     assert "min-h-0 flex-1 overflow-y-auto" in block
 
 
+@case
+def test_agent_surface_transitions() -> None:
+    """Agent 三形态之间要有共享元素，而不是整页硬切。
+
+    - 打开/收起：唤起器（胶囊/圆钮）↔ 抽屉，同一个 of-agent 名字做插值；
+    - Agent 自己打开一条内容：从右侧代位盒子长成详情页 hero（of-media/of-title），
+      跟点卡片是同一套；
+    - 收起方向必须把代位盒子挂进新快照（apply 内），否则新页面没有终点；
+    - 代位盒子要在 apply 的第一件事摘掉，留到新快照会和真元素同名，浏览器整段跳过转场。
+    """
+    ghost = read("motion", "ghost.ts")
+    nav = read("motion", "nav.ts")
+    css = read("theme.css")
+    assert "CONTENT_MAX = 1180" in ghost and "export function createGhost" in ghost
+    assert 'kind === "corner"' in ghost and "viewTransitionName" in ghost
+    # 名字挂在 760 宽的面板上，不是外层通栏容器（否则插值盒子横向铺满整屏）
+    sheet = SURFACE.split("data-agent-surface=\"sheet\"")[1]
+    assert 'data-vt="agent"' in sheet and 'viewTransitionName: "of-agent"' in sheet
+    assert 'data-vt="agent"' in read("agent", "AgentRail.tsx")
+    # 唤起器贴内容栏而不是屏幕右沿
+    assert "max-w-[1180px]" in SURFACE and 'data-agent-launcher="corner"' in SURFACE
+    assert "of-agent" in css and "nav-agent-in" in css
+    # 打开用 tab（新侧入场）、收起用 back（旧侧收缩）；prettier 会把 kind 折到下一行，按 token 断言
+    for kind in ('"tab"', '"back"', '"push"'):
+        assert kind in AGENT, "Agent 转场缺方向 " + kind
+    assert "runNav(" in AGENT
+    assert "after?:" in nav and "opts.after?.()" in nav
+    # 打开条目的两条路径（点卡片 / Agent 自己打开）共用 openItem
+    assert "fromAgent: true" in AGENT and "item: seed" in AGENT
+    assert "openItem(id, seed)" in AGENT
+    # Agent 的 ui_open_item 不许再裸 navigate 绕过转场
+    open_branch = AGENT.split('event.name === "ui_open_item"')[1].split("}")[0]
+    assert "openItem(" in open_branch and 'navigate("/item/' not in open_branch
+    assert "fromAgent" in ITEM and "createGhost" in ITEM
+    # 从 Agent 返回信息流时不再给卡片挂名字：同名会让整段转场作废
+    assert "backFromAgent" in FEED and "!backFromAgent" in FEED
+
+
 def main() -> int:
     failed = 0
     for name, fn in CASES:
