@@ -36,15 +36,21 @@
 **证据**：缓存条目文字 207→218→228→242→257→305 逐帧增长，约 1.2s 铺完；未缓存条目
 0.29s 出现「Agent 正在通读素材…」骨架，4.77s 后 134→…→276 逐字增长。
 
-## 3. 关键词：Ctrl+K 被浏览器抢走
+## 3. 键盘：Ctrl+K 与浏览器地址栏的冲突（结论修正）
 
-**修法**：主键改为 `/`（单键，且不在输入框里触发），辅键换成 `Ctrl/⌘ + Shift + K`；
-`AiDock` 收到 `onefeed:ask` 后 `setOpen(true)` 并 `inputRef.focus()`。
-快捷键帮助表同步（`web/src/components/ShortcutHelp.tsx`）。
+**先前的错误结论**：一度认定「Ctrl+K 是浏览器保留键，页面根本收不到」，把主键换成 `/`、
+辅键换成 `Ctrl/⌘ + Shift + K`。这个结论是错的——用户反馈「很多网站都能用 Ctrl+K」，复查发现
+页面确实收得到 keydown，真正的问题是 `useHotkeys` 命中后**没调 `preventDefault`**：面板开了，
+Chrome 的地址栏默认动作也照常执行，焦点被地址栏抢走，于是看起来像「面板没聚焦」。
 
-**证据**：`.onefeed/tmp/probe_keys.py` —— `/` 与 `Control+Shift+K` 都能让
-`[role=dialog]` 出现，且 `document.activeElement` 的 aria-label 是「向 OneFeed 提问」；
-Esc 关闭后焦点仍在输入框。
+**修法**：
+- `web/src/motion/useHotkeys.ts`：命中后先 `e.preventDefault()` 再执行动作；
+- `web/src/App.tsx`：恢复 `mod+k`，与 `/` 并列，`mod+shift+k` 保留为别名；
+- 帮助表改成「⌘ / Ctrl + K」。
+
+**证据**：`.onefeed/tmp/probe_ctrlk_fixed.py` —— `Control+K` 后
+`{"ctrl": true, "prevented": true}`、`[role=dialog]` 出现、`activeElement` 的 aria-label
+是「向 OneFeed 提问」；`Control+Shift+K` 同样可用。
 
 ## 4. 底部 AI 从「搜索框」变成能交互的 Agent
 

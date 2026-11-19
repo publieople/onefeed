@@ -44,10 +44,11 @@ def case(fn):
 
 @case
 def test_global_scope_survives_list() -> None:
-    # 列表压栈时全局键（? / t / r / ⌘⇧K）必须还能用
-    # 注意不能再用 mod+k：Chrome 的地址栏搜索把它占了，页面收不到
+    # 列表压栈时全局键（? / t / r / ⌘K）必须还能用
+    # Ctrl+K 页面收得到，但必须 preventDefault，否则地址栏会同时聚焦、焦点被抢走
     assert 'scope === "global" ? top === "dialog" : top !== scope' in HOTKEYS
-    for key in ('"/"', '"mod+shift+k"', '"?"', "t:", "r:"):
+    assert "e.preventDefault()" in HOTKEYS, "命中快捷键没吞浏览器默认动作"
+    for key in ('"/"', '"mod+k"', '"?"', "t:", "r:"):
         assert key in APP, "App 全局快捷键缺 " + key
     assert "pushScope" in APP and "ShortcutHelp" in APP
 
@@ -166,7 +167,7 @@ def test_threads_are_resumable_and_saved() -> None:
 
 @case
 def test_shortcut_help_is_the_single_source() -> None:
-    for key in ("/", "⌘ / Ctrl + Shift + K", "Esc", "?", "j / k", "← / →"):
+    for key in ("/", "⌘ / Ctrl + K", "Esc", "?", "j / k", "← / →"):
         assert key in HELP, "快捷键表里没写 " + key
 
 

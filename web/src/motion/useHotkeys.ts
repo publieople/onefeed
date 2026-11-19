@@ -105,6 +105,9 @@ export function useHotkeys(scope: Scope, map: Record<string, Handler>, enabled =
         if (!hit(s, e)) continue;
         // 输入框里只放行带修饰键的，以及 escape
         if (typing && !s.mod && s.key !== "escape") return;
+        // 命中就吃掉浏览器默认动作：Ctrl+K 不吞的话，面板开了、地址栏也聚焦了，
+        // 用户看到的「面板没聚焦」其实是焦点被地址栏抢走。
+        e.preventDefault();
         fn(e);
         return;
       }

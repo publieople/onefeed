@@ -13,7 +13,7 @@ const GROUPS: { title: string; rows: [string, string][] }[] = [
     title: "全局",
     rows: [
       ["/", "打开 AI 输入框"],
-    ["⌘ / Ctrl + Shift + K", "同「/」（Ctrl+K 被浏览器占了）"],
+      ["⌘ / Ctrl + K", "同「/」（地址栏的 Ctrl+K 已被页面接管）"],
       ["Esc", "关闭当前弹层 / 面板"],
       ["?", "这份快捷键表"],
       ["t", "切换亮暗主题"],

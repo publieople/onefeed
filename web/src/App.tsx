@@ -128,9 +128,12 @@ export default function App() {
   }, [loadSummary, reloadSettings]);
 
   // 全局快捷键：「/」叫出 AI 输入框，「?」看键位表，「t」换主题，「r」刷新一轮。
-  // 不用 ⌘/Ctrl+K —— 那是浏览器地址栏/搜索栏的保留键，页面根本收不到（用户实测按了是 Chrome 在响应）。
+  // ⌘/Ctrl+K 保留：页面收得到，但要靠 useHotkeys 里的 preventDefault 吞掉地址栏默认动作，
+  // 否则面板开了、地址栏也聚焦，看起来像「没聚焦」。
   useHotkeys("global", {
     "/": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
+    // Ctrl/⌘+K 是这类产品的惯例，Chrome 允许页面 preventDefault（不吞的话地址栏会一起聚焦）
+    "mod+k": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
     "mod+shift+k": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
     "?": () => setHelp(true),
     t: () => window.dispatchEvent(new CustomEvent("onefeed:theme")),
