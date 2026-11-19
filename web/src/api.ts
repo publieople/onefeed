@@ -784,8 +784,13 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
   const [count, setCount] = useState(() => seed?.count ?? 0);
   const [parsed, setParsed] = useState<ParsedQuery | null>(() => seed?.parsed ?? null);
   const [loading, setLoading] = useState(!seed);
+  // 下一页单独一套状态：自动预取时不能把首屏的「正在取内容…」再翻出来，
+  // 也不能让列表底部那块占位忽有忽无（整页会跟着抖）。
+  const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  // 单飞：滚动传感器可能在一次请求飞在路上时又触发一次，重复请求会把同一页追两遍
+  const flight = useRef(false);
 
   const build = useCallback(
     (cursor: string | null) => {
@@ -805,10 +810,14 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
 
   const load = useCallback(
     async (cursor: string | null, append: boolean) => {
-      abortRef.current?.abort();
+      if (flight.current) return;
+      flight.current = true;
+      // 追加时不能 abort：那是把正在飞的那一页丢掉再要一次，尾巴会被截断
+      if (!append) abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      setLoading(true);
+      if (append) setMoreLoading(true);
+      else setLoading(true);
       setError("");
       try {
         const data = await getJSON<FeedResponse>(build(cursor), controller.signal);
@@ -821,13 +830,21 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
             feedCache.delete(oldest.value);
           }
         }
-        setItems((prev) => (append ? [...prev, ...data.items] : data.items));
+        setItems((prev) => {
+          if (!append) return data.items;
+          // 游标是稳定的，但刷新一轮后条目可能移位；按 id 去重，
+          // 免得同一张卡在列表里出现两次（React key 重了会直接报错）
+          const seen = new Set(prev.map((entry) => entry.id));
+          return [...prev, ...data.items.filter((entry) => !seen.has(entry.id))];
+        });
         setNext(data.next);
         setCount(data.count);
         setParsed(data.parsed);
       } catch (err) {
         if ((err as Error).name !== "AbortError") setError((err as Error).message);
       } finally {
+        flight.current = false;
+        setMoreLoading(false);
         setLoading(false);
       }
     },
@@ -844,6 +861,7 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
     count,
     parsed,
     loading,
+    moreLoading,
     error,
     more: () => (next ? load(next, true) : Promise.resolve()),
   };

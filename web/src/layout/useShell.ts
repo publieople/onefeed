@@ -7,6 +7,10 @@ import { useCallback, useEffect, useState } from "react";
  *   - 1440 起左栏才敢钉住 288：再窄中列就掉到 1000 以下，3 列卡片会挤成一团；
  *   - 1024 起给 64 的图标轨，不占内容宽度，也还认得出来是栏；
  *   - 1800 起右栏也钉住：1440 段再塞 320 进去，中列只剩 800 多。
+ *
+ * 左栏只有「宽 / 图标轨 / 不显示」三档，**全部待在栅格里**：点展开就是把这一列的
+ * 宽度从 64 换到 288，让内容列自己让位。早先 <1440 时展开是一个 fixed 的全屏浮层，
+ * 288 的抽屉压在页面左边、盖住内容，点一次像跳进了另一个页面 —— 沉浸感全没了。
  */
 
 export type LeftLayout = "full" | "rail" | "hidden";
@@ -38,9 +42,6 @@ export interface Shell {
   width: number;
   left: LeftLayout;
   right: RightLayout;
-  /** <1440 时左栏钉不住，展开是盖在内容上的一层 288 浮层 */
-  leftDrawer: boolean;
-  setLeftDrawer: (open: boolean) => void;
   rightOpen: boolean;
   setRightOpen: (open: boolean) => void;
   toggleLeft: () => void;
@@ -51,8 +52,10 @@ export function useShell(): Shell {
   const [width, setWidth] = useState(() =>
     typeof window === "undefined" ? LEFT_FULL : document.documentElement.clientWidth,
   );
-  const [expanded, setExpanded] = useState(() => readFlag(LEFT_KEY, true));
-  const [leftDrawer, setLeftDrawer] = useState(false);
+  // 宽屏默认展开；窄屏默认收成图标轨 —— 1280 上先给内容列留够地方
+  const [expanded, setExpanded] = useState(() =>
+    readFlag(LEFT_KEY, document.documentElement.clientWidth >= LEFT_FULL),
+  );
   const pinned = width >= RIGHT_PIN;
   const [rightOpen, setRightOpen] = useState(pinned);
   const [wasPinned, setWasPinned] = useState(pinned);
@@ -72,18 +75,15 @@ export function useShell(): Shell {
   }, [pinned, wasPinned]);
 
   const left: LeftLayout =
-    width >= LEFT_FULL && expanded ? "full" : width >= LEFT_RAIL ? "rail" : "hidden";
+    width >= LEFT_RAIL ? (expanded ? "full" : "rail") : "hidden";
 
+  // 1440 以上是「288 钉住 / 64 图标轨」，1024–1439 也走同一条路：点展开就是这一列变宽，
+  // 内容列被 flex 自动挤窄，不再有盖住页面的浮层。
   const toggleLeft = useCallback(() => {
-    // 1440 以上在「288 钉住 / 64 图标轨」之间切；往下就只能开浮层
-    if (document.documentElement.clientWidth >= LEFT_FULL) {
-      setExpanded((prev) => {
-        writeFlag(LEFT_KEY, !prev);
-        return !prev;
-      });
-      return;
-    }
-    setLeftDrawer((prev) => !prev);
+    setExpanded((prev) => {
+      writeFlag(LEFT_KEY, !prev);
+      return !prev;
+    });
   }, []);
 
   const toggleRight = useCallback(() => setRightOpen((prev) => !prev), []);
@@ -92,8 +92,6 @@ export function useShell(): Shell {
     width,
     left,
     right: pinned ? "pinned" : "drawer",
-    leftDrawer,
-    setLeftDrawer,
     rightOpen,
     setRightOpen,
     toggleLeft,

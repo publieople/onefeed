@@ -18,7 +18,9 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 import { AgentProvider } from "./agent/AgentProvider";
 import AgentSurface from "./agent/AgentSurface";
 import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, type Summary } from "./api";
+import ScrollTop from "./components/ScrollTop";
 import { DUR, EASE, pageVariants } from "./motion";
+import { useScrollSpeedCap } from "./motion/useScrollSpeedCap";
 
 export interface OutletCtx {
   progress: RunState | null;
@@ -61,6 +63,8 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [toast, setToast] = useState("");
   const [help, setHelp] = useState(false);
+  // 信息流的滚轮限速：翻得太快会冲到还没取回来的地方，这里按每秒像素上限放行
+  useScrollSpeedCap();
   const wasRunning = useRef(false);
   const location = useLocation();
   const reduce = useReducedMotion();
@@ -207,6 +211,7 @@ export default function App() {
       </RailSlotProvider>
       {/* 三形态的落点：唤起器 / 底部抽屉（右栏槽位在 Shell 里） */}
       <AgentSurface />
+      <ScrollTop />
       <AnimatePresence>
         {toast ? (
           <motion.div

@@ -2,6 +2,7 @@ import { History, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FilterBox from "../components/FilterBox";
+import { useLauncherReveal } from "../motion/useLauncherReveal";
 import { useAgentActions, useAgentHistory, useAgentSession, useAgentSurface } from "./AgentProvider";
 import AgentComposer from "./AgentComposer";
 import AgentHistory from "./AgentHistory";
@@ -20,18 +21,36 @@ const LAUNCH_HINTS = [
 export function AgentLauncher() {
   const { onItemPage, pinned, hintIndex, turns } = { ...useAgentSurface(), ...useAgentSession() };
   const { openWith } = useAgentActions();
+  // 滚动感应：往下翻时它收起来让出内容，往回滚一点、或指针贴到底边再出来。
+  // 收起用的是位移 + 透明（节点还在），所以还要把 tabIndex 和 pointer-events 一起关掉。
+  const { shown, hold } = useLauncherReveal();
+  const lift = shown ? "translate-y-0 opacity-100" : "translate-y-[130%] opacity-0";
+  const reach = shown ? "pointer-events-auto" : "pointer-events-none";
   // ≥1800 右栏常驻，详情页再挂个圆钮就是两个入口打架
   if (onItemPage && pinned) return null;
   // 入口贴内容栏的右沿，不贴屏幕右沿：页面主体是居中 1180px，贴屏幕会在宽屏上飘到空白里去，
   // 视觉上跟内容脱节。代位盒子（motion/ghost.ts）算的是同一组边距，两边必须一起改。
   if (onItemPage) {
     return (
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-6 pb-5">
+      <div
+        data-agent-launcher-wrap="corner"
+        className={
+          "pointer-events-none fixed inset-x-0 bottom-0 z-30 px-6 pb-5 transition duration-300 ease-out " + lift
+        }
+      >
         <div className="mx-auto flex max-w-[1180px] justify-end">
           <button
             onClick={() => openWith()}
+            onPointerEnter={() => hold(true)}
+            onPointerLeave={() => hold(false)}
+            onFocus={() => hold(true)}
+            onBlur={() => hold(false)}
             data-agent-launcher="corner"
-            className="pointer-events-auto flex h-10 items-center gap-2 rounded-full border border-line/70 bg-paper/85 pl-2.5 pr-4 text-[12.5px] text-muted shadow-[0_4px_14px_rgba(20,20,20,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:text-ink"
+            tabIndex={shown ? 0 : -1}
+            className={
+              "flex h-10 items-center gap-2 rounded-full border border-line/70 bg-paper/85 pl-2.5 pr-4 text-[12.5px] text-muted shadow-[0_4px_14px_rgba(20,20,20,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:text-ink " +
+              reach
+            }
             aria-label="打开 AI 助手"
             title="问 OneFeed（/ 或 ⌘K）"
           >
@@ -46,9 +65,15 @@ export function AgentLauncher() {
     );
   }
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-6 pb-4">
+    <div
+      data-agent-launcher-wrap="pill"
+      className={
+        "pointer-events-none fixed inset-x-0 bottom-0 z-30 px-6 pb-4 transition duration-300 ease-out " + lift
+      }
+    >
       {/* 底部渐隐：卡片滚到这里会淡进纸面，而不是被胶囊硬切一条直线。
-          用渐变而不是模糊（backdrop-filter 在长列表上要重绘整屏，PF-1 刚去掉）。 */}
+          用渐变而不是模糊（backdrop-filter 在长列表上要重绘整屏，PF-1 刚去掉）。
+          渐隐层跟着唤起器一起位移/淡出，收起时底部不留一条没有内容的白雾。 */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-paper via-paper/85 to-transparent"
@@ -57,8 +82,16 @@ export function AgentLauncher() {
         {/* 平时半透明、薄一点；悬停/聚焦才浮起来。整条不抢内容，但一直够得着。 */}
         <button
           onClick={() => openWith()}
+          onPointerEnter={() => hold(true)}
+          onPointerLeave={() => hold(false)}
+          onFocus={() => hold(true)}
+          onBlur={() => hold(false)}
           data-agent-launcher="pill"
-          className="pointer-events-auto flex h-11 w-full max-w-[760px] items-center gap-2 rounded-full border border-line/70 bg-paper/80 px-3 text-left shadow-[0_4px_14px_rgba(20,20,20,0.06)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:shadow-[0_10px_26px_rgba(20,20,20,0.12)] focus-visible:-translate-y-0.5 focus-visible:border-ink/25 focus-visible:bg-paper"
+          tabIndex={shown ? 0 : -1}
+          className={
+            "flex h-11 w-full max-w-[760px] items-center gap-2 rounded-full border border-line/70 bg-paper/80 px-3 text-left shadow-[0_4px_14px_rgba(20,20,20,0.06)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:shadow-[0_10px_26px_rgba(20,20,20,0.12)] focus-visible:-translate-y-0.5 focus-visible:border-ink/25 focus-visible:bg-paper " +
+            reach
+          }
           aria-label="打开 AI 助手"
         >
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-solid text-solid-fg">

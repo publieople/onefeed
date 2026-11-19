@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { Bookmark, Star } from "lucide-react";
+import { Bookmark, Loader2, Star } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { useFeed, type FeedItem } from "../api";
 import Card from "../components/Card";
@@ -218,6 +218,38 @@ export default function FeedPage({ ctx }: Props) {
     restoreAnchor();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backId, feed.loading, feed.items.length]);
+
+  // ── 无限预取：离底部还有一屏半就开始取下一页，滚到底时内容已经在了。
+  // 传感器挂在底部那条状态上，它只在还有下一页（或正在取）时存在。
+  // 回调里读的是 ref：feed.more 每次渲染都是新函数，直接进依赖会让 observer 反复重建。
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  const moreRef = useRef(feed.more);
+  moreRef.current = feed.more;
+  const nextRef = useRef(feed.next);
+  nextRef.current = feed.next;
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !feed.next) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting) && nextRef.current) void moreRef.current();
+      },
+      { rootMargin: "0px 0px 1200px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [feed.next]);
+
+  // 一屏都没铺满（筛选后只剩几条）时传感器够不着，自己补一次，别让人对着空荡荡的页面
+  useEffect(() => {
+    if (!feed.next || feed.loading || feed.moreLoading) return;
+    if (document.documentElement.scrollHeight > window.innerHeight + 240) return;
+    const timer = window.setTimeout(() => {
+      if (nextRef.current) void moreRef.current();
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [feed.next, feed.loading, feed.moreLoading, feed.items.length]);
 
   // AI 对话框把「它理解的条件」交给信息流：用事件而不是上下文，
   // 免得为一个筛选状态把整个 App 的 props 再穿一遍。
@@ -444,16 +476,27 @@ export default function FeedPage({ ctx }: Props) {
         </div>
       ) : null}
 
-      {feed.next ? (
-        <div className="mt-10 flex justify-center">
-          <button
-            onClick={() => void feed.more()}
-            disabled={feed.loading}
-            className="rounded-full border border-line px-5 py-2 text-[13px] text-muted transition hover:border-ink/25 hover:text-ink disabled:opacity-50"
-          >
-            {feed.loading ? "加载中…" : "加载更多"}
-          </button>
+      {/* 取下一页的状态条：高度固定 56px，状态在「正在获取 / 往下滑」之间切换时
+          页面不会因为这一行变高变矮而抖一下。滚到底时它正好在视口里，也就是传感器的落点。 */}
+      {feed.next || feed.moreLoading ? (
+        <div
+          ref={sentinel}
+          aria-live="polite"
+          className="mt-8 flex min-h-[56px] items-center justify-center"
+        >
+          {feed.moreLoading ? (
+            <span className="flex items-center gap-2 text-[12.5px] text-fade">
+              <Loader2 size={13} className="animate-spin" />
+              正在获取新内容…
+            </span>
+          ) : (
+            <span className="text-[12.5px] text-fade">继续往下滑，自动接着取</span>
+          )}
         </div>
+      ) : feed.items.length ? (
+        <p className="mt-8 flex min-h-[56px] items-center justify-center text-[12.5px] text-fade">
+          已经到底了
+        </p>
       ) : null}
     </div>
   );

@@ -22,15 +22,12 @@ import { useAgentActions, useAgentHistory, useAgentSession } from "./AgentProvid
  */
 export default function AgentSidebar({
   collapsed = false,
-  drawer = false,
   onExpand,
   onCollapse,
   onNavigate,
   onHelp,
 }: {
   collapsed?: boolean;
-  /** 浮层里用：高度跟着浮层走，不 sticky */
-  drawer?: boolean;
   onExpand?: () => void;
   onCollapse?: () => void;
   onNavigate?: () => void;
@@ -142,12 +139,7 @@ export default function AgentSidebar({
   return (
     <aside
       aria-label="Agent 工作台"
-      className={
-        (drawer
-          ? "flex h-full w-72 flex-col"
-          : "sticky top-[76px] flex h-[calc(100vh-96px)] w-72 shrink-0 flex-col") +
-        " overflow-hidden rounded-card border border-line bg-paper"
-      }
+      className="sticky top-[76px] flex h-[calc(100vh-96px)] w-72 shrink-0 flex-col overflow-hidden rounded-card border border-line bg-paper"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
         <Sparkles size={14} className="text-muted" />
