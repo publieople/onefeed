@@ -642,14 +642,26 @@ class Store:
             "FROM agent_threads t ORDER BY t.updated_at DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
-    def thread_runs(self, thread_id: str, limit: int = 40) -> list[dict[str, Any]]:
-        """一轮对话里每一问一答：时间正序，方便直接铺成聊天记录。"""
+    def thread_runs(self, thread_id: str, limit: int = 40,
+                    steps: bool = True) -> list[dict[str, Any]]:
+        """一轮对话里每一问一答：时间正序，方便直接铺成聊天记录。
+
+        steps=True 时把每轮的完整事件带回去。结果卡片、计划、轨迹全在 done 事件的
+        payload 里，只回放 input/reply 的话「上次给我看的那几条」就丢了。
+        """
         limit = max(1, min(int(limit), 100))
         rows = self.conn.execute(
             "SELECT id, input, reply, status, steps, ms, error, created_at, finished_at "
             "FROM agent_runs WHERE thread_id = ? ORDER BY created_at ASC LIMIT ?",
             (thread_id, limit)).fetchall()
-        return [dict(r) for r in rows]
+        out = [dict(r) for r in rows]
+        if steps:
+            for run in out:
+                events = self.conn.execute(
+                    "SELECT seq, kind, name, payload, undo_token, at FROM agent_steps "
+                    "WHERE run_id = ? ORDER BY seq", (run["id"],)).fetchall()
+                run["events"] = [self._decode_step(dict(r)) for r in events]
+        return out
 
     def get_mark(self, item_id: str) -> dict[str, Any]:
         row = self.conn.execute("SELECT * FROM item_marks WHERE item_id = ?",

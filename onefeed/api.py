@@ -327,10 +327,15 @@ def agent_threads(request: Request, limit: int = Query(20, ge=1, le=100)) -> dic
 
 
 @router.get("/agent/threads/{thread_id}")
-def agent_thread(request: Request, thread_id: str, limit: int = Query(40, ge=1, le=100)) -> dict:
-    """一段对话的完整问答对：点开就能接着聊，不用重放事件。"""
+def agent_thread(request: Request, thread_id: str, limit: int = Query(40, ge=1, le=100),
+                 events: bool = Query(True)) -> dict:
+    """一段对话的完整问答对，默认连事件流一起给。
+
+    回放要复原「上次给我看的那几条」：结果卡片、计划、轨迹都只存在 done 事件的
+    payload 里，不带事件就只能铺文字。只想要文本列表时传 ?events=0。
+    """
     store = _store(request)
-    runs = store.thread_runs(thread_id, limit=limit)
+    runs = store.thread_runs(thread_id, limit=limit, steps=events)
     return {"thread_id": thread_id, "runs": runs, "count": len(runs)}
 
 

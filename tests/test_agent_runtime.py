@@ -397,6 +397,14 @@ def main() -> int:
     check(bool(threads) and threads[0]["runs"] >= 1, "recent_threads 能列出会话与轮数")
     runs_in_thread = store.thread_runs(threads[0]["id"])
     check(bool(runs_in_thread) and "input" in runs_in_thread[0], "thread_runs 给问答对")
+    # 回放要复原「上次给我看的那几条」：结果卡片只存在 done 事件里
+    replay_events = runs_in_thread[0].get("events") or []
+    replay_done = [e for e in replay_events if e["kind"] == "done"]
+    check(bool(replay_done), "thread_runs 默认带回事件流，回放能拿到 done")
+    check("items" in (replay_done[0]["data"] if replay_done else {}),
+          "done 事件里带着结果条目，历史回放能重建卡片")
+    text_only = store.thread_runs(threads[0]["id"], steps=False)
+    check("events" not in text_only[0], "steps=False 时不带事件，只读文本列表更轻")
 
     # ---------------------------------------------------------------- 4) HTTP
     settings_mod.save({"ai_agent": True})
@@ -424,8 +432,12 @@ def main() -> int:
     resp = client.get("/api/agent/threads")
     check(resp.status_code == 200 and resp.json()["count"] >= 1, "GET /agent/threads 会话列表")
     resp = client.get(f"/api/agent/threads/{threads[0]['id']}")
-    check(resp.status_code == 200 and resp.json()["count"] >= 1,
+    body = resp.json()
+    check(resp.status_code == 200 and body["count"] >= 1,
           "GET /agent/threads/{id} 能回放问答")
+    check(bool(body["runs"][0].get("events")), "线程详情默认带事件流（结果卡片靠它复原）")
+    resp = client.get(f"/api/agent/threads/{threads[0]['id']}?events=0")
+    check("events" not in resp.json()["runs"][0], "?events=0 只给文本，省流量")
     resp = client.post("/api/agent/save", json={"id": "bilibili:ai1", "on": True})
     check(resp.status_code == 200 and resp.json()["saved"] is True,
           "POST /agent/save 不经模型收藏")

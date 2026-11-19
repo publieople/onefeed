@@ -84,7 +84,12 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
 
             {turn.trace?.length ? (
               <div className="pl-8">
-                <AgentConsole events={turn.trace} answered={answered} answeredAsk={answeredAsk} />
+                <AgentConsole
+                  events={turn.trace}
+                  answered={answered}
+                  answeredAsk={answeredAsk}
+                  readonly={turn.history}
+                />
               </div>
             ) : null}
 

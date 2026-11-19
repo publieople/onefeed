@@ -38,6 +38,8 @@ export interface AgentTurn {
   data?: AiResponse;
   trace?: AgentEvent[];
   stopped?: boolean;
+  /** 从历史里回放出来的一轮：轨迹只读，不再等你确认或回答 */
+  history?: boolean;
 }
 
 /** 详情页告诉 Agent「用户正看着这一条」，问「总结这条」时不用再问是哪条 */
@@ -516,17 +518,70 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     await loadHistory();
   }, [historyOpen, loadHistory]);
 
-  /** 接着上一段聊：把历史问答铺回来，再发消息就落进同一条线程 */
+  /** 接着上一段聊：把历史问答连同结果卡片、轨迹一起铺回来，再发消息就落进同一条线程 */
   const resumeThread = useCallback(
     async (thread: AgentThread) => {
       try {
         const data = await getThread(thread.id);
         const next: AgentTurn[] = [];
+        const marked: string[] = [];
         for (const run of data.runs ?? []) {
           if (run.input) next.push({ role: "user", text: run.input });
-          if (run.reply) next.push({ role: "ai", text: run.reply });
+          const events = Array.isArray(run.events) ? run.events : [];
+          // 回放跟实时同形：轨迹照铺，只把流式正文的 delta 丢掉（几十帧、没有展示价值）
+          const trace = events.filter((event) => event.kind !== "delta");
+          const final = [...events]
+            .reverse()
+            .find((event) => event.kind === "done" || event.kind === "cancelled");
+          if (!final) {
+            const text = run.reply || (run.status === "error" ? "这一轮没跑完。" : "");
+            if (text) {
+              next.push({
+                role: "ai",
+                text,
+                trace: trace.length ? trace : undefined,
+                history: true,
+              });
+            }
+            continue;
+          }
+          const d = (final.data ?? {}) as Record<string, unknown>;
+          const items: FeedItem[] = Array.isArray(d.items) ? (d.items as FeedItem[]) : [];
+          const usage = (d.usage ?? {}) as Record<string, unknown>;
+          const stopped = run.status === "cancelled" || final.kind === "cancelled";
+          const reply = String(d.reply ?? run.reply ?? "");
+          const ai: AiResponse = {
+            engine: "agent",
+            provider: typeof d.provider === "string" ? d.provider : "",
+            plan:
+              (d.plan as AiResponse["plan"]) ??
+              { mode: "agent", platforms: [], kinds: [], since: null, keyword: "", sort: "freshness" },
+            reply,
+            items,
+            count: items.length,
+            suggestions: Array.isArray(d.suggestions) ? (d.suggestions as string[]) : [],
+            understood: String(d.understood ?? ""),
+            steps: Number(usage.steps ?? run.steps ?? 0),
+            ms: Number(usage.ms ?? run.ms ?? 0),
+          };
+          for (const item of items) if (item.saved) marked.push(item.id);
+          next.push({
+            role: "ai",
+            text: reply || (stopped ? "停下了。" : `翻到 ${items.length} 条。`),
+            data: ai,
+            trace: trace.length ? trace : undefined,
+            stopped,
+            history: true,
+          });
         }
         setTurns(next);
+        if (marked.length) {
+          setSaved((prev) => {
+            const merged = new Set(prev);
+            for (const id of marked) merged.add(id);
+            return merged;
+          });
+        }
         setThread(thread.id);
         setHistoryOpen(false);
         setOpen(true);

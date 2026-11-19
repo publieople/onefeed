@@ -394,6 +394,10 @@ export interface AgentThreadRun {
   reply: string;
   status: string;
   created_at: number;
+  steps?: number;
+  ms?: number;
+  /** 这一轮的完整事件流：回放时从 done 事件的 payload 里复原结果卡片与轨迹 */
+  events?: AgentEvent[];
 }
 
 /** 会话列表：面板里「最近」用，接着上一段聊不必重说条件 */

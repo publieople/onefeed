@@ -189,6 +189,26 @@ def test_threads_are_resumable_and_saved() -> None:
 
 
 @case
+def test_history_replay_keeps_results_and_trace() -> None:
+    """回放一段旧对话，得跟刚聊完一样有结果卡片和轨迹。
+
+    以前 resumeThread 只铺 input/reply 两行字，done 事件里的 items 被丢掉，
+    用户翻历史就只剩「已帮你打开那期」这句话、没有那期本身。
+    """
+    assert 'event.kind === "done" || event.kind === "cancelled"' in AGENT
+    assert 'event.kind !== "delta"' in AGENT, "回放要滤掉流式正文，否则几十帧全塞进 DOM"
+    assert "history: true" in AGENT
+    # 轨迹里的旧问卷/旧确认不能重新变成可点按钮
+    assert "readonly={turn.history}" in THREAD
+    assert "const { open: historyOpen }" not in THREAD
+    assert "readonly" in CONSOLE and "这轮没等到你的回答" in CONSOLE
+    assert "这轮没等到你的确认" in CONSOLE
+    # 类型上线程详情要能带事件
+    api = read("api.ts")
+    assert "events?: AgentEvent[]" in api
+
+
+@case
 def test_shortcut_help_is_the_single_source() -> None:
     for key in ("/", "⌘ / Ctrl + K", "Esc", "?", "j / k", "← / →"):
         assert key in HELP, "快捷键表里没写 " + key

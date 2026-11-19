@@ -22,6 +22,8 @@ interface Props {
   /** 客户端回过的提问：ask_id → 选了什么（回放时用来显示结果） */
   answeredAsk?: Record<string, string[]>;
   onAnswer?: (askId: string, selected: string[], text: string) => void;
+  /** 历史回放：轨迹只读，别让旧问卷再变成可点的按钮 */
+  readonly?: boolean;
 }
 
 /** 一轮 Agent 的轨迹：打算怎么做、想什么、查了什么、动了什么、问你什么。 */
@@ -32,6 +34,7 @@ export default function AgentConsole({
   onConfirm,
   answeredAsk = {},
   onAnswer,
+  readonly = false,
 }: Props) {
   const plan = events.find((event) => event.kind === "plan");
   // 正在等用户回答时，底部不该再说「下一步…」——下一步是用户
@@ -67,7 +70,7 @@ export default function AgentConsole({
         </div>
       ) : null}
 
-      {rows.length === 0 ? (
+      {rows.length === 0 && !readonly ? (
         <div className="flex items-center gap-1.5 text-[11.5px] text-fade">
           <Loader2 size={11} className="animate-spin" />
           正在想…
@@ -81,6 +84,7 @@ export default function AgentConsole({
             event={event}
             answered={answered[String(event.data.confirm_id)]}
             onConfirm={onConfirm}
+            readonly={readonly}
           />
         ) : event.kind === "need_answer" ? (
           <AskRow
@@ -89,6 +93,7 @@ export default function AgentConsole({
             picked={answeredAsk[String(event.data.ask_id)]}
             running={running}
             onAnswer={onAnswer}
+            readonly={readonly}
           />
         ) : event.kind === "error" ? (
           <div key={event.seq} className="text-[11.5px] leading-snug text-[color:var(--warn,#b4432b)]">
@@ -144,11 +149,13 @@ function AskRow({
   picked,
   running,
   onAnswer,
+  readonly,
 }: {
   event: AgentEvent;
   picked?: string[];
   running?: boolean;
   onAnswer?: (askId: string, selected: string[], text: string) => void;
+  readonly?: boolean;
 }) {
   const askId = String(event.data.ask_id ?? "");
   const options: string[] = Array.isArray(event.data.options)
@@ -192,6 +199,8 @@ function AskRow({
           <Check size={11} />
           你回了：{picked.length ? picked.join("、") : "（没选）"}
         </div>
+      ) : readonly ? (
+        <div className="mt-1.5 text-[11px] text-fade">这轮没等到你的回答</div>
       ) : (
         <>
           {options.length ? (
@@ -248,10 +257,12 @@ function ConfirmRow({
   event,
   answered,
   onConfirm,
+  readonly,
 }: {
   event: AgentEvent;
   answered?: boolean;
   onConfirm?: (confirmId: string, allow: boolean) => void;
+  readonly?: boolean;
 }) {
   const confirmId = String(event.data.confirm_id ?? "");
   const settled = typeof answered === "boolean";
@@ -269,6 +280,8 @@ function ConfirmRow({
           {answered ? <Check size={11} /> : <X size={11} />}
           {answered ? "已允许" : "没允许，它按现有数据继续"}
         </div>
+      ) : readonly ? (
+        <div className="mt-1.5 text-[11px] text-fade">这轮没等到你的确认</div>
       ) : (
         <div className="mt-1.5 flex gap-1.5">
           <button
