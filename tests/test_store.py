@@ -20,7 +20,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from onefeed.store import Store, decode_cursor, encode_cursor  # noqa: E402
+from onefeed.store import SCHEMA_VERSION, Store, decode_cursor, encode_cursor  # noqa: E402
 
 VERBOSE = "--verbose" in sys.argv
 CHECKS = 0
@@ -69,7 +69,7 @@ def main() -> int:
 
         # 建表与迁移
         check(db.is_file(), "数据库文件已创建")
-        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 5, "user_version = 5")
+        check(store.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION, "user_version = SCHEMA_VERSION")
         # v5：Agent 运行、步骤、收藏标记都在同一库；hidden 默认不进 feed
         check(store.get_mark("demo:item0")["saved"] is False, "v5 item_marks 默认未收藏")
 

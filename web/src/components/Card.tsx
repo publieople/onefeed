@@ -1,7 +1,20 @@
-import { memo, useRef, type CSSProperties } from "react";
+import { memo, useRef, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { prefetchItem } from "../api";
-import { FileText, Heart, Image as ImageIcon, MessageCircle, Play, Quote, Star } from "lucide-react";
+import {
+  FileText,
+  Heart,
+  Image as ImageIcon,
+  Link2,
+  MessageCircle,
+  MoreHorizontal,
+  Play,
+  Quote,
+  Sparkles,
+  Star,
+} from "lucide-react";
+import { useAgentActions, useAgentSession } from "../agent/AgentProvider";
+import CardMenu, { type CardMenuItem } from "./CardMenu";
 import type { FeedItem } from "../api";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
@@ -221,6 +234,56 @@ function Card({ item, onOpen, vtNames }: Props) {
   const body = excerpt(item);
   const kindLabel = KIND_LABEL[item.kind] ?? item.kind;
   const hoverTimer = useRef<number | null>(null);
+  const linkRef = useRef<HTMLAnchorElement | null>(null);
+  const moreRef = useRef<HTMLButtonElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { saved, toggleSave } = { ...useAgentSession(), ...useAgentActions() };
+  const isSaved = saved.has(item.id) || Boolean(item.saved);
+
+  /** 卡片本身是 <a>：里面这些按钮必须先掐掉跳转，否则点收藏会把人送走 */
+  const swallow = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const copyLink = () => {
+    const announce = () => window.dispatchEvent(new CustomEvent("onefeed:toast", { detail: { text: "已复制原平台链接" } }));
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(item.url).then(announce).catch(fallbackCopy);
+      return;
+    }
+    fallbackCopy();
+    function fallbackCopy() {
+      const area = document.createElement("textarea");
+      area.value = item.url;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      try {
+        document.execCommand("copy");
+        announce();
+      } finally {
+        area.remove();
+      }
+    }
+  };
+
+  const menuItems: CardMenuItem[] = [
+    {
+      id: "save",
+      label: isSaved ? "移出稍后再看" : "稍后再看",
+      icon: <Star size={13} fill={isSaved ? "currentColor" : "none"} />,
+      onSelect: () => toggleSave(item.id),
+    },
+    { id: "copy", label: "复制原平台链接", icon: <Link2 size={13} />, onSelect: copyLink },
+    {
+      id: "summary",
+      label: "查看 AI 总结",
+      icon: <Sparkles size={13} />,
+      onSelect: () => onOpen(item.id, linkRef.current ?? document.body, item),
+    },
+  ];
 
   /* 指针停一下就开始预取：转场结束时数据大概率已经就位，不会飞进去撞见骨架屏 */
   const schedulePrefetch = () => {
@@ -234,6 +297,7 @@ function Card({ item, onOpen, vtNames }: Props) {
 
   return (
     <motion.a
+      ref={linkRef}
       href={"/item/" + encodeURIComponent(item.id)}
       aria-label={p.label + " · " + kindLabel + " · " + item.title}
       onClick={(e) => {
@@ -314,7 +378,42 @@ function Card({ item, onOpen, vtNames }: Props) {
             </span>
           ) : null}
         </span>
+        {/* 卡片操作：常驻而不是 hover 才出现 —— 触屏没有 hover，键盘用户也不该先猜一下 */}
+        <span className="ml-1.5 flex shrink-0 items-center gap-0.5 border-l border-line pl-1">
+          <button
+            onClick={(event) => {
+              swallow(event);
+              toggleSave(item.id);
+            }}
+            aria-label={isSaved ? "移出稍后再看" : "稍后再看"}
+            aria-pressed={isSaved}
+            title={isSaved ? "移出稍后再看" : "稍后再看"}
+            className={
+              "flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-wash " +
+              (isSaved ? "text-ink" : "text-fade hover:text-ink")
+            }
+          >
+            <Star size={13} fill={isSaved ? "currentColor" : "none"} />
+          </button>
+          <button
+            ref={moreRef}
+            onClick={(event) => {
+              swallow(event);
+              setMenuOpen((prev) => !prev);
+            }}
+            aria-label="更多操作"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            title="更多操作"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-fade transition hover:bg-wash hover:text-ink"
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        </span>
       </footer>
+      {menuOpen && moreRef.current ? (
+        <CardMenu anchor={moreRef.current} items={menuItems} onClose={() => setMenuOpen(false)} />
+      ) : null}
     </motion.a>
   );
 }

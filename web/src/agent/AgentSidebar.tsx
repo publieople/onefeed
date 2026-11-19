@@ -2,6 +2,7 @@ import {
   ChevronRight,
   HelpCircle,
   Loader2,
+  NotebookPen,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -19,6 +20,11 @@ import { useAgentActions, useAgentHistory, useAgentSession } from "./AgentProvid
  * 左栏：Agent 工作台。
  * 只放「跟 Agent 有关」的东西 —— 会话史、新对话、收藏入口。导航菜单不往这里塞，
  * 它跟顶栏的设置 / 市场是两套东西，混在一起会变成又一个侧边导航。
+ *
+ * 收放动画的要点：两层都在 DOM 里，各自固定自己的宽度（展开层 240、图标轨 64）。
+ * 外壳只负责把这一列从 64 过渡到 240 —— 展开层永远按 240 排版，被窄列裁掉一部分，
+ * 而不是先按 64 排版再重排一次。早先直接换组件，宽度动画跑起来的那 220ms 里
+ * 整个面板都挤在 64px 内，标题一行行折成两三个字，最后才「啪」地展开。
  */
 export default function AgentSidebar({
   collapsed = false,
@@ -38,6 +44,7 @@ export default function AgentSidebar({
   const { refreshHistory, resumeThread, newThread, openWith } = useAgentActions();
   const [query, setQuery] = useState("");
   const [savedCount, setSavedCount] = useState(0);
+  const [summaryCount, setSummaryCount] = useState(0);
 
   useEffect(() => {
     void refreshHistory();
@@ -48,9 +55,18 @@ export default function AgentSidebar({
       void getJSON<FeedResponse>("/api/feed?saved=1&limit=1")
         .then((data) => setSavedCount(data.count ?? 0))
         .catch(() => setSavedCount(0));
+    const loadSummaries = () =>
+      void getJSON<{ count: number }>("/api/agent/summaries?limit=1")
+        .then((data) => setSummaryCount(data.count ?? 0))
+        .catch(() => setSummaryCount(0));
     load();
+    loadSummaries();
     window.addEventListener("onefeed:saved", load);
-    return () => window.removeEventListener("onefeed:saved", load);
+    window.addEventListener("onefeed:summary", loadSummaries);
+    return () => {
+      window.removeEventListener("onefeed:saved", load);
+      window.removeEventListener("onefeed:summary", loadSummaries);
+    };
   }, []);
 
   const groups = useMemo(() => groupThreads(items, query), [items, query]);
@@ -66,11 +82,140 @@ export default function AgentSidebar({
     onNavigate?.();
   };
 
-  if (collapsed) {
-    return (
-      <aside
-        aria-label="Agent 工作台（收起的图标栏）"
-        className="flex h-full w-full flex-col items-center gap-1 py-2"
+  return (
+    <aside aria-label="Agent 工作台" className="relative h-full w-full overflow-hidden">
+      {/* 展开层：固定 240（= 外壳 LEFT_W_FULL）。外层列变宽时只是把它多露出来一截 */}
+      <div
+        data-shell-layer="full"
+        data-on={!collapsed}
+        className="side-layer absolute inset-y-0 left-0 flex w-[240px] flex-col"
+      >
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
+          <Sparkles size={14} className="text-muted" />
+          <span className="text-[13px] font-medium">Agent 工作台</span>
+          <button
+            onClick={onCollapse}
+            className="ml-auto flex h-7 w-7 items-center justify-center rounded-full text-fade transition hover:bg-wash hover:text-ink"
+            aria-label="收起 Agent 工作台"
+            title="收起（[）"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        </div>
+
+        <div className="shrink-0 space-y-2 px-3 py-2.5">
+          <button
+            onClick={start}
+            className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-solid text-[12.5px] text-solid-fg transition hover:opacity-90"
+          >
+            <Plus size={14} />
+            新对话
+          </button>
+          <label className="flex h-8 items-center gap-1.5 rounded-lg border border-line px-2 text-fade focus-within:border-ink/25">
+            <Search size={12} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="找一段聊过的"
+              aria-label="搜索对话"
+              className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-fade"
+            />
+          </label>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
+          {loading && !items.length ? (
+            <p className="flex items-center gap-2 px-2 py-6 text-[12px] text-fade">
+              <Loader2 size={12} className="animate-spin" />
+              正在翻…
+            </p>
+          ) : !items.length ? (
+            <p className="px-2 py-6 text-[12px] leading-relaxed text-muted">
+              还没聊过。按 / 说一句，这里就会记下来。
+            </p>
+          ) : !groups.length ? (
+            <p className="px-2 py-6 text-[12px] text-muted">没有匹配的对话。</p>
+          ) : (
+            groups.map((group) => (
+              <section key={group.label} className="mb-2">
+                <h3 className="px-2 py-1 text-[11px] text-fade">{group.label}</h3>
+                <ul className="space-y-0.5">
+                  {group.items.map((thread) => (
+                    <li key={thread.id}>
+                      <button
+                        onClick={() => resume(thread)}
+                        aria-current={thread.id === threadId ? "true" : undefined}
+                        className={
+                          "w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-wash/80 " +
+                          (thread.id === threadId ? "bg-wash text-ink" : "text-muted")
+                        }
+                      >
+                        <span className="flex items-center gap-1.5">
+                          {thread.id === threadId && busy ? (
+                            <Loader2 size={10} className="shrink-0 animate-spin" />
+                          ) : null}
+                          <span className="truncate text-[12.5px] leading-[1.4]">{thread.title || "没起名的对话"}</span>
+                        </span>
+                        <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-fade">
+                          {thread.runs} 轮
+                          <span>·</span>
+                          {relative(thread.updated_at)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-line p-2">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("onefeed:rail", { detail: { tab: "saved" } }))}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
+          >
+            <Star size={13} />
+            稍后再看
+            <span className="ml-auto text-[11px] text-fade">{savedCount}</span>
+          </button>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("onefeed:rail", { detail: { tab: "summaries" } }))}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
+          >
+            <NotebookPen size={13} />
+            AI 总结
+            <span className="ml-auto text-[11px] text-fade">{summaryCount}</span>
+          </button>
+          <button
+            onClick={onHelp}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
+          >
+            <HelpCircle size={13} />
+            快捷键
+            <kbd className="ml-auto rounded border border-line px-1 text-[10px] text-fade">?</kbd>
+          </button>
+          <Link
+            to="/settings"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
+          >
+            <Settings size={13} />
+            设置
+          </Link>
+          {turns.length ? (
+            <p className="mt-1 flex items-center gap-1 px-2 text-[11px] text-fade">
+              <ChevronRight size={10} />
+              当前这段 {turns.filter((turn) => turn.role === "user").length} 轮
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {/* 图标轨：同样固定 64 宽，和展开层交叉淡入淡出 */}
+      <div
+        data-shell-layer="rail"
+        data-on={collapsed}
+        className="side-layer absolute inset-y-0 left-0 flex w-16 flex-col items-center gap-1 py-2"
       >
         <button
           onClick={onExpand}
@@ -132,125 +277,6 @@ export default function AgentSidebar({
         >
           <Settings size={15} />
         </Link>
-      </aside>
-    );
-  }
-
-  return (
-    <aside
-      aria-label="Agent 工作台"
-      className="flex h-full w-full min-w-0 flex-col overflow-hidden"
-    >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
-        <Sparkles size={14} className="text-muted" />
-        <span className="text-[13px] font-medium">Agent 工作台</span>
-        <button
-          onClick={onCollapse}
-          className="ml-auto flex h-7 w-7 items-center justify-center rounded-full text-fade transition hover:bg-wash hover:text-ink"
-          aria-label="收起 Agent 工作台"
-          title="收起（[）"
-        >
-          <PanelLeftClose size={14} />
-        </button>
-      </div>
-
-      <div className="shrink-0 space-y-2 px-3 py-2.5">
-        <button
-          onClick={start}
-          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-solid text-[12.5px] text-solid-fg transition hover:opacity-90"
-        >
-          <Plus size={14} />
-          新对话
-        </button>
-        <label className="flex h-8 items-center gap-1.5 rounded-lg border border-line px-2 text-fade focus-within:border-ink/25">
-          <Search size={12} />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="找一段聊过的"
-            aria-label="搜索对话"
-            className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-fade"
-          />
-        </label>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
-        {loading && !items.length ? (
-          <p className="flex items-center gap-2 px-2 py-6 text-[12px] text-fade">
-            <Loader2 size={12} className="animate-spin" />
-            正在翻…
-          </p>
-        ) : !items.length ? (
-          <p className="px-2 py-6 text-[12px] leading-relaxed text-muted">
-            还没聊过。按 / 说一句，这里就会记下来。
-          </p>
-        ) : !groups.length ? (
-          <p className="px-2 py-6 text-[12px] text-muted">没有匹配的对话。</p>
-        ) : (
-          groups.map((group) => (
-            <section key={group.label} className="mb-2">
-              <h3 className="px-2 py-1 text-[11px] text-fade">{group.label}</h3>
-              <ul className="space-y-0.5">
-                {group.items.map((thread) => (
-                  <li key={thread.id}>
-                    <button
-                      onClick={() => resume(thread)}
-                      aria-current={thread.id === threadId ? "true" : undefined}
-                      className={
-                        "w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-wash/80 " +
-                        (thread.id === threadId ? "bg-wash text-ink" : "text-muted")
-                      }
-                    >
-                      <span className="flex items-center gap-1.5">
-                        {thread.id === threadId && busy ? (
-                          <Loader2 size={10} className="shrink-0 animate-spin" />
-                        ) : null}
-                        <span className="truncate text-[12.5px] leading-[1.4]">{thread.title || "没起名的对话"}</span>
-                      </span>
-                      <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-fade">
-                        {thread.runs} 轮
-                        <span>·</span>
-                        {relative(thread.updated_at)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))
-        )}
-      </div>
-
-      <div className="shrink-0 border-t border-line p-2">
-        <button
-          onClick={() => window.dispatchEvent(new CustomEvent("onefeed:rail", { detail: { tab: "saved" } }))}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
-        >
-          <Star size={13} />
-          稍后再看
-          <span className="ml-auto text-[11px] text-fade">{savedCount}</span>
-        </button>
-        <button
-          onClick={onHelp}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
-        >
-          <HelpCircle size={13} />
-          快捷键
-          <kbd className="ml-auto rounded border border-line px-1 text-[10px] text-fade">?</kbd>
-        </button>
-        <Link
-          to="/settings"
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
-        >
-          <Settings size={13} />
-          设置
-        </Link>
-        {turns.length ? (
-          <p className="mt-1 flex items-center gap-1 px-2 text-[11px] text-fade">
-            <ChevronRight size={10} />
-            当前这段 {turns.filter((turn) => turn.role === "user").length} 轮
-          </p>
-        ) : null}
       </div>
     </aside>
   );

@@ -1,4 +1,4 @@
-import { Bookmark, History, Layers, Sparkles, X } from "lucide-react";
+import { Bookmark, History, Layers, NotebookPen, Sparkles, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { DUR, EASE } from "../motion/tokens";
@@ -7,11 +7,17 @@ import { AgentRailBody } from "../agent/AgentRail";
 import { useRailSlot } from "../layout/RailSlot";
 import { platform } from "../platform";
 import SavedList from "./SavedList";
+import SummaryList from "./SummaryList";
 
-export type RailTab = "saved" | "ai" | "siblings";
+export type RailTab = "saved" | "summaries" | "ai" | "siblings";
 
-const ICON = { saved: Bookmark, ai: Sparkles, siblings: Layers } as const;
-const LABEL: Record<RailTab, string> = { saved: "稍后再看", ai: "AI 助手", siblings: "同题" };
+const ICON = { saved: Bookmark, summaries: NotebookPen, ai: Sparkles, siblings: Layers } as const;
+const LABEL: Record<RailTab, string> = {
+  saved: "稍后再看",
+  summaries: "AI 总结",
+  ai: "AI 助手",
+  siblings: "同题",
+};
 
 /**
  * 右栏槽位：一个 320 宽的栏，里面按场景换三块内容。
@@ -32,7 +38,10 @@ export default function RightRail({
   const { siblings } = useRailSlot();
   const [tab, setTab] = useState<RailTab>(defaultTab);
 
-  const tabs: RailTab[] = siblings.length ? ["saved", "ai", "siblings"] : ["saved", "ai"];
+  // 「AI 总结」常驻：它是这一栏除了稍后再看之外最常用的入口
+  const tabs: RailTab[] = siblings.length
+    ? ["saved", "summaries", "ai", "siblings"]
+    : ["saved", "summaries", "ai"];
   const key = tabs.join(",");
 
   // Agent 以「右栏」形态打开（详情页 ≥1080）时，这一栏自动让给对话。
@@ -93,7 +102,7 @@ export default function RightRail({
                 aria-selected={on}
                 onClick={() => setTab(id)}
                 className={
-                  "flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] transition " +
+                  "flex h-7 items-center gap-1 rounded-full px-2 text-[11.5px] transition " +
                   (on ? "bg-wash text-ink" : "text-muted hover:text-ink")
                 }
               >
@@ -138,6 +147,8 @@ export default function RightRail({
           <AgentRailBody />
         ) : tab === "saved" ? (
           <SavedList onOpen={onClose} />
+        ) : tab === "summaries" ? (
+          <SummaryList onOpen={onClose} />
         ) : (
           <SiblingList />
         )}

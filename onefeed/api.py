@@ -393,6 +393,13 @@ def agent_saved(request: Request, limit: int = Query(50, ge=1, le=200)) -> dict:
     return {"items": items, "count": len(items)}
 
 
+@router.get("/agent/summaries")
+def agent_summaries(request: Request, limit: int = Query(30, ge=1, le=100)) -> dict:
+    """最近生成过 AI 总结的条目，右栏「AI 总结」页用。"""
+    items = _store(request).summarized_items(limit=limit)
+    return {"items": items, "count": len(items)}
+
+
 @router.post("/agent/mark")
 def agent_mark(request: Request, payload: dict[str, Any] = Body(default={})) -> dict:
     """卡片上的收藏/已读/隐藏按钮（不经过模型）。"""

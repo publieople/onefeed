@@ -62,6 +62,17 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [toast, setToast] = useState("");
+  // 任何组件都能报一句结果（卡片菜单复制链接、收藏切换），不必把 toast 状态传下去
+  useEffect(() => {
+    const onToast = (event: Event) => {
+      const text = (event as CustomEvent<{ text?: string }>).detail?.text;
+      if (!text) return;
+      setToast(text);
+      window.setTimeout(() => setToast(""), 2400);
+    };
+    window.addEventListener("onefeed:toast", onToast);
+    return () => window.removeEventListener("onefeed:toast", onToast);
+  }, []);
   const [help, setHelp] = useState(false);
   // 信息流的滚轮限速：翻得太快会冲到还没取回来的地方，这里按每秒像素上限放行
   useScrollSpeedCap();

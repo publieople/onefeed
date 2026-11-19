@@ -498,3 +498,48 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
   }
 }
 
+
+/* 左栏收放：两层都常驻，各自固定宽度（展开层 240 / 图标轨 64）。
+   外壳只把这一列从 64 过渡到 240，展开层永远按 240 排版、被窄列裁掉 ——
+   不会先按 64px 重排再展开。交叉淡入淡出让两层的切换看不出「换了个组件」。 */
+.side-layer {
+  opacity: 1;
+  transform: translateX(0);
+  visibility: visible;
+  transition:
+    opacity 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
+}
+
+.side-layer[data-on="false"] {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-6px);
+  pointer-events: none;
+  transition:
+    opacity 120ms ease-out,
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 120ms;
+}
+
+/* 栏宽：带一点回弹的缓出（260ms），收放像被弹了一下而不是匀速平移 */
+.shell-col {
+  transition: width 260ms cubic-bezier(0.22, 1.24, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side-layer,
+  .side-layer[data-on="false"],
+  .shell-col {
+    transition: none !important;
+  }
+}
+
+/* 换肤的对角扫过必须只作用在 root 一层。
+   顶栏平时有常驻的 of-topbar 名字（导航转场时它不跟着抖），但换肤时它会变成
+   独立的一层，没被那条斜带覆盖 —— 看起来就是顶栏自己淡了一下，很割裂。
+   换肤期间把这个名字摘掉，让顶栏并入整页快照一起被扫过。 */
+html.theme-vt [data-vt="topbar"] {
+  view-transition-name: none !important;
+}

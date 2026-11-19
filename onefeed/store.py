@@ -756,6 +756,34 @@ class Store:
         return {"item_id": row["item_id"], "payload": payload,
                 "fetched_at": int(row["fetched_at"] or 0)}
 
+    def summarized_items(self, limit: int = 30) -> list[dict[str, Any]]:
+        """最近生成过 AI 总结的条目，右栏「AI 总结」那一页用。
+
+        总结表只存 payload，标题 / 平台 / 封面都在 items 里，所以这里 join 回来；
+        排序按总结生成时间（用户刚看完的那条在最上面），不是按发布时间。
+        """
+        rows = self.conn.execute(
+            "SELECT i.*, s.payload AS summary_payload, s.fetched_at AS summary_at "
+            "FROM summaries s JOIN items i ON i.id = s.item_id "
+            "ORDER BY s.fetched_at DESC LIMIT ?",
+            (max(1, min(int(limit), 100)),)).fetchall()
+        out: list[dict[str, Any]] = []
+        for raw in rows:
+            row = dict(raw)
+            payload_raw = row.pop("summary_payload", "{}")
+            row["summary_at"] = int(row.pop("summary_at", 0) or 0)
+            try:
+                payload = json.loads(payload_raw or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            row["summary_tldr"] = str(payload.get("tldr") or "")
+            row["summary_points"] = len(payload.get("points") or [])
+            self._decode_row(row)
+            out.append(row)
+        return out
+
     def save_summary(self, item_id: str, payload: dict[str, Any]) -> None:
         with self._write_lock:
             self.conn.execute(

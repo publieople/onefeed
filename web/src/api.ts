@@ -431,6 +431,17 @@ export function agentSaved(): Promise<{ items: FeedItem[]; count: number }> {
   return getJSON("/api/agent/saved");
 }
 
+/** 最近总结过的条目：条目本体 + 那次的 tldr / 要点数 / 生成时间 */
+export interface SummarizedItem extends FeedItem {
+  summary_tldr?: string;
+  summary_at?: number;
+  summary_points?: number;
+}
+
+export function agentSummaries(limit = 30): Promise<{ items: SummarizedItem[]; count: number }> {
+  return getJSON("/api/agent/summaries?limit=" + limit);
+}
+
 export function agentUndo(token: string): Promise<Record<string, unknown>> {
   return postJSON("/api/agent/undo", { token });
 }

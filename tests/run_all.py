@@ -43,6 +43,13 @@ ORDER = [
     "test_lightbox.py",
     "test_entry.py",
     "test_e2e_feed.py",
+    "test_interaction.py",
+    "test_card_actions.py",
+    "test_nav_motion.py",
+    "test_grid_cols.py",
+    "test_infinite_and_rail.py",
+    "test_side_rails.py",
+    "test_motion_coverage.py",
 ]
 
 

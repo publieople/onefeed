@@ -30,7 +30,15 @@ def test_left_rail_transitions_its_own_column_width():
     assert "shell.left === \"full\" ? LEFT_W_FULL : LEFT_W_RAIL" in shell
     # flex item 的 min-width:auto = min-content（子元素自己撑）会把宽度撑住，没有起点
     assert "min-w-0" in shell
-    assert "transition-[width] duration-[220ms] ease-out" in shell
+    # 过渡写在 theme.css 的 .shell-col 里（带一点回弹的缓出），不在 Tailwind 里堆 arbitrary
+    assert "shell-col" in shell
+    css = read("web/src/theme.css")
+    assert ".shell-col" in css and "cubic-bezier(0.22, 1.24, 0.36, 1)" in css
+    # 两层常驻、各自固定宽度：过渡期间展开层不会被重排成 64px 宽
+    sidebar = read("web/src/agent/AgentSidebar.tsx")
+    assert 'data-shell-layer="full"' in sidebar and 'data-shell-layer="rail"' in sidebar
+    assert "w-[240px]" in sidebar and "w-16" in sidebar
+    assert ".side-layer" in css and '[data-on="false"]' in css
 
 
 def test_right_drawer_enters_with_keyframes_and_leaves_with_transition():

@@ -689,6 +689,8 @@ export default function ItemPage() {
         setStreamRaw(rawRef.current);
       },
       onDone: (payload) => {
+      // 右栏「AI 总结」按这个广播刷新；总结是新生成的还是缓存命中都算一次更新
+      window.dispatchEvent(new CustomEvent("onefeed:summary", { detail: { id: targetId } }));
         if (!summaryAlive.current) return;
         pendingSummary.current = { ok: true, summary: payload };
         setSummaryLoading(false);

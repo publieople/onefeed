@@ -46,7 +46,7 @@ from onefeed import agent_runtime as rt  # noqa: E402
 from onefeed import ai as ai_mod  # noqa: E402
 from onefeed import settings as settings_mod  # noqa: E402
 from onefeed.app import create_app  # noqa: E402
-from onefeed.store import Store  # noqa: E402
+from onefeed.store import SCHEMA_VERSION, Store  # noqa: E402
 
 VERBOSE = "--verbose" in sys.argv
 CHECKS = 0
@@ -111,7 +111,7 @@ def main() -> int:
         leftover.unlink(missing_ok=True)
     store = Store(db)
     store.upsert_items(seed())
-    check(store.conn.execute("PRAGMA user_version").fetchone()[0] == 5, "schema 迁到 v5")
+    check(store.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION, "schema 迁到最新版")
 
     # ---------------------------------------------------------------- 1) 标记
     check(store.get_mark("bilibili:ai1")["saved"] is False, "没标记过时 saved=False")
@@ -393,17 +393,22 @@ def main() -> int:
           "不存在的 run 答复返回 False")
 
     # 会话：一轮 run 就是一段线程里的一个问答对
-    threads = store.recent_threads(limit=10)
+    # 用这轮自己的 thread，不要赌 recent_threads[0] 就是它：
+    # 前面几条用例也会起 run，跑得快慢不同，最新线程未必是刚完成这条。
+    thread_id = row_a.get("thread_id") or ""
+    threads = store.recent_threads(limit=20)
     check(bool(threads) and threads[0]["runs"] >= 1, "recent_threads 能列出会话与轮数")
-    runs_in_thread = store.thread_runs(threads[0]["id"])
+    check(any(t["id"] == thread_id for t in threads), "刚跑完的会话在 recent_threads 里")
+    runs_in_thread = store.thread_runs(thread_id)
     check(bool(runs_in_thread) and "input" in runs_in_thread[0], "thread_runs 给问答对")
+    mine = next((r for r in runs_in_thread if r["id"] == started_a["run_id"]), runs_in_thread[-1])
     # 回放要复原「上次给我看的那几条」：结果卡片只存在 done 事件里
-    replay_events = runs_in_thread[0].get("events") or []
+    replay_events = mine.get("events") or []
     replay_done = [e for e in replay_events if e["kind"] == "done"]
     check(bool(replay_done), "thread_runs 默认带回事件流，回放能拿到 done")
     check("items" in (replay_done[0]["data"] if replay_done else {}),
           "done 事件里带着结果条目，历史回放能重建卡片")
-    text_only = store.thread_runs(threads[0]["id"], steps=False)
+    text_only = store.thread_runs(thread_id, steps=False)
     check("events" not in text_only[0], "steps=False 时不带事件，只读文本列表更轻")
 
     # ---------------------------------------------------------------- 4) HTTP

@@ -118,7 +118,7 @@ export default function Shell({
             // 抬上去就把渐变挡回内容区，不用去算列宽。
             // top-[57px] / 100vh-57px：顶栏 h-14 加 1px 分隔线才是它真正的下沿，
             // 用 top-14 会让栏底多出 1px 落到视口外
-            className="sticky top-[57px] z-40 h-[calc(100vh-57px)] min-w-0 shrink-0 overflow-hidden border-r border-line bg-paper transition-[width] duration-[220ms] ease-out"
+            className="shell-col sticky top-[57px] z-40 h-[calc(100vh-57px)] min-w-0 shrink-0 overflow-hidden border-r border-line bg-paper"
           >
             {shell.left === "full" ? (
               <AgentSidebar onCollapse={shell.toggleLeft} onHelp={onHelp} />
