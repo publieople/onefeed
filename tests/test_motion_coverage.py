@@ -52,6 +52,22 @@ def test_bottom_sheet_keeps_a_mounted_exit():
     assert 'mode === "closed" || !sheet.mounted' in surface
 
 
+def test_bottom_veil_stays_under_the_two_side_columns():
+    """底部渐隐是给内容卡片的，横跨视口会顺手把侧栏底部刷成灰的。
+
+    用户看到的是「稍后再看 / 快捷键 / 设置 三行发灰、像禁用」，其实颜色 token
+    没变（一直 text-muted #6b7280），是那条 fixed inset-x-0 的渐变盖在上面。
+    两栏都是不透明纸色底，用 z 序把它挡回去，不要靠算列宽。
+    """
+    surface = read("web/src/agent/AgentSurface.tsx")
+    assert "pointer-events-none fixed inset-x-0 bottom-0 z-30" in surface
+    assert "pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-paper" in surface
+
+    shell = read("web/src/layout/Shell.tsx")
+    assert 'sticky top-[76px] z-40 h-[calc(100vh-96px)] min-w-0 shrink-0 overflow-hidden rounded-card border border-line bg-paper' in shell
+    assert "rail-in sticky top-[76px] z-40 h-[calc(100vh-96px)] min-h-[420px] w-[320px] shrink-0" in shell
+
+
 def test_keyframes_and_reduce_motion_are_declared():
     css = read("web/src/theme.css")
     for name in ("sheet-in", "drawer-in", "rail-in"):

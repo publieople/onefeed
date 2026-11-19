@@ -91,7 +91,11 @@ export default function Shell({
           <div
             data-shell-left={shell.left}
             style={{ width: shell.left === "full" ? LEFT_W_FULL : LEFT_W_RAIL }}
-            className="sticky top-[76px] h-[calc(100vh-96px)] min-w-0 shrink-0 overflow-hidden rounded-card border border-line bg-paper transition-[width] duration-[220ms] ease-out"
+            // z-40：抬到底部渐隐层（AgentLauncher 那条 fixed inset-x-0 h-28，z-30）之上。
+            // 那条渐变是为「卡片滚到底淡进纸面」做的，横跨整个视口，会顺手把左栏底部
+            // 「稍后再看 / 快捷键 / 设置」刷成灰的，看着像被禁用了。两栏都是不透明纸色底，
+            // 抬上去就把渐变挡回内容区，不用去算列宽。
+            className="sticky top-[76px] z-40 h-[calc(100vh-96px)] min-w-0 shrink-0 overflow-hidden rounded-card border border-line bg-paper transition-[width] duration-[220ms] ease-out"
           >
             {shell.left === "full" ? (
               <AgentSidebar onCollapse={shell.toggleLeft} onHelp={onHelp} />
@@ -107,7 +111,7 @@ export default function Shell({
 
         {pinned && (shell.rightOpen || rail) ? (
           <RightRail
-            className="rail-in sticky top-[76px] h-[calc(100vh-96px)] min-h-[420px] w-[320px] shrink-0"
+            className="rail-in sticky top-[76px] z-40 h-[calc(100vh-96px)] min-h-[420px] w-[320px] shrink-0"
             defaultTab={onItemPage ? "ai" : "saved"}
             onClose={dismissRail}
           />

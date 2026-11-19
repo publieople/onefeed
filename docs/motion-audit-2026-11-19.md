@@ -141,3 +141,25 @@ cd web; npm run build                                 → index-7qSYc8km.js 469.
 - **抽屉可拖拽关闭**：手指拖动跟 `drawer-in` 关键帧会打架，需要改成全程 JS 驱动，单独一轮做。
 - **窄屏真机**：只验了 1280 与 900 两档；iOS Safari 的 `view-transition` 与 `backdrop` 未验。
 - **触屏没有「指针贴边」**：唤起器的 reveal 依赖 `pointermove`，手机上只能靠上滑（`scroll` 方向）。
+
+## 8. 补记（2026-11-19 20:10）：侧栏底部三行「发灰」不是颜色，是底部渐隐层盖上去的
+
+用户截图（342×142）里「稍后再看 0 / 快捷键 ? / 设置」三行依次变淡、像被禁用。查下来颜色 token 一直没变：
+
+- 三行的 computed `color` 全是 `rgb(107, 114, 128)`（`--c-muted`）、12px、祖先链 `opacity` 无衰减、无 `filter`/`mask`、无动画残留 → 文字本身没问题。
+- 拿 canvas 采样用户截图：y≈32 行最深像素 ≈(115,122,135)、y≈64 行 ≈(184,188,194)、y≈96–112 行 ≈(225,226,226) → 按垂直位置递减，是渐变刷淡。
+- 根子在 `web/src/agent/AgentSurface.tsx:78-81`：底色渐隐 `pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-paper` 挂在一个 `fixed inset-x-0 bottom-0 z-30` 的包裹上，横跨整个视口；左栏 `h-[calc(100vh-96px)]` 底边就在 y≈100vh-20，三行 y=781/811/841（视口 900）全落在最后 112px 的渐变带里。
+
+修法是 z 序，不是算列宽：两栏都是不透明纸色底（`bg-paper`），抬到渐隐层之上，渐变就只留在内容区。
+
+- `web/src/layout/Shell.tsx` 左列加 `z-40`，pinned 右栏 `rail-in sticky ... z-40`。
+- 复验（1440×900，Chrome）：`shot-footer-fixed.png` 三行回到实色 muted；`shot-veil-content.png` 内容区底部渐隐仍在（卡片照样淡进纸面）；`shot-rail-bottom.png`（1800 宽）右栏底部纯净无着色；暗色 `shot-footer-dark.png` 三行等浓。
+- 全站排查：跨视口的遮罩/渐变只有这一条；`TabRail` 的胶囊两端渐隐局限在轨道内，`Card` 的两处渐变是装饰且不跨视口。
+- 守门：`tests/test_motion_coverage.py` 增 `test_bottom_veil_stays_under_the_two_side_columns`（钉住包裹 `z-30`、渐隐类名、两栏的 `z-40`）。
+
+```
+uv run --with pytest python -m pytest tests -q        → 95 passed
+cd web; node scripts/check-ui.mjs                     → OK：没有违规
+cd web; npm run build                                 → index-yzM_yVwJ.js 469.17 kB / gzip 153.00 kB
+```
+
