@@ -1,24 +1,55 @@
-import { History, Sparkles, X } from "lucide-react";
-import { useAgentActions, useAgentSession, useAgentSurface } from "./AgentProvider";
+import { Sparkles, X } from "lucide-react";
 import AgentComposer from "./AgentComposer";
 import AgentHistory from "./AgentHistory";
 import AgentThread from "./AgentThread";
+import { useAgentActions, useAgentSession, useAgentSurface } from "./AgentProvider";
 
 /**
- * 详情页右栏：Agent 和数据并排站着。
- * 这一形态是为了修「Agent 打开一条内容后自己消失」——换页面、看原文时它都在。
+ * 右栏里那块「跟 Agent 聊」的内容。外壳（宽度、圆角、滑动）由 RightRail 管，
+ * 这里只负责对话本身 —— 所以右栏、抽屉、/agent 页都能装同一份。
  */
-export default function AgentRail() {
+export function AgentRailBody() {
   const { focus } = useAgentSurface();
-  const { turns } = useAgentSession();
-  const { close, toggleHistory, ask, inputRef } = useAgentActions();
+  const { ask } = useAgentActions();
 
   const presets = focus
     ? ["总结这一条", "跟同题的其他平台比比", "收藏这条并记一句为什么"]
     : ["今天有什么值得看的", "随便来点"];
 
-  // data-vt="agent" + 常驻名字：跟底部抽屉共用同一个名字，
-  // 从抽屉里打开一条内容时这块面板会被浏览器从抽屉位置插值到右栏位置
+  return (
+    <>
+      {focus ? (
+        <div className="shrink-0 border-b border-line/60 px-3.5 py-2.5">
+          <p className="truncate text-[12px] text-muted">正在看：{focus.title}</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {presets.map((preset) => (
+              <button
+                key={preset}
+                onClick={() => ask(preset)}
+                className="rounded-full border border-line px-2.5 py-1 text-[11.5px] text-muted transition hover:border-ink/30 hover:text-ink"
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <AgentHistory dense />
+      <AgentThread padding="px-3.5 py-3" />
+      <div className="shrink-0 border-t border-line p-3">
+        <AgentComposer />
+      </div>
+    </>
+  );
+}
+
+/**
+ * 独立的右栏外壳。App 外壳的右槽位（components/RightRail.tsx）会用 AgentRailBody 自己搭，
+ * 这个默认导出留给需要单独立一栏的场景。
+ */
+export default function AgentRail() {
+  const { close } = useAgentActions();
+  const { turns } = useAgentSession();
   return (
     <aside
       data-agent-surface="rail"
@@ -27,56 +58,22 @@ export default function AgentRail() {
       aria-label="AI 助手"
       className="sticky top-[76px] flex h-[calc(100vh-96px)] min-h-[420px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_10px_30px_rgba(20,20,20,0.06)]"
     >
-      <div className="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
-        <Sparkles size={14} className="text-ink" />
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3.5">
+        <Sparkles size={14} className="text-muted" />
         <span className="text-[13px] font-medium">找内容</span>
-        <span className="text-[11px] text-fade">{turns.length ? `${turns.length} 条消息` : "随时接着聊"}</span>
-        <button
-          onClick={() => void toggleHistory()}
-          className="ml-auto rounded p-1 text-fade transition hover:bg-wash hover:text-ink"
-          aria-label="最近的对话"
-          title="最近的对话"
-        >
-          <History size={15} />
-        </button>
+        <span className="text-[11.5px] text-fade">
+          {turns.length ? "这是刚才那轮" : "随时接着聊"}
+        </span>
         <button
           onClick={close}
-          className="rounded p-1 text-fade transition hover:bg-wash hover:text-ink"
+          className="ml-auto flex h-7 w-7 items-center justify-center rounded-full text-fade transition hover:bg-wash hover:text-ink"
           aria-label="收起右栏"
           title="收起（Esc）"
         >
-          <X size={15} />
+          <X size={14} />
         </button>
       </div>
-
-      {focus ? (
-        <div className="border-b border-line/70 px-3.5 py-2.5">
-          <p className="truncate text-[11.5px] text-fade" title={focus.title}>
-            正在看：<span className="text-muted">{focus.title}</span>
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {presets.map((preset) => (
-              <button
-                key={preset}
-                onClick={() => {
-                  inputRef.current?.focus();
-                  void ask(preset);
-                }}
-                className="rounded-full border border-line px-2.5 py-1 text-[11.5px] text-muted transition hover:border-ink/25 hover:text-ink"
-              >
-                {preset}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <AgentHistory dense />
-      <AgentThread padding="px-3.5 py-3" />
-
-      <div className="border-t border-line p-3">
-        <AgentComposer />
-      </div>
+      <AgentRailBody />
     </aside>
   );
 }

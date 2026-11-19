@@ -1,8 +1,9 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import TopBar from "./components/TopBar";
 import ShortcutHelp from "./components/ShortcutHelp";
+import Shell from "./layout/Shell";
+import { RailSlotProvider } from "./layout/RailSlot";
 import { ConfirmHost } from "./components/ui/Confirm";
 import { pushScope, popScope, useHotkeys } from "./motion/useHotkeys";
 import FeedPage from "./pages/FeedPage";
@@ -173,16 +174,8 @@ export default function App() {
   return (
     // Agent 的会话挂在路由之上：换页面（包括 Agent 自己打开的那一条）都不重建
     <AgentProvider>
-      <div className="min-h-screen bg-paper">
-      {/* 键盘用户第一个 Tab 就能跳过顶栏直达内容 */}
-      <a
-        href="#main"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-full focus:bg-solid focus:px-4 focus:py-2 focus:text-[13px] focus:text-solid-fg"
-      >
-        跳到内容
-      </a>
-      <TopBar health={health} progress={progress} onRefresh={refresh} />
-      <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1180px] px-6 outline-none">
+      <RailSlotProvider>
+      <Shell health={health} progress={progress} onRefresh={refresh} onHelp={() => setHelp(true)}>
         {/* 走 View Transition 时新页已经以最终样子进了快照，这里不能再播进场动画 */}
         <motion.div
           key={location.pathname}
@@ -210,8 +203,9 @@ export default function App() {
             </Routes>
           </Suspense>
         </motion.div>
-      </main>
-      {/* 三形态的落点：唤起器 / 底部抽屉 / 详情页右栏（右栏由 ItemPage 自己渲染） */}
+      </Shell>
+      </RailSlotProvider>
+      {/* 三形态的落点：唤起器 / 底部抽屉（右栏槽位在 Shell 里） */}
       <AgentSurface />
       <AnimatePresence>
         {toast ? (
@@ -230,7 +224,6 @@ export default function App() {
       {/* 全站确认框的落点：任何页面 await confirmDialog(...) 都渲染在这里 */}
         <ConfirmHost />
         <ShortcutHelp open={help} onClose={() => setHelp(false)} />
-      </div>
     </AgentProvider>
   );
 }

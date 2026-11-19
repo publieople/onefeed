@@ -63,9 +63,11 @@ export interface AgentSessionState {
 
 export interface AgentSurfaceState {
   open: boolean;
-  /** closed：只剩唤起器；sheet：底部抽屉；rail：详情页右侧栏（由 ItemPage 渲染） */
+  /** closed：只剩唤起器；sheet：底部抽屉；rail：右栏（App 外壳的右槽位渲染） */
   mode: "closed" | "sheet" | "rail";
   wide: boolean;
+  /** ≥1800 时右栏常驻：详情页的唤起器收起来，不跟常驻的右栏重复 */
+  pinned: boolean;
   onItemPage: boolean;
   onAgentPage: boolean;
   focus: AgentFocus | null;
@@ -84,8 +86,10 @@ export interface AgentActions {
   toggleSave: (id: string) => void;
   applyFilter: (data: AiResponse) => void;
   toggleHistory: () => void;
-  /** 无条件打开并拉一次会话史：全页形态左栏要用 */
+  /** 无条件打开并拉一次会话史：抽屉 / 右栏的历史面板用 */
   loadHistory: () => void;
+  /** 只刷新列表，不动历史面板的开合：左右侧的常驻栏用它 */
+  refreshHistory: () => Promise<void>;
   resumeThread: (thread: AgentThread) => void;
   newThread: () => void;
   setFocus: (focus: AgentFocus | null) => void;
@@ -187,6 +191,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const [wide, setWide] = useState(() =>
     typeof window === "undefined" ? true : window.matchMedia("(min-width: 1080px)").matches,
   );
+  const [pinned, setPinned] = useState(() =>
+    typeof window === "undefined" ? false : window.matchMedia("(min-width: 1800px)").matches,
+  );
 
   const streamRef = useRef<(() => void) | null>(null);
   const settledRef = useRef(false);
@@ -215,6 +222,14 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1080px)");
     const on = () => setWide(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+
+  /* 1800 起右栏常驻在栅格里（见 layout/useShell.ts），唤起器要让位 */
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1800px)");
+    const on = () => setPinned(mq.matches);
     mq.addEventListener("change", on);
     return () => mq.removeEventListener("change", on);
   }, []);
@@ -487,6 +502,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     });
     try {
       await agentSave(id, on);
+      // 稍后再看那份列表跟卡片星标是同一份数据，改完广播一下让它自己刷新
+      window.dispatchEvent(new CustomEvent("onefeed:saved", { detail: { id, saved: on } }));
     } catch {
       setSaved((prev) => {
         const next = new Set(prev);
@@ -497,8 +514,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     }
   }, [saved]);
 
-  const loadHistory = useCallback(async () => {
-    setHistoryOpen(true);
+  const refreshHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
       const data = await listThreads(20);
@@ -509,6 +525,11 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       setHistoryLoading(false);
     }
   }, []);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryOpen(true);
+    await refreshHistory();
+  }, [refreshHistory]);
 
   const toggleHistory = useCallback(async () => {
     if (historyOpen) {
@@ -667,7 +688,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       setOpen(false);
       return;
     }
-    // 收起方向：抽屉/右栏缩回唤起器。唤起器是收起之后才挂上的，新快照里没有它，
+    // 详情页右栏（≥1080）：右栏是常驻槽位的一部分，收起只是把 tab 还给「稍后再看」，
+    // 不做缩回唤起器的转场 —— 那里没有唤起器可缩。
+    if (onItemPage && wide) {
+      setOpen(false);
+      return;
+    }
+    // 收起方向：抽屉缩回唤起器。唤起器是收起之后才挂上的，新快照里没有它，
     // 所以代位盒子要挂在 apply 里 —— 那样它只进新快照，正好当终点。
     const ghost = createGhost({ agent: onItemPage && wide ? "corner" : "pill" });
     runNav(
@@ -745,8 +772,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   );
 
   const surface = useMemo<AgentSurfaceState>(
-    () => ({ open, mode, wide, onItemPage, onAgentPage, focus, hintIndex, draft }),
-    [open, mode, wide, onItemPage, onAgentPage, focus, hintIndex, draft],
+    () => ({ open, mode, wide, pinned, onItemPage, onAgentPage, focus, hintIndex, draft }),
+    [open, mode, wide, pinned, onItemPage, onAgentPage, focus, hintIndex, draft],
   );
 
   const actions = useMemo<AgentActions>(
@@ -762,6 +789,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       applyFilter,
       toggleHistory,
       loadHistory,
+      refreshHistory,
       resumeThread,
       newThread,
       setFocus,
@@ -780,6 +808,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       applyFilter,
       toggleHistory,
       loadHistory,
+      refreshHistory,
       resumeThread,
       newThread,
       setFocus,

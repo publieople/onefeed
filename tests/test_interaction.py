@@ -109,7 +109,7 @@ def test_agent_survives_navigation() -> None:
     assert "AgentProvider" in AGENT and "useState<AgentTurn[]>" in AGENT
     # 详情页右栏 + 上下文上报
     assert '"rail"' in AGENT and '"sheet"' in AGENT and '"closed"' in AGENT
-    assert "AgentRail" in ITEM, "详情页没有右栏"
+    assert "useRailSlot()" in ITEM and "setSiblings(" in ITEM, "详情页要把同题交给外壳右栏"
     assert "setFocus({ id: item.id" in ITEM, "详情页没告诉 Agent 在看哪条"
     # 全页形态
     assert 'path="/agent"' in APP and 'path="/agent/:threadId"' in APP

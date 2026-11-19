@@ -19,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 
@@ -120,9 +120,13 @@ FRESH_KEY = "COALESCE(NULLIF(i.published_at, 0), i.fetched_at - 86400)"
 ENGAGE_RAW = "(like_count + comment_count * 2 + share_count * 3 + view_count * 0.05)"
 ENGAGE_KEY = "i.engage_score"
 
+# 「稍后再看」按收藏时间倒排：刚点星标的在最上面，取消再收会刷新到顶。
+# 迁移前的旧收藏 saved_at 为 0，回落 updated_at，不至于全挤在末尾。
+SAVED_AT = "COALESCE(NULLIF(m.saved_at, 0), m.updated_at)"
 SORTS = {"freshness": f"{FRESH_KEY} DESC, i.id DESC",
-         "engagement": f"{ENGAGE_KEY} DESC, {FRESH_KEY} DESC, i.id DESC"}
-SORT_KEYS = {"freshness": FRESH_KEY, "engagement": ENGAGE_KEY}
+         "engagement": f"{ENGAGE_KEY} DESC, {FRESH_KEY} DESC, i.id DESC",
+         "saved": f"{SAVED_AT} DESC, i.id DESC"}
+SORT_KEYS = {"freshness": FRESH_KEY, "engagement": ENGAGE_KEY, "saved": SAVED_AT}
 
 
 AGENT_SCHEMA = """
@@ -184,6 +188,8 @@ def default_db_path() -> Path:
 def sort_value(row: dict[str, Any], sort: str) -> int:
     if sort == "engagement":
         return int(row.get("engage_score") or 0)
+    if sort == "saved":
+        return int(row.get("saved_at") or 0) or int(row.get("updated_at") or 0)
     return int(row.get("published_at") or 0) or max(0, int(row.get("fetched_at") or 0) - 86400)
 
 
@@ -270,6 +276,16 @@ class Store:
                 conn.executescript(SUMMARIES_SCHEMA)
             if version < 5:
                 conn.executescript(AGENT_SCHEMA)
+            if version < 6:
+                # 收藏时间 + 一句备注：右栏「稍后再看」要按收藏时刻排，也要留一句「为什么留」。
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(item_marks)")}
+                if "saved_at" not in columns:
+                    conn.execute("ALTER TABLE item_marks ADD COLUMN saved_at INTEGER NOT NULL DEFAULT 0")
+                if "note" not in columns:
+                    conn.execute("ALTER TABLE item_marks ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+                # 老收藏没有收藏时刻，用最后一次改标记的时间兜底，别让它们全排到最后
+                conn.execute("UPDATE item_marks SET saved_at = updated_at "
+                             "WHERE saved = 1 AND saved_at = 0")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
         self.recompute_engage()
@@ -375,7 +391,8 @@ class Store:
         where.append("COALESCE(m.hidden, 0) = 0")  # 「不感兴趣」的条目默认不进流
         clause = "WHERE " + " AND ".join(where)
         sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
-               f"m.hidden AS mark_hidden "
+               f"m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, "
+               f"m.note AS mark_note "
                f"FROM items i LEFT JOIN item_marks m ON m.item_id = i.id "
                f"{clause} ORDER BY {order} LIMIT ?")
         params.append(limit + 1)
@@ -452,7 +469,8 @@ class Store:
         where.append("COALESCE(m.hidden, 0) = 0")
         clause = "WHERE " + " AND ".join(where)
         sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
-               f"m.hidden AS mark_hidden "
+               f"m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, "
+               f"m.note AS mark_note "
                f"FROM items i LEFT JOIN item_marks m ON m.item_id = i.id "
                f"{clause} ORDER BY {SORTS.get(sort, SORTS['freshness'])} LIMIT ?")
         params.append(pool)
@@ -497,11 +515,14 @@ class Store:
         for key, mark in (("saved", "mark_saved"), ("read", "mark_read_at"),
                           ("hidden", "mark_hidden")):
             row[key] = bool(row.pop(mark, 0) or 0)
+        # 收藏时刻与备注：右栏「稍后再看」按时间排，也能显示那句「为什么留」
+        row["saved_at"] = int(row.pop("mark_saved_at", 0) or 0)
+        row["note"] = str(row.pop("mark_note", "") or "")
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(
             "SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
-            "m.hidden AS mark_hidden "
+            "m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, m.note AS mark_note "
             "FROM items i LEFT JOIN item_marks m ON m.item_id = i.id WHERE i.id = ?",
             (item_id,)).fetchone()
         if row is None:
@@ -668,17 +689,26 @@ class Store:
                                 (item_id,)).fetchone()
         if row is None:
             return {"item_id": item_id, "saved": False, "read": False, "hidden": False,
-                    "read_at": 0}
+                    "read_at": 0, "saved_at": 0, "note": "", "updated_at": 0}
         return {"item_id": item_id, "saved": bool(row["saved"]), "read": bool(row["read_at"]),
                 "hidden": bool(row["hidden"]), "read_at": int(row["read_at"] or 0),
+                "saved_at": int(row["saved_at"] or 0), "note": str(row["note"] or ""),
                 "updated_at": int(row["updated_at"] or 0)}
 
     def mark_item(self, item_id: str, saved: bool | None = None, read: bool | None = None,
-                  hidden: bool | None = None) -> dict[str, Any]:
+                  hidden: bool | None = None, note: str | None = None) -> dict[str, Any]:
         """局部更新标记：只改传了的那几项，没传的保持原值。"""
         current = self.get_mark(item_id)
         if saved is not None:
+            turning_on = bool(saved) and not current["saved"]
             current["saved"] = bool(saved)
+            # 只有「没收藏 → 收藏」才盖时间：重复点收藏不该把它顶到稍后再看最前面
+            if turning_on:
+                current["saved_at"] = int(time.time())
+            elif not saved:
+                current["saved_at"] = 0
+        if note is not None:
+            current["note"] = str(note)
         if read is not None:
             current["read"] = bool(read)
             current["read_at"] = int(time.time()) if read else 0
@@ -686,22 +716,23 @@ class Store:
             current["hidden"] = bool(hidden)
         with self._write_lock:
             self.conn.execute(
-                "INSERT INTO item_marks (item_id, saved, read_at, hidden, updated_at) "
-                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET "
+                "INSERT INTO item_marks (item_id, saved, read_at, hidden, updated_at, "
+                "saved_at, note) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET "
                 "saved=excluded.saved, read_at=excluded.read_at, hidden=excluded.hidden, "
-                "updated_at=excluded.updated_at",
+                "updated_at=excluded.updated_at, saved_at=excluded.saved_at, note=excluded.note",
                 (item_id, int(current["saved"]), int(current["read_at"]),
-                 int(current["hidden"]), int(time.time())))
+                 int(current["hidden"]), int(time.time()),
+                 int(current.get("saved_at") or 0), str(current.get("note") or "")))
             self.conn.commit()
         return self.get_mark(item_id)
 
     def saved_items(self, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             "SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
-            "m.hidden AS mark_hidden "
+            "m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, m.note AS mark_note "
             "FROM item_marks m JOIN items i ON i.id = m.item_id "
             "WHERE m.saved = 1 AND COALESCE(m.hidden, 0) = 0 "
-            "ORDER BY m.updated_at DESC LIMIT ?",
+            "ORDER BY " + SAVED_AT + " DESC LIMIT ?",
             (max(1, min(int(limit), 200)),)).fetchall()
         out = [dict(r) for r in rows]
         for row in out:

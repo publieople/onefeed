@@ -155,3 +155,55 @@
 6. 键盘：`[` `]` 开合、Esc 关闭、Tab 顺序为 左 → 中 → 右。
 7. `pytest`、`check-ui`、`npm run build` 全过，并补 3 条静态守门
    （左栏栅格、右栏抽屉不改内容宽、ghost 动态测宽）。
+
+## 10. 落地记录（2026-11-19，已实现并验证）
+
+### 10.1 新增与改动
+
+| 文件 | 角色 |
+|---|---|
+| web/src/layout/useShell.ts | 断点（1024 / 1440 / 1800）、左栏 full/rail/hidden、右栏 pinned/drawer、左栏展开偏好存 onefeed.shell.left |
+| web/src/layout/Shell.tsx | 唯一拥有三栏的地方：1820 外框 + 左栏 + main(1180) + 右栏；[ ] 快捷键、Esc 关闭、窄屏让位 |
+| web/src/layout/RailSlot.tsx | 详情页把同题列表交给外壳右栏的上下文 |
+| web/src/agent/AgentSidebar.tsx | Agent 工作台：新对话 / 搜索 / 今天·昨天·更早 / 稍后再看计数 / 快捷键 / 设置；64px 图标轨 |
+| web/src/components/RightRail.tsx | 右栏槽位：稍后再看 / AI 助手 / 同题 三 tab，按形态决定是否挂 of-agent |
+| web/src/components/SavedList.tsx | 稍后再看列表：saved_at 倒序、移出后 5s 撤销 |
+| web/src/agent/AgentRail.tsx | 拆出 AgentRailBody（可嵌槽位），保留独立 aside 版本 |
+| web/src/agent/AgentProvider.tsx | 新增 refreshHistory、pinned；close() 在右栏形态下直接收；收藏后广播 onefeed:saved |
+| web/src/motion/ghost.ts | contentEdges() 优先读 #main 实测矩形，量不到才回落 1180 |
+| onefeed/store.py | item_marks 增 saved_at / note，SCHEMA_VERSION 6，sort=saved |
+
+### 10.2 三处与方案不同（都为了少出怪）
+
+1. **右抽屉在 ≥1280 用 paddingRight 让位，不做浮层盖住内容**。方案里抽屉是浮层，但详情页把 AI 挂在右栏时，浮层会盖住正文，用户一边问一边读就废了。1280 以下让不出 364px，只能盖上去。
+2. **信息流上打开 Agent（底部抽屉）时，右栏不跟着切 AI**。原先 present 判断只看 tab 与 open，结果同一段对话在抽屉和右栏各显示一次；现在必须 mode === rail 才呈现。
+3. **of-agent 只在真右栏形态挂**。抽屉、右栏同时挂同名会让浏览器整段跳过转场（之前踩过 duplicate view-transition-name），所以名字跟着 presenting 走。
+
+### 10.3 真机验证（Chrome，8799，库 924 条）
+
+| 视口 | 左栏 | 内容列 | 右栏 | 横向滚动 |
+|---|---|---|---|---|
+| 1920 | full 288（20 条会话） | 1132 | pinned 320 | 无 |
+| 1440 | full 288 | 1092 | 抽屉（按 ] 或详情页 Agent 时出现） | 无 |
+| 1200 | 图标轨 64 | 1076 | 抽屉 | 无 |
+| 900 | 隐藏（按 [ 出浮层） | 860 | 抽屉 | 无 |
+
+- 1920 点左栏旧对话 → 底部抽屉打开、2 轮完整（含结果卡与轨迹）；右栏保持「稍后再看」，不再重复呈现。
+- 收藏一条 → 右栏出现 1 行；移出 → 立刻消失且底部出现「已移出：… 撤销」；点撤销 → 条目回来。
+- 1440 详情页按 / → 右栏 AI 呈现（正在看 chip + 三个预设），内容列从 1092 让到 748；Esc → 右栏与抽屉一起收，内容列回 1092。
+- 1920 详情页 → 右栏本来就在，按 / 直接在栏内开对话，不出现圆钮（pinned 时 AgentLauncher 返回 null）。
+- 全程 docW == vw，console 无报错。
+
+截图：docs/images/2026-11-19-rails-1920.png、-1920-saved.png、-1440-item.png。
+
+### 10.4 施工中踩的三个坑
+
+1. **后端旧进程占着 8799**：新加了 sort=saved，旧进程仍按旧 SORTS 校验，/api/feed?saved=1&sort=saved 直接 422 bad_sort。job_kill 杀不掉 python 子进程，要用 Get-NetTCPConnection -LocalPort 8799 找 PID 再 Stop-Process。
+2. **空态把撤销条吞掉**：SavedList 原来 items 为空就 return 空态，移出最后一条时 5s 撤销窗口直接消失。改成空态与列表三目同层渲染。
+3. **右栏抢对话**：见 10.2 第 2 条，抽屉与右栏同时显示同一段。
+
+### 10.5 本轮没做（下一批）
+
+- 会话重命名 / 删除 / 分叉 / 导出（需要 PATCH、DELETE 线程接口）。
+- 左栏浮层在 900 下是遮罩 + 抽屉，不是移动端 Sheet（形态接近，但没有拖拽关闭）。
+- 两栏都不可拖拽调宽；2560 档没单独截图（1920 已验证，>1920 只是两侧更宽）。

@@ -28,6 +28,9 @@ export interface FeedItem {
   /** item_marks 拍平：收藏 / 已读（后端 page() 会带） */
   saved?: boolean;
   read?: boolean;
+  /** 收藏时间（秒）：稍后再看按它倒序，没有就是没收藏过 */
+  saved_at?: number;
+  note?: string;
 }
 
 export interface ParsedQuery {

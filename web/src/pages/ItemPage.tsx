@@ -20,8 +20,8 @@ import {
 } from "../api";
 import { parseStreamText } from "../streamText";
 import { CommentBody } from "../components/CommentBody";
-import AgentRail from "../agent/AgentRail";
-import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
+import { useAgentActions } from "../agent/AgentProvider";
+import { useRailSlot } from "../layout/RailSlot";
 import { createGhost } from "../motion/ghost";
 import { runNav } from "../motion/nav";
 import { KIND_LABEL, platform } from "../platform";
@@ -813,8 +813,6 @@ export default function ItemPage() {
     if (item) document.title = item.title + " · OneFeed";
   }, [item]);
 
-  const { mode } = useAgentSurface();
-  const railMode = mode === "rail";
   /* 告诉 Agent「我在看哪一条」：右栏点「总结这一条」不用再问你指谁。
      离开详情页要清掉，否则在信息流里问「总结这条」会指向上一条。 */
   const { setFocus } = useAgentActions();
@@ -823,6 +821,15 @@ export default function ItemPage() {
     setFocus({ id: item.id, title: item.title, platform: item.platform });
     return () => setFocus(null);
   }, [item?.id, item?.title, item?.platform, setFocus]);
+
+  /* 右栏槽位的「同题」页签：右栏挂在外壳上，取不到这份数据，得从这儿递过去 */
+  const { setSiblings } = useRailSlot();
+  useEffect(() => {
+    setSiblings(
+      (data?.siblings ?? []).map((sib) => ({ id: sib.id, platform: sib.platform, title: sib.title })),
+    );
+    return () => setSiblings([]);
+  }, [data?.siblings, setSiblings]);
 
   // 点缩略图：图从缩略图的位置长成整屏大图，关掉时再缩回去
   const openLightbox = useCallback((index: number, el?: HTMLElement) => {
@@ -920,8 +927,8 @@ export default function ItemPage() {
 
   return (
     <Shell>
-    <div className={railMode ? "grid gap-8 pt-6 lg:grid-cols-[minmax(0,1fr)_380px]" : "pt-6"}>
-    <div className={railMode ? "min-w-0 pb-24" : "mx-auto max-w-[860px] pb-24"}>
+    <div className="pt-6">
+    <div className="mx-auto max-w-[860px] pb-24">
       <div className="flex items-center gap-3 text-[12px] text-muted">
         <button
           type="button"
@@ -1217,8 +1224,6 @@ export default function ItemPage() {
         />
       ) : null}
     </div>
-      {/* 右栏：Agent 打开另一条、切「原文」、滚到底，它都在原地 */}
-      {railMode ? <AgentRail /> : null}
     </div>
     </Shell>
   );

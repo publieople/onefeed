@@ -18,8 +18,10 @@ const LAUNCH_HINTS = [
 
 /** 唤起器：没打开时只剩这一条。信息流上是底部胶囊，其他页是右下角圆钮。 */
 export function AgentLauncher() {
-  const { onItemPage, hintIndex, turns } = { ...useAgentSurface(), ...useAgentSession() };
+  const { onItemPage, pinned, hintIndex, turns } = { ...useAgentSurface(), ...useAgentSession() };
   const { openWith } = useAgentActions();
+  // ≥1800 右栏常驻，详情页再挂个圆钮就是两个入口打架
+  if (onItemPage && pinned) return null;
   // 入口贴内容栏的右沿，不贴屏幕右沿：页面主体是居中 1180px，贴屏幕会在宽屏上飘到空白里去，
   // 视觉上跟内容脱节。代位盒子（motion/ghost.ts）算的是同一组边距，两边必须一起改。
   if (onItemPage) {

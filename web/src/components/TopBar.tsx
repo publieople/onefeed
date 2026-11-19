@@ -45,7 +45,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
       style={{ viewTransitionName: "of-topbar" }}
       className="sticky top-0 z-30 border-b border-line bg-paper"
     >
-      <div className="relative mx-auto flex h-14 w-full max-w-[1180px] items-center gap-4 px-6">
+      <div className="relative mx-auto flex h-14 w-full max-w-[1820px] items-center gap-4 px-5">
         <NavLink to="/" className="flex items-baseline gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-solid text-[13px] font-semibold text-solid-fg">
             O

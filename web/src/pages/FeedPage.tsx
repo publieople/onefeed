@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { Star } from "lucide-react";
+import { Bookmark, Star } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { useFeed, type FeedItem } from "../api";
 import Card from "../components/Card";
@@ -311,6 +311,14 @@ export default function FeedPage({ ctx }: Props) {
           maxFit={grid.maxFit}
           onChange={chooseCols}
         />
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent("onefeed:rail", { detail: { tab: "saved" } }))}
+          title="打开右侧栏看稍后再看（]）"
+          className="flex items-center gap-1 rounded-full border border-line px-3 py-1 text-[12px] text-muted transition hover:border-ink/25 hover:text-ink"
+        >
+          <Bookmark size={12} />
+          稍后再看
+        </button>
         <span className="ml-auto text-[12px] text-fade">
           {ctx.summary ? ctx.summary.platforms.length + " 个平台" : "加载中"}
           {newest ? " · 最近采集 " + newest : ""}

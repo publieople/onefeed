@@ -31,8 +31,23 @@ export interface Ghost {
   remove: () => void;
 }
 
-/** 内容栏的左右内沿：跟 App 里的 <main class="mx-auto max-w-[1180px] px-6"> 对齐 */
+/**
+ * 内容栏的左右内沿。
+ *
+ * 外壳有左右栏之后，内容列不再等于「视口居中 1180」——它会被两侧栏挤窄。
+ * 所以优先量 #main 的真实位置，量不到（首帧 / 非外壳环境）才回落到常量。
+ */
 export function contentEdges(): { left: number; right: number; width: number } {
+  const main = document.getElementById("main");
+  if (main) {
+    const rect = main.getBoundingClientRect();
+    const style = window.getComputedStyle(main);
+    const left = rect.left + parseFloat(style.paddingLeft || "0");
+    const right = rect.right - parseFloat(style.paddingRight || "0");
+    if (Number.isFinite(left) && Number.isFinite(right) && right - left > 200) {
+      return { left, right, width: right - left };
+    }
+  }
   const vw = document.documentElement.clientWidth;
   const outer = Math.min(CONTENT_MAX, vw);
   const left = (vw - outer) / 2;
