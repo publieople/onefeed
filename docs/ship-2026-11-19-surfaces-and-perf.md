@@ -32,6 +32,11 @@
   `Esc` 只收起不打断；`⌘⇧H` 历史；sheet 内 Tab 环绕；rail 不做焦点陷阱（它不遮内容）。
 - **形态切换动效**：只做「收敛 / 展开」一档（`layoutId` + `SPRING_SOFT`），不给每一次跳转都配飞行。
 
+实拍（1280×860，真实库 924 条）：`docs/images/2026-11-19-agent-rail.png` 是 Agent 自己打开 B 站视频后的右栏形态
+（左栏正文自动让位、正在看 chip 指着当前条目、计划清单与轨迹仍在跑）；
+`docs/images/2026-11-19-agent-sheet.png` 是信息流上的底部抽屉；
+`docs/images/2026-11-19-agent-page.png` 是 `/agent` 整页形态（刷新后按 localStorage 指针把上一段铺回来）。
+
 ## 2. 性能：从「能跑」到「滚动不掉帧」
 
 ### 改了什么
