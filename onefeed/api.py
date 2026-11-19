@@ -418,6 +418,40 @@ def agent_mark(request: Request, payload: dict[str, Any] = Body(default={})) -> 
     return {"ok": True, "mark": mark}
 
 
+@router.get("/favorites")
+def favorite_list(request: Request, limit: int = Query(50, ge=1, le=200)) -> dict:
+    """收藏夹列表：与「稍后再看」分开，按加入收藏夹的时间倒序。"""
+    items = _store(request).favorite_items(limit=limit)
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/favorites/{item_id}")
+def favorite_status(request: Request, item_id: str) -> dict:
+    return _store(request).get_favorite(item_id)
+
+
+@router.put("/favorites/{item_id}")
+def favorite_put(request: Request, item_id: str,
+                 payload: dict[str, Any] = Body(default={})) -> dict:
+    """收藏一条：备注必填（收藏夹的意义就是记下为什么留）。"""
+    note = str(payload.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail={
+            "code": "need_note", "message": "写一句为什么收藏这一条",
+            "hint": "收藏夹不是收藏按钮，备注是它和稍后再看的区别"})
+    store = _store(request)
+    if store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail={"code": "no_item",
+                                                     "message": "库里没有这条"})
+    return {"ok": True, "favorite": store.favorite_item(item_id, note)}
+
+
+@router.delete("/favorites/{item_id}")
+def favorite_delete(request: Request, item_id: str) -> dict:
+    removed = _store(request).unfavorite_item(item_id)
+    return {"ok": True, "removed": removed}
+
+
 @router.get("/feed")
 def feed(
     request: Request,

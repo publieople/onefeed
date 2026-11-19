@@ -825,6 +825,52 @@ class Store:
             self._decode_row(row)
         return out
 
+    # ------------------------------------------------------------ favorites
+    def get_favorite(self, item_id: str) -> dict[str, Any]:
+        """收藏夹是独立的一张表：与稍后再看（item_marks.saved）互不影响。"""
+        row = self.conn.execute("SELECT * FROM item_favorites WHERE item_id = ?",
+                                (item_id,)).fetchone()
+        if row is None:
+            return {"item_id": item_id, "favorited": False, "note": "",
+                    "created_at": 0, "updated_at": 0}
+        return {"item_id": row["item_id"], "favorited": True,
+                "note": str(row["note"] or ""), "created_at": int(row["created_at"] or 0),
+                "updated_at": int(row["updated_at"] or 0)}
+
+    def favorite_item(self, item_id: str, note: str) -> dict[str, Any]:
+        """收藏一条并写下为什么留；重复收藏只更新备注，不刷新加入时间。"""
+        now = int(time.time())
+        current = self.get_favorite(item_id)
+        created = current["created_at"] or now
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO item_favorites (item_id, note, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET "
+                "note=excluded.note, updated_at=excluded.updated_at",
+                (item_id, str(note or ""), created, now))
+            self.conn.commit()
+        return self.get_favorite(item_id)
+
+    def unfavorite_item(self, item_id: str) -> bool:
+        with self._write_lock:
+            cur = self.conn.execute("DELETE FROM item_favorites WHERE item_id = ?", (item_id,))
+            self.conn.commit()
+        return bool(cur.rowcount)
+
+    def favorite_items(self, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
+            "m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, m.note AS mark_note, "
+            "f.created_at AS fav_at, f.note AS fav_note "
+            "FROM item_favorites f JOIN items i ON i.id = f.item_id "
+            "LEFT JOIN item_marks m ON m.item_id = i.id "
+            "ORDER BY f.created_at DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),)).fetchall()
+        out = [dict(r) for r in rows]
+        for row in out:
+            self._decode_row(row)
+        return out
+
     # ------------------------------------------------------------ summaries
     def get_summary(self, item_id: str) -> dict[str, Any] | None:
         """取 AI 总结缓存。总结按条永久存，不看时间——要看新的就 refresh。"""

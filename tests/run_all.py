@@ -36,6 +36,7 @@ ORDER = [
     "test_agent_runtime.py",
     "test_agent_tasks.py",
     "test_summary.py",
+    "test_favorites.py",
     "test_ui_lint.py",
     "test_theme_reveal.py",
     "test_nav_motion.py",

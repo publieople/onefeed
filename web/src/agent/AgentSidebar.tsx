@@ -1,5 +1,6 @@
 import {
   ChevronRight,
+  Heart,
   HelpCircle,
   Loader2,
   NotebookPen,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { getJSON, type AgentThread, type FeedResponse } from "../api";
+import { getJSON, listFavorites, type AgentThread, type FeedResponse } from "../api";
 import { useAgentActions, useAgentHistory, useAgentSession } from "./AgentProvider";
 
 /**
@@ -44,6 +45,7 @@ export default function AgentSidebar({
   const { refreshHistory, resumeThread, newThread, openWith } = useAgentActions();
   const [query, setQuery] = useState("");
   const [savedCount, setSavedCount] = useState(0);
+  const [favoriteCount, setFavoriteCount] = useState(0);
   const [summaryCount, setSummaryCount] = useState(0);
 
   useEffect(() => {
@@ -59,12 +61,19 @@ export default function AgentSidebar({
       void getJSON<{ count: number }>("/api/agent/summaries?limit=1")
         .then((data) => setSummaryCount(data.count ?? 0))
         .catch(() => setSummaryCount(0));
+    const loadFavorites = () =>
+      void listFavorites(1)
+        .then((data) => setFavoriteCount(data.count ?? 0))
+        .catch(() => setFavoriteCount(0));
     load();
+    loadFavorites();
     loadSummaries();
     window.addEventListener("onefeed:saved", load);
+    window.addEventListener("onefeed:favorites", loadFavorites);
     window.addEventListener("onefeed:summary", loadSummaries);
     return () => {
       window.removeEventListener("onefeed:saved", load);
+      window.removeEventListener("onefeed:favorites", loadFavorites);
       window.removeEventListener("onefeed:summary", loadSummaries);
     };
   }, []);
@@ -180,6 +189,14 @@ export default function AgentSidebar({
             <span className="ml-auto text-[11px] text-fade">{savedCount}</span>
           </button>
           <button
+            onClick={() => window.dispatchEvent(new CustomEvent("onefeed:rail", { detail: { tab: "favorites" } }))}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
+          >
+            <Heart size={13} />
+            收藏夹
+            <span className="ml-auto text-[11px] text-fade">{favoriteCount}</span>
+          </button>
+          <button
             onClick={() => window.dispatchEvent(new CustomEvent("onefeed:rail", { detail: { tab: "summaries" } }))}
             className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-muted transition hover:bg-wash hover:text-ink"
           >
@@ -258,6 +275,17 @@ export default function AgentSidebar({
         >
           <Star size={15} />
           {savedCount ? (
+            <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-ink" aria-hidden />
+          ) : null}
+        </button>
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent("onefeed:rail", { detail: { tab: "favorites" } }))}
+          className="relative flex h-9 w-9 items-center justify-center rounded-lg text-muted transition hover:bg-wash hover:text-ink"
+          aria-label={"收藏夹（" + favoriteCount + " 条）"}
+          title="收藏夹"
+        >
+          <Heart size={15} />
+          {favoriteCount ? (
             <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-ink" aria-hidden />
           ) : null}
         </button>

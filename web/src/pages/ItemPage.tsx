@@ -1,12 +1,14 @@
 import DOMPurify from "dompurify";
-import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, MessageCircle, RefreshCw, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, Heart, MessageCircle, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
+  addFavorite,
   getDetail,
   getJSON,
   peekItem,
+  removeFavorite,
   streamSummary,
   type ItemResponse,
   type CommentItem,
@@ -20,6 +22,7 @@ import {
 } from "../api";
 import { parseStreamText } from "../streamText";
 import { CommentBody } from "../components/CommentBody";
+import { confirmDialog } from "../components/ui/Confirm";
 import { useAgentActions } from "../agent/AgentProvider";
 import { useRailSlot } from "../layout/RailSlot";
 import { createGhost } from "../motion/ghost";
@@ -578,6 +581,12 @@ export default function ItemPage() {
   const [summaryError, setSummaryError] = useState("");
   /** 点了总结里的时间戳之后，播放器要从这里开始 */
   const [seek, setSeek] = useState<number | null>(null);
+  /**
+   * 收藏夹是独立功能：必须写一句备注，只记「为什么留」。
+   * 卡片上那颗星是「稍后再看」，一键就进、不写备注，两边各存各的表。
+   */
+  const [favOpen, setFavOpen] = useState(false);
+  const [fav, setFav] = useState<{ favorited: boolean; note: string } | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -925,6 +934,8 @@ export default function ItemPage() {
     ? payload.images.map((_, index) => mediaBase + "/img-" + index)
     : item.images;
   const p = platform(item.platform);
+  const favorited = fav ? fav.favorited : Boolean(item.favorited);
+  const favNote = fav ? fav.note : item.favorite_note ?? "";
 
   // hero 里的那一块就是共享元素的落点。列表里只有图文的卡片没有视频位，
   // 图文（kind=images）继续走下面的画廊，不额外顶一块 hero，免得同一张图出现两次。
@@ -1208,6 +1219,20 @@ export default function ItemPage() {
       </section>
 
       <div className="mt-7 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setFavOpen(true)}
+          aria-pressed={favorited}
+          className={
+            "flex h-10 items-center justify-center gap-1.5 rounded-lg border px-4 text-[13px] transition " +
+            (favorited
+              ? "border-ink/30 bg-wash text-ink"
+              : "border-line text-muted hover:border-ink/25 hover:text-ink")
+          }
+        >
+          <Heart size={14} fill={favorited ? "currentColor" : "none"} />
+          {favorited ? "已收藏" : "收藏"}
+        </button>
         <a
           href={item.url}
           target="_blank"
@@ -1226,6 +1251,20 @@ export default function ItemPage() {
         </button>
       </div>
 
+      {favOpen ? (
+        <FavoriteDialog
+          itemId={item.id}
+          title={item.title}
+          favorited={favorited}
+          note={favNote}
+          onClose={() => setFavOpen(false)}
+          onChange={(next) => {
+            setFav(next);
+            setFavOpen(false);
+          }}
+        />
+      ) : null}
+
       {lightbox !== null && images[lightbox] ? (
         <Lightbox
           images={images}
@@ -1237,5 +1276,194 @@ export default function ItemPage() {
     </div>
     </div>
     </Shell>
+  );
+}
+
+const DIALOG_FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * 收藏对话框。收藏和「稍后再看」是两件事，所以这里强制写一句备注：
+ * 三天后回来看「收藏夹」，只有一句自己写的话才能提醒当初为什么留下它。
+ * 已收藏时同一个框兼作编辑：改备注、或移出（移出还要过一次确认）。
+ */
+function FavoriteDialog({
+  itemId,
+  title,
+  favorited,
+  note,
+  onClose,
+  onChange,
+}: {
+  itemId: string;
+  title: string;
+  favorited: boolean;
+  note: string;
+  onClose: () => void;
+  onChange: (next: { favorited: boolean; note: string }) => void;
+}) {
+  const [value, setValue] = useState(note);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState("");
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const areaRef = useRef<HTMLTextAreaElement | null>(null);
+  const restoreRef = useRef<Element | null>(null);
+  const busy = saving || removing;
+  const canSave = value.trim().length > 0 && !busy;
+
+  useEffect(() => {
+    restoreRef.current = document.activeElement;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    requestAnimationFrame(() => areaRef.current?.focus());
+    const back = restoreRef.current as HTMLElement | null;
+    return () => {
+      document.body.style.overflow = prev;
+      // 焦点还给「收藏」按钮：关掉之后键盘用户不该落回 body
+      requestAnimationFrame(() => {
+        if (back && document.body.contains(back)) back.focus?.();
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const nodes = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE) ?? []).filter(
+        (n) => n.offsetParent !== null,
+      );
+      if (!nodes.length) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || !panelRef.current?.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+
+  const save = async () => {
+    const text = value.trim();
+    if (!text || busy) return;
+    setSaving(true);
+    setError("");
+    try {
+      const res = await addFavorite(itemId, text);
+      window.dispatchEvent(new CustomEvent("onefeed:favorites"));
+      const wasFavorited = favorited;
+      window.dispatchEvent(
+        new CustomEvent("onefeed:toast", { detail: { text: wasFavorited ? "已更新备注" : "已收进收藏夹" } }),
+      );
+      onChange({ favorited: true, note: res.favorite?.note || text });
+    } catch (err) {
+      setError((err as Error).message || "没存上，稍后再试。");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (busy) return;
+    const ok = await confirmDialog({
+      title: "移出收藏夹？",
+      body: "这条记录和备注会一起删掉。卡片上的「稍后再看」不受影响。",
+      confirmText: "移出",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setRemoving(true);
+    setError("");
+    try {
+      await removeFavorite(itemId);
+      window.dispatchEvent(new CustomEvent("onefeed:favorites"));
+      window.dispatchEvent(new CustomEvent("onefeed:toast", { detail: { text: "已移出收藏夹" } }));
+      onChange({ favorited: false, note: "" });
+    } catch (err) {
+      setError((err as Error).message || "没移出，稍后再试。");
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-solid/25 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={favorited ? "编辑收藏" : "收藏这条"}
+        className="relative w-full max-w-[440px] rounded-card border border-line bg-paper p-5 shadow-pop"
+      >
+        <h2 className="text-[16px] font-semibold text-ink">{favorited ? "编辑收藏" : "收藏这条"}</h2>
+        <p className="mt-1 line-clamp-1 text-[12px] text-fade">{title}</p>
+        <label className="mt-4 block">
+          <span className="text-[12px] text-muted">为什么留下它？（一句话就够，以后靠它回忆）</span>
+          <textarea
+            ref={areaRef}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            rows={3}
+            maxLength={200}
+            placeholder="比如：讲清了 C 端 AI 定价的三层成本，写方案时能引用"
+            className="mt-1.5 w-full resize-none rounded-lg border border-line bg-wash px-3 py-2 text-[13px] leading-relaxed text-ink outline-none focus-visible:ring-2 focus-visible:ring-ink/25"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void save();
+              }
+            }}
+          />
+        </label>
+        <div className="mt-1 flex items-center justify-between text-[11px] text-fade">
+          <span>{error ? <span className="text-danger">{error}</span> : "⌘/Ctrl + Enter 保存"}</span>
+          <span className="tabular-nums">{value.trim().length}/200</span>
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          {favorited ? (
+            <button
+              type="button"
+              onClick={() => void remove()}
+              disabled={busy}
+              className="flex h-9 items-center gap-1.5 rounded-full border border-line px-3 text-[13px] text-muted transition hover:border-danger/40 hover:text-danger disabled:opacity-50"
+            >
+              <Trash2 size={13} />
+              {removing ? "移出中…" : "移出收藏夹"}
+            </button>
+          ) : null}
+          <div className="ml-auto flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-9 rounded-full border border-line px-4 text-[13px] text-ink hover:bg-wash"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={!canSave}
+              onClick={() => void save()}
+              className="h-9 rounded-full bg-solid px-4 text-[13px] font-medium text-solid-fg disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

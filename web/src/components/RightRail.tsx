@@ -1,4 +1,4 @@
-import { Bookmark, History, Layers, NotebookPen, Sparkles, X } from "lucide-react";
+import { Bookmark, Heart, History, Layers, NotebookPen, Sparkles, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { DUR, EASE } from "../motion/tokens";
@@ -6,14 +6,16 @@ import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
 import { AgentRailBody } from "../agent/AgentRail";
 import { useRailSlot } from "../layout/RailSlot";
 import { platform } from "../platform";
+import FavoritesList from "./FavoritesList";
 import SavedList from "./SavedList";
 import SummaryList from "./SummaryList";
 
-export type RailTab = "saved" | "summaries" | "ai" | "siblings";
+export type RailTab = "saved" | "favorites" | "summaries" | "ai" | "siblings";
 
-const ICON = { saved: Bookmark, summaries: NotebookPen, ai: Sparkles, siblings: Layers } as const;
+const ICON = { saved: Bookmark, favorites: Heart, summaries: NotebookPen, ai: Sparkles, siblings: Layers } as const;
 const LABEL: Record<RailTab, string> = {
   saved: "稍后再看",
+  favorites: "收藏夹",
   summaries: "AI 总结",
   ai: "AI 助手",
   siblings: "同题",
@@ -40,8 +42,8 @@ export default function RightRail({
 
   // 「AI 总结」常驻：它是这一栏除了稍后再看之外最常用的入口
   const tabs: RailTab[] = siblings.length
-    ? ["saved", "summaries", "ai", "siblings"]
-    : ["saved", "summaries", "ai"];
+    ? ["saved", "favorites", "summaries", "ai", "siblings"]
+    : ["saved", "favorites", "summaries", "ai"];
   const key = tabs.join(",");
 
   // Agent 以「右栏」形态打开（详情页 ≥1080）时，这一栏自动让给对话。
@@ -91,7 +93,10 @@ export default function RightRail({
       }
     >
       <div className="flex h-12 shrink-0 items-center gap-1 border-b border-line px-2">
-        <span role="tablist" aria-label="右栏内容" className="flex items-center gap-0.5">
+        {/* 五个 tab 在 320 宽里放不下，早先靠 flex 均分把「稍后再看」压成两行竖排。
+            这里让标签保持单行、放不下就横向滚，右侧按钮位置不动。 */}
+        <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <span role="tablist" aria-label="右栏内容" className="flex w-max items-center gap-0.5">
           {tabs.map((id) => {
             const Icon = ICON[id];
             const on = id === tab;
@@ -100,18 +105,23 @@ export default function RightRail({
                 key={id}
                 role="tab"
                 aria-selected={on}
+                aria-label={LABEL[id]}
+                title={LABEL[id]}
                 onClick={() => setTab(id)}
                 className={
-                  "flex h-7 items-center gap-1 rounded-full px-2 text-[11.5px] transition " +
-                  (on ? "bg-wash text-ink" : "text-muted hover:text-ink")
+                  "flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full text-[11.5px] transition " +
+                  (on ? "bg-wash px-2.5 text-ink" : "px-2 text-muted hover:text-ink")
                 }
               >
                 <Icon size={12.5} />
-                {LABEL[id]}
+                {/* 四个页签在 320 宽里放不下全名：只有当前页带文字，其余留图标 + title，
+                    既不会把「稍后再看」压成竖排，也不用横向滚动去够最后一个 */}
+                {on ? LABEL[id] : null}
               </button>
             );
           })}
         </span>
+        </div>
         {tab === "ai" ? (
           <button
             onClick={() => void toggleHistory()}
@@ -147,6 +157,8 @@ export default function RightRail({
           <AgentRailBody />
         ) : tab === "saved" ? (
           <SavedList onOpen={onClose} />
+        ) : tab === "favorites" ? (
+          <FavoritesList onOpen={onClose} />
         ) : tab === "summaries" ? (
           <SummaryList onOpen={onClose} />
         ) : (

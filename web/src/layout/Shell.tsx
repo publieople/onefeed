@@ -1,8 +1,8 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import AgentSidebar from "../agent/AgentSidebar";
 import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
 import type { Health, RunState } from "../api";
-import RightRail from "../components/RightRail";
+import RightRail, { type RailTab } from "../components/RightRail";
 import TopBar from "../components/TopBar";
 import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
 import { usePresence } from "../motion/usePresence";
@@ -47,6 +47,11 @@ export default function Shell({
 
   const pinned = shell.right === "pinned";
   const rail = mode === "rail";
+  /**
+   * 左栏点「收藏夹」时这一栏是关着的，事件比挂载先到——
+   * 光靠栏内的监听接不住，所以外壳记住要开哪一页，挂载时直接落在那一页。
+   */
+  const [railTab, setRailTab] = useState<RailTab | null>(null);
   const drawerOpen = !pinned && (shell.rightOpen || rail);
   // 抽屉得先留着才能播退场：它滑出去之后才是真的卸载
   const drawer = usePresence(drawerOpen, 240);
@@ -93,6 +98,23 @@ export default function Shell({
     if (rail) close();
     shell.setRightOpen(false);
   };
+
+  /**
+   * 左栏和工具栏上的「稍后再看 / 收藏夹 / AI 总结」只发一条 onefeed:rail 事件，
+   * 真正把这一栏拉开的是外壳：栏本身默认是关的，不在这里接住，点了就像没反应。
+   */
+  const openRight = shell.setRightOpen;
+  useEffect(() => {
+    const onRail = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: RailTab }>).detail;
+      setRailTab(detail?.tab ?? "saved");
+      // Agent 正占着这一栏时，先把它收掉，否则列表会被对话顶掉
+      if (rail) close();
+      openRight(true);
+    };
+    window.addEventListener("onefeed:rail", onRail);
+    return () => window.removeEventListener("onefeed:rail", onRail);
+  }, [rail, close, openRight]);
 
   return (
     <div className="min-h-screen bg-paper">
@@ -141,7 +163,7 @@ export default function Shell({
         {pinned && (shell.rightOpen || rail) ? (
           <RightRail
             className="rail-in sticky top-[57px] z-40 h-[calc(100vh-57px)] min-h-[420px] w-[320px] shrink-0 border-l border-line"
-            defaultTab={onItemPage ? "ai" : "saved"}
+            defaultTab={railTab ?? (onItemPage ? "ai" : "saved")}
             onClose={dismissRail}
           />
         ) : null}
@@ -161,7 +183,7 @@ export default function Shell({
         >
           <RightRail
             className="h-full rounded-card border border-line shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
-            defaultTab={onItemPage ? "ai" : "saved"}
+            defaultTab={railTab ?? (onItemPage ? "ai" : "saved")}
             onClose={dismissRail}
           />
         </div>

@@ -31,6 +31,9 @@ export interface FeedItem {
   /** 收藏时间（秒）：稍后再看按它倒序，没有就是没收藏过 */
   saved_at?: number;
   note?: string;
+  /** 收藏夹是另一张表：与稍后再看互不影响 */
+  favorited?: boolean;
+  favorite_note?: string;
 }
 
 export interface ParsedQuery {
@@ -431,6 +434,32 @@ export function agentMark(id: string, patch: { saved?: boolean; read?: boolean; 
 
 export function agentSaved(): Promise<{ items: FeedItem[]; count: number }> {
   return getJSON("/api/agent/saved");
+}
+
+/** 收藏夹：与稍后再看分开的两套接口 */
+export interface FavoriteState {
+  item_id: string;
+  favorited: boolean;
+  note: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export function listFavorites(limit = 50): Promise<{ items: FeedItem[]; count: number }> {
+  return getJSON("/api/favorites?limit=" + limit);
+}
+
+export function favoriteStatus(id: string): Promise<FavoriteState> {
+  return getJSON("/api/favorites/" + encodeURIComponent(id));
+}
+
+/** 收藏必须带备注：那是它和「稍后再看」的区别 */
+export function addFavorite(id: string, note: string): Promise<{ ok: boolean; favorite: FavoriteState }> {
+  return putJSON("/api/favorites/" + encodeURIComponent(id), { note });
+}
+
+export function removeFavorite(id: string): Promise<{ ok: boolean; removed: boolean }> {
+  return deleteJSON("/api/favorites/" + encodeURIComponent(id));
 }
 
 /** 最近总结过的条目：条目本体 + 那次的 tldr / 要点数 / 生成时间 */

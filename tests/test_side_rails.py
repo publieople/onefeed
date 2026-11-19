@@ -122,3 +122,43 @@ def test_saved_items_have_a_stable_order_and_timestamp():
     assert "WHERE saved = 1 AND saved_at = 0" in store
     api = read("onefeed/api.py")
     assert "sort not in SORTS" in api, "新增排序键后 /api/feed?sort=saved 自动合法"
+
+def test_rail_entries_actually_open_the_column():
+    """左栏点「稍后再看 / 收藏夹」必须真把右栏拉开。
+
+    以前只发 onefeed:rail 事件，而这一栏默认关着、组件根本没挂载，
+    事件没有接收方——点了像没反应。外壳接住事件再开栏，栏里再切页。
+    """
+    shell = read("web/src/layout/Shell.tsx")
+    assert 'addEventListener("onefeed:rail"' in shell, "外壳要接住左栏的拉栏事件"
+    assert "openRight(true)" in shell, "接住之后得真的把右栏打开"
+    assert "if (rail) close();" in shell, "Agent 占着这一栏时先收掉，别让列表被对话顶掉"
+    rail = read("web/src/components/RightRail.tsx")
+    assert '"favorites"' in rail and "FavoritesList" in rail, "右栏要有收藏夹这一页"
+
+
+def test_favorites_are_a_separate_feature_from_saved():
+    """收藏夹 ≠ 稍后再看：两套表、两套接口、两种交互。
+
+    稍后再看是卡片上点星、一键就进、按时间倒序；
+    收藏夹在详情页、必须写一句备注、移出还要确认。
+    """
+    store = read("onefeed/store.py")
+    assert "CREATE TABLE IF NOT EXISTS item_favorites" in store, "收藏夹独立建表，不与 item_marks 共用"
+    assert "CREATE INDEX IF NOT EXISTS idx_favorites_created" in store
+    assert "def favorite_item(" in store and "def favorite_items(" in store
+    assert "def get_favorite(" in store and "def unfavorite_item(" in store
+    assert "LEFT JOIN item_favorites f" in store
+
+    api = read("onefeed/api.py")
+    assert '@router.put("/favorites/{item_id}")' in api, "收藏走独立的 PUT，不复用 mark 接口"
+    assert "need_note" in api, "不给备注不许收藏"
+
+    item = read("web/src/pages/ItemPage.tsx")
+    assert "FavoriteDialog" in item and "为什么留下它" in item
+    assert "confirmDialog({" in item, "移出收藏夹还要过一次确认"
+    assert "onefeed:favorites" in item
+
+    favs = read("web/src/components/FavoritesList.tsx")
+    assert "favorite_note" in favs, "列表主文是备注，不是标题"
+    assert "稍后再看里的状态不受影响" in favs, "移出时说清与稍后再看互不影响"
