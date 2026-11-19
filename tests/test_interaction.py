@@ -266,6 +266,24 @@ def test_agent_surface_transitions() -> None:
     assert "backFromAgent" in FEED and "!backFromAgent" in FEED
 
 
+@case
+def test_launcher_fades_into_the_page() -> None:
+    """底部唤起器要「淡进纸面」，不能是一颗压在卡片上的实心胶囊。
+
+    - 胶囊下方有一块从纸色到透明的渐隐层（不用 backdrop-blur，那会在长列表上重绘整屏）；
+    - 渐隐层不许拦点击，卡片滚到它下面还得能点开；
+    - 胶囊平时半透明、薄一点，悬停才浮起来；
+    - 内容区底部留白要够，最后一行能滚到渐隐层上面。
+    """
+    launcher = SURFACE.split('data-agent-launcher="pill"')[1].split("</button>")[0]
+    assert "bg-gradient-to-t from-paper" in SURFACE
+    assert "pointer-events-none" in SURFACE
+    assert "backdrop-blur" not in launcher, "底部条不再用 backdrop-filter"
+    assert "bg-paper/80" in launcher and "h-11" in launcher
+    assert "hover:-translate-y-0.5" in launcher and "hover:bg-paper" in launcher
+    assert 'className="pb-32"' in FEED, "信息流底部要给渐隐层留位置"
+
+
 def main() -> int:
     failed = 0
     for name, fn in CASES:

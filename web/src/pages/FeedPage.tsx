@@ -268,8 +268,9 @@ export default function FeedPage({ ctx }: Props) {
     return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
   }, [ctx.summary]);
 
+  // 底部给 AI 胶囊和渐隐层留出位置，最后一行卡片能滚到它上面
   return (
-    <div className="pb-24">
+    <div className="pb-32">
       <section className="flex flex-wrap items-center gap-3 pt-6">
         <h1 className="text-[15px] font-medium">
           {savedOnly ? "我的收藏" : active ? "筛选结果" : range === "today" ? "今天" : "全部内容"}

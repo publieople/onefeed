@@ -31,7 +31,7 @@ export function AgentLauncher() {
           <button
             onClick={() => openWith()}
             data-agent-launcher="corner"
-            className="pointer-events-auto flex h-11 items-center gap-2 rounded-full border border-line bg-paper/95 pl-3 pr-4 text-[12.5px] text-muted shadow-[0_10px_30px_rgba(20,20,20,0.14)] transition hover:border-ink/30 hover:text-ink"
+            className="pointer-events-auto flex h-10 items-center gap-2 rounded-full border border-line/70 bg-paper/85 pl-2.5 pr-4 text-[12.5px] text-muted shadow-[0_4px_14px_rgba(20,20,20,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:text-ink"
             aria-label="打开 AI 助手"
             title="问 OneFeed（/ 或 ⌘K）"
           >
@@ -47,17 +47,24 @@ export function AgentLauncher() {
   }
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-6 pb-4">
-      <div className="mx-auto flex max-w-[1180px] justify-center">
+      {/* 底部渐隐：卡片滚到这里会淡进纸面，而不是被胶囊硬切一条直线。
+          用渐变而不是模糊（backdrop-filter 在长列表上要重绘整屏，PF-1 刚去掉）。 */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-paper via-paper/85 to-transparent"
+      />
+      <div className="relative mx-auto flex max-w-[1180px] justify-center">
+        {/* 平时半透明、薄一点；悬停/聚焦才浮起来。整条不抢内容，但一直够得着。 */}
         <button
           onClick={() => openWith()}
           data-agent-launcher="pill"
-          className="pointer-events-auto flex h-12 w-full max-w-[760px] items-center gap-2 rounded-full border border-line bg-paper/95 px-3 text-left shadow-[0_10px_30px_rgba(20,20,20,0.12)] transition hover:border-ink/30"
+          className="pointer-events-auto flex h-11 w-full max-w-[760px] items-center gap-2 rounded-full border border-line/70 bg-paper/80 px-3 text-left shadow-[0_4px_14px_rgba(20,20,20,0.06)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:shadow-[0_10px_26px_rgba(20,20,20,0.12)] focus-visible:-translate-y-0.5 focus-visible:border-ink/25 focus-visible:bg-paper"
           aria-label="打开 AI 助手"
         >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-solid text-solid-fg">
-            <Sparkles size={13} />
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-solid text-solid-fg">
+            <Sparkles size={12} />
           </span>
-          <span className="flex-1 truncate text-[13px] text-fade">
+          <span className="flex-1 truncate text-[12.5px] text-fade">
             问 OneFeed：{LAUNCH_HINTS[hintIndex % LAUNCH_HINTS.length]}
           </span>
           <kbd className="hidden shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-fade md:block">/</kbd>
