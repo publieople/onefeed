@@ -27,8 +27,10 @@ export default function ScrollTop() {
           title="回到顶部"
           tabIndex={shown ? 0 : -1}
           className={
-            "flex h-9 w-9 items-center justify-center rounded-full border border-line/70 bg-paper/90 text-muted shadow-[0_4px_14px_rgba(20,20,20,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:text-ink " +
-            (shown ? "pointer-events-auto opacity-100" : "pointer-events-none translate-y-2 opacity-0")
+            "flex h-9 w-9 items-center justify-center rounded-full border border-line/70 bg-paper/90 text-muted shadow-[0_4px_14px_rgba(20,20,20,0.08)] transition duration-200 ease-out hover:-translate-y-0.5 hover:border-ink/25 hover:text-ink " +
+            (shown
+              ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
+              : "pointer-events-none translate-y-2 scale-90 opacity-0")
           }
         >
           <ArrowUp size={16} />

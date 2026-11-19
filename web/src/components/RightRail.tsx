@@ -1,5 +1,7 @@
 import { Bookmark, History, Layers, Sparkles, X } from "lucide-react";
+import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
+import { DUR, EASE } from "../motion/tokens";
 import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
 import { AgentRailBody } from "../agent/AgentRail";
 import { useRailSlot } from "../layout/RailSlot";
@@ -122,13 +124,22 @@ export default function RightRail({
         </button>
       </div>
 
-      {tab === "ai" ? (
-        <AgentRailBody />
-      ) : tab === "saved" ? (
-        <SavedList onOpen={onClose} />
-      ) : (
-        <SiblingList />
-      )}
+      {/* 换 tab 时内容淡进来：三块高度不同，瞬时替换会像页面抖了一下 */}
+      <motion.div
+        key={tab}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: DUR.micro, ease: EASE }}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        {tab === "ai" ? (
+          <AgentRailBody />
+        ) : tab === "saved" ? (
+          <SavedList onOpen={onClose} />
+        ) : (
+          <SiblingList />
+        )}
+      </motion.div>
     </aside>
   );
 }

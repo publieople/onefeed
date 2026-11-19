@@ -1027,6 +1027,7 @@ export default function ItemPage() {
       </div>
 
       {tab === "summary" ? (
+        <div key="summary" className="rise">
         <SummaryPanel
           data={summary}
           loading={summaryLoading}
@@ -1043,9 +1044,11 @@ export default function ItemPage() {
           onRetry={retrySummary}
           url={item.url}
         />
+        </div>
       ) : null}
 
       {tab === "source" ? (
+      <div key="source" className="rise">
       <>
       {detailLoading ? (
         <p className="mt-5 text-[12px] text-fade">正在取正文与评论…（可能要十几秒）</p>
@@ -1088,6 +1091,7 @@ export default function ItemPage() {
 
       {payload?.note ? <p className="mt-4 text-[12px] leading-relaxed text-fade">{payload.note}</p> : null}
       </>
+      </div>
       ) : null}
 
       {item.tags?.length ? (

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FilterBox from "../components/FilterBox";
 import { useLauncherReveal } from "../motion/useLauncherReveal";
+import { usePresence } from "../motion/usePresence";
 import { useAgentActions, useAgentHistory, useAgentSession, useAgentSurface } from "./AgentProvider";
 import AgentComposer from "./AgentComposer";
 import AgentHistory from "./AgentHistory";
@@ -107,8 +108,15 @@ export function AgentLauncher() {
   );
 }
 
-/** 底部抽屉：窄屏、非详情页，以及详情页但不够宽的时候 */
-export function AgentSheet() {
+/**
+ * 底部抽屉：窄屏、非详情页，以及详情页但不够宽的时候。
+ *
+ * shown / named 由外层给：关闭时 mode 立刻变成 closed，但面板得先滑下去再卸载，
+ * 所以挂载与展示分成两件事（motion/usePresence）。
+ * named=false 用于「抽屉正在退场、右栏已经接管」的那一帧 —— 同一时刻只能有一个
+ * of-agent，两个同名会让浏览器直接取消整段转场。
+ */
+export function AgentSheet({ shown = true, named = true }: { shown?: boolean; named?: boolean }) {
   const { open } = useAgentSurface();
   const { open: historyOpen } = useAgentHistory();
   const { close, toggleHistory } = useAgentActions();
@@ -141,8 +149,6 @@ export function AgentSheet() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (!open) return null;
-
   // 挂到 body：切页动画会给页面容器加 transform，fixed 元素留在里面会跟着跑。
   // data-vt="agent" + 常驻名字：抽屉和详情页右栏是同一个东西换了位置，
   // 浏览器靠这个把两端插成一段「从底部滑到右侧」的位移。
@@ -153,14 +159,17 @@ export function AgentSheet() {
       aria-modal="true"
       aria-label="找内容"
       ref={sheetRef}
-      className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-6 pb-4"
+      className={
+        "sheet-in fixed inset-x-0 bottom-0 z-40 flex justify-center px-6 pb-4 transition duration-[220ms] ease-out " +
+        (shown ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0")
+      }
     >
       <div className="flex w-full max-w-[760px] flex-col gap-3">
         {/* 名字挂在面板本身，不挂外层那条通栏容器：外层是 1270 宽，
             插值出来的盒子会横着铺满整屏，看不出「从唤起器长出来」。 */}
         <div
           data-vt="agent"
-          style={{ viewTransitionName: "of-agent" }}
+          style={named ? { viewTransitionName: "of-agent" } : undefined}
           className="flex max-h-[62vh] min-h-[200px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
         >
           <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
@@ -219,6 +228,14 @@ export function AgentSheet() {
 
 export default function AgentSurface() {
   const { mode, onAgentPage } = useAgentSurface();
+  // 抽屉的挂载寿命要比 mode==="sheet" 长一截：关闭时先滑下去，滑完再卸载。
+  // 唤起器同期先不渲染，否则它会在抽屉退场的 220ms 里从底下冒出来抢镜。
+  const sheet = usePresence(mode === "sheet", 220);
   if (onAgentPage) return null;
-  return mode === "closed" ? <AgentLauncher /> : mode === "sheet" ? <AgentSheet /> : null;
+  return (
+    <>
+      {mode === "closed" || !sheet.mounted ? <AgentLauncher /> : null}
+      {sheet.mounted ? <AgentSheet shown={sheet.shown} named={mode === "sheet"} /> : null}
+    </>
+  );
 }

@@ -96,16 +96,16 @@ export default function AgentConsole({
             readonly={readonly}
           />
         ) : event.kind === "error" ? (
-          <div key={event.seq} className="text-[11.5px] leading-snug text-[color:var(--warn,#b4432b)]">
+          <div key={event.seq} className="fade-in text-[11.5px] leading-snug text-[color:var(--warn,#b4432b)]">
             这轮没跑完：{String(event.data.message ?? "").slice(0, 120)}
           </div>
         ) : event.kind === "action" ? (
-          <div key={event.seq} className="flex items-start gap-1.5 text-[11.5px] text-muted">
+          <div key={event.seq} className="fade-in flex items-start gap-1.5 text-[11.5px] text-muted">
             <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-ink/50" />
             <span>{actionText(event)}</span>
           </div>
         ) : (
-          <div key={event.seq} className="flex items-start gap-1.5 text-[11.5px] text-muted">
+          <div key={event.seq} className="fade-in flex items-start gap-1.5 text-[11.5px] text-muted">
             <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-ink/70" />
             <span className="min-w-0">
               <span className="text-ink">{String(event.data.title ?? event.name)}</span>

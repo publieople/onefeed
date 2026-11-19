@@ -484,17 +484,26 @@ export default function FeedPage({ ctx }: Props) {
           aria-live="polite"
           className="mt-8 flex min-h-[56px] items-center justify-center"
         >
-          {feed.moreLoading ? (
-            <span className="flex items-center gap-2 text-[12.5px] text-fade">
-              <Loader2 size={13} className="animate-spin" />
-              正在获取新内容…
-            </span>
-          ) : (
-            <span className="text-[12.5px] text-fade">继续往下滑，自动接着取</span>
-          )}
+          {/* 三种状态在同一行原地换字，高度不变；换的时候淡一下，不然像页面闪了一下 */}
+          <motion.span
+            key={feed.moreLoading ? "loading" : "idle"}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: DUR.micro, ease: EASE }}
+            className="flex items-center gap-2 text-[12.5px] text-fade"
+          >
+            {feed.moreLoading ? (
+              <>
+                <Loader2 size={13} className="animate-spin" />
+                正在获取新内容…
+              </>
+            ) : (
+              "继续往下滑，自动接着取"
+            )}
+          </motion.span>
         </div>
       ) : feed.items.length ? (
-        <p className="mt-8 flex min-h-[56px] items-center justify-center text-[12.5px] text-fade">
+        <p className="rise mt-8 flex min-h-[56px] items-center justify-center text-[12.5px] text-fade">
           已经到底了
         </p>
       ) : null}

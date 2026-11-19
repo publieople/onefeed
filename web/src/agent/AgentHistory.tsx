@@ -7,7 +7,7 @@ export default function AgentHistory({ dense = false }: { dense?: boolean }) {
   const { resumeThread, newThread } = useAgentActions();
   if (!open) return null;
   return (
-    <div className={"space-y-1.5 border-b border-line/60 " + (dense ? "pb-2" : "px-4 pb-3")}>
+    <div className={"rise space-y-1.5 border-b border-line/60 " + (dense ? "pb-2" : "px-4 pb-3")}>
       <div className="flex items-center gap-2">
         <span className="text-[11.5px] text-fade">
           {loading ? (

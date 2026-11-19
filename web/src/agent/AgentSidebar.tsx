@@ -70,7 +70,7 @@ export default function AgentSidebar({
     return (
       <aside
         aria-label="Agent 工作台（收起的图标栏）"
-        className="sticky top-[76px] flex h-[calc(100vh-96px)] w-16 shrink-0 flex-col items-center gap-1 rounded-card border border-line bg-paper py-2"
+        className="flex h-full w-full flex-col items-center gap-1 py-2"
       >
         <button
           onClick={onExpand}
@@ -139,7 +139,7 @@ export default function AgentSidebar({
   return (
     <aside
       aria-label="Agent 工作台"
-      className="sticky top-[76px] flex h-[calc(100vh-96px)] w-72 shrink-0 flex-col overflow-hidden rounded-card border border-line bg-paper"
+      className="flex h-full w-72 shrink-0 flex-col overflow-hidden"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
         <Sparkles size={14} className="text-muted" />

@@ -15,6 +15,8 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [undo, setUndo] = useState<FeedItem | null>(null);
+  // 正在淡出的那一行：先给 160ms 过渡，再真的从列表里摘掉
+  const [leaving, setLeaving] = useState<string[]>([]);
   const timer = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -47,10 +49,15 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
   );
 
   const remove = (item: FeedItem) => {
-    setItems((prev) => prev.filter((row) => row.id !== item.id));
-    setUndo(item);
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setUndo(null), 5000);
+    // 列表瞬间少一行会让人怀疑「是不是点错了」，先让它缩着淡出去
+    setLeaving((prev) => [...prev, item.id]);
+    window.setTimeout(() => {
+      setItems((prev) => prev.filter((row) => row.id !== item.id));
+      setLeaving((prev) => prev.filter((id) => id !== item.id));
+      setUndo(item);
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setUndo(null), 5000);
+    }, 160);
     void agentSave(item.id, false).catch(() => void load());
   };
 
@@ -102,7 +109,13 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
         {items.map((item) => {
           const meta = platform(item.platform);
           return (
-            <li key={item.id} className="group flex items-start gap-2.5 rounded-lg p-1.5 transition hover:bg-wash/70">
+            <li
+              key={item.id}
+              className={
+                "group flex items-start gap-2.5 rounded-lg p-1.5 transition duration-[160ms] ease-out hover:bg-wash/70 " +
+                (leaving.includes(item.id) ? "pointer-events-none -translate-x-1 opacity-0" : "")
+              }
+            >
               <button
                 onClick={() => {
                   openItem(item.id, item);
@@ -149,7 +162,7 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
       </ul>
       ) : null}
       {undo ? (
-        <div className="mx-2 mb-2 flex shrink-0 items-center gap-2 rounded-lg bg-solid px-3 py-2 text-[11.5px] text-solid-fg">
+        <div className="rise mx-2 mb-2 flex shrink-0 items-center gap-2 rounded-lg bg-solid px-3 py-2 text-[11.5px] text-solid-fg">
           <span className="truncate">已移出：{undo.title}</span>
           <button onClick={restore} className="ml-auto flex shrink-0 items-center gap-1 underline underline-offset-2">
             <RotateCcw size={11} />

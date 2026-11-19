@@ -216,7 +216,7 @@ const MiniRow = memo(function MiniRow({
         aria-pressed={saved}
         aria-label={saved ? "取消收藏" : "收藏这条"}
         title={saved ? "取消收藏" : "收藏"}
-        className={"mr-1 mt-1.5 shrink-0 rounded p-1 transition hover:bg-wash " + (saved ? "text-ink" : "text-fade hover:text-ink")}
+        className={"mr-1 mt-1.5 shrink-0 rounded p-1 transition hover:bg-wash active:scale-90 " + (saved ? "text-ink" : "text-fade hover:text-ink")}
       >
         <Star size={13} fill={saved ? "currentColor" : "none"} />
       </button>

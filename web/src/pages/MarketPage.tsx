@@ -260,7 +260,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
       </p>
 
       {note || undo ? (
-        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop">
+        <div className="rise fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop">
           <span>{note || "已卸载：" + undo}</span>
           {undo ? (
             <button

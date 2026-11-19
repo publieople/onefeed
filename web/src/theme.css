@@ -421,6 +421,62 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
   font-size: clamp(11px, 3.4cqw, 12px);
 }
 
+/* 进场用 keyframes：随挂载自动播放，不依赖两帧时序（主线程一忙，两次 state 会合并） */
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.sheet-in {
+  animation: sheet-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translate3d(100%, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.drawer-in {
+  animation: drawer-in 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* 右栏常驻时浮出来：只动透明度，不动 transform ——
+   这一栏可能正好是 View Transition 的共享元素，改 transform 会跟转场抢同一个属性 */
+@keyframes rail-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.rail-in {
+  animation: rail-in 0.22s ease-out both;
+}
+
+/* 系统开了「减少动态效果」：进场动画和收放过渡一律不跑，但还是要有节点在 */
+@media (prefers-reduced-motion: reduce) {
+  .sheet-in,
+  .drawer-in,
+  .rail-in {
+    animation: none;
+  }
+
+  [data-shell-drawer="right"],
+  [data-agent-surface="sheet"] {
+    transition: none;
+  }
+}
+
 /* 老浏览器没有容器查询单位：退回今天的固定档位，宁可不变大也不要字变成 inheriting */
 @supports not (container-type: inline-size) {
   .card-pad {
