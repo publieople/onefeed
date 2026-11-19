@@ -397,3 +397,48 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
   }
 }
 
+/* ── 卡片跟着自己的宽度走（容器查询）────────────────────────────────
+   卡片外壳挂了 container-type: inline-size，这里的 cqw 就是「卡片宽度的百分比」：
+   三列 380px 时标题 17.5px、五列 220px 时收到 14px，meta 同理。
+   标题槽位用 em 而不是固定 46px —— em 相对自身字号，两行 1.42 行高正好 2.84em，
+   所以字号变了槽位跟着变，等高契约（同排卡片底部对齐）不会被打破。 */
+.card-pad {
+  padding: clamp(9px, 3.2cqw, 13px);
+}
+
+.card-title {
+  height: 2.84em;
+  font-size: clamp(14px, 4.6cqw, 18px);
+  line-height: 1.42;
+}
+
+.card-meta {
+  height: 2.8em;
+  font-size: clamp(11.5px, 3.6cqw, 13px);
+}
+
+.card-meta-quiet {
+  font-size: clamp(11px, 3.4cqw, 12px);
+}
+
+/* 老浏览器没有容器查询单位：退回今天的固定档位，宁可不变大也不要字变成 inheriting */
+@supports not (container-type: inline-size) {
+  .card-pad {
+    padding: 12px;
+  }
+
+  .card-title {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  .card-meta {
+    height: 43px;
+    font-size: 13px;
+  }
+
+  .card-meta-quiet {
+    font-size: 12px;
+  }
+}
+

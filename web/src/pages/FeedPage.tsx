@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { motion } from "framer-motion";
+import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { Star } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { useFeed, type FeedItem } from "../api";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
+import ColsPicker from "../components/ui/ColsPicker";
+import { useGridCols, type ColsChoice } from "../layout/useGridCols";
 import { runNav } from "../motion/nav";
 import { DUR, EASE } from "../motion/tokens";
 import { useHotkeys, pushScope, popScope } from "../motion/useHotkeys";
@@ -118,14 +120,45 @@ export default function FeedPage({ ctx }: Props) {
     [selected, activeSort, q, since, savedOnly],
   );
   const feed = useFeed(query, ctx.reloadKey);
+  // 列数按网格实测宽度算（侧栏开合、窗口缩放都走这条），不再用 md:/xl: 视口断点
+  const grid = useGridCols();
   const active = selected.length > 0 || q.trim().length > 0 || savedOnly;
-  // 重排动画只在「一屏装得下」时开：项数多的时候逐张滑会拖成一条虫
-  const animateLayout = feed.items.length > 0 && feed.items.length <= 12;
+  // 重排动画覆盖「换列数 / 侧栏开合 / 换筛选」三种情况。项数多时逐张滑太拖，
+  // 所以 48 张封顶（一屏半的量），再多就直接换 —— 连 motion 节点都不建。
+  // 系统里关掉动效的人，换列就直接到位。
+  const reduceMotion = useReducedMotion();
+  const animateLayout = feed.items.length > 0 && feed.items.length <= 48 && !reduceMotion;
+
+  // 列数一变，文档高度跟着变：浏览器只会把视口钉在原来的滚动偏移上，
+  // 正在看的那张卡就被甩出屏幕了。换列前记下「第一张还在视野里的卡」在文档里的位置，
+  // 换完按它的位移补一次滚动 —— 换列才像卡片自己挪了地方，而不是页面跳一下。
+  // 记的是文档坐标（视口 top + scrollY），否则补偿量会把当前滚动距离算进去。
+  const anchor = useRef<{ id: string; docTop: number; cols: number } | null>(null);
+  const captureAnchor = () => {
+    const first = Array.from(document.querySelectorAll<HTMLElement>("[data-vt-item]")).find(
+      (el) => el.getBoundingClientRect().bottom > 0,
+    );
+    anchor.current = first
+      ? { id: first.dataset.vtItem ?? "", docTop: first.getBoundingClientRect().top + window.scrollY, cols: grid.cols }
+      : null;
+  };
+  const chooseCols = (next: ColsChoice) => {
+    captureAnchor();
+    grid.setChoice(next);
+  };
+  useLayoutEffect(() => {
+    const prev = anchor.current;
+    if (!prev || prev.cols === grid.cols) return;
+    if (document.documentElement.classList.contains("vt-running")) return;
+    const el = document.querySelector<HTMLElement>('[data-vt-item="' + CSS.escape(prev.id) + '"]');
+    if (!el) return;
+    const delta = el.getBoundingClientRect().top + window.scrollY - prev.docTop;
+    if (Math.abs(delta) > 4) window.scrollBy({ top: delta, behavior: "auto" });
+  }, [grid.cols]);
 
   // ── 列表键盘模型：j/k 上下、h/l 跨列、o 新标签打开、Enter 交给原生 <a>
   const [cursor, setCursor] = useState(-1);
   const cardEls = () => Array.from(document.querySelectorAll<HTMLAnchorElement>('[data-vt-item] a[href^="/item/"]'));
-  const cols = () => (window.innerWidth >= 1280 ? 3 : window.innerWidth >= 768 ? 2 : 1);
   const moveCursor = (delta: number) => {
     setCursor((prev) => {
       const last = feed.items.length - 1;
@@ -158,8 +191,15 @@ export default function FeedPage({ ctx }: Props) {
   useHotkeys("list", {
     j: () => moveCursor(1),
     k: () => moveCursor(-1),
-    l: () => moveCursor(cols()),
-    h: () => moveCursor(-cols()),
+    l: () => moveCursor(grid.cols),
+    h: () => moveCursor(-grid.cols),
+    // Alt+0~5 直接定列数：不用 Ctrl/⌘+数字，那是 Chrome 切标签页的
+    "alt+0": () => chooseCols("auto"),
+    "alt+1": () => chooseCols(1),
+    "alt+2": () => chooseCols(2),
+    "alt+3": () => chooseCols(3),
+    "alt+4": () => chooseCols(4),
+    "alt+5": () => chooseCols(5),
     o: () => {
       const el = current();
       if (el) window.open(el.href, "_blank", "noopener");
@@ -265,6 +305,12 @@ export default function FeedPage({ ctx }: Props) {
           <Star size={12} fill={savedOnly ? "currentColor" : "none"} />
           已收藏
         </button>
+        <ColsPicker
+          choice={grid.choice}
+          cols={grid.cols}
+          maxFit={grid.maxFit}
+          onChange={chooseCols}
+        />
         <span className="ml-auto text-[12px] text-fade">
           {ctx.summary ? ctx.summary.platforms.length + " 个平台" : "加载中"}
           {newest ? " · 最近采集 " + newest : ""}
@@ -294,7 +340,12 @@ export default function FeedPage({ ctx }: Props) {
         </div>
       ) : null}
 
-      <section className="mt-5 grid grid-cols-1 items-stretch gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
+      <LayoutGroup id="feed">
+      <section
+        ref={grid.ref}
+        style={{ gridTemplateColumns: "repeat(" + grid.cols + ", minmax(0, 1fr))" }}
+        className="mt-5 grid items-stretch gap-x-5 gap-y-5"
+      >
         {feed.items.map((item, index) => {
           // T5：换筛选 / 排序时让留下来的卡片滑到新位置。项数一多，逐张滑会像在拖地，
           // 所以只在 12 张以内开（正好是一屏的量），超过就直接换 —— 连 motion 节点都不建，
@@ -308,29 +359,37 @@ export default function FeedPage({ ctx }: Props) {
               }
             />
           );
-          const shell = "rise h-full";
+          // 进场动画（.rise 用 animation-fill-mode: both，会永久压住 transform）
+          // 必须挂在内层：挂在外层的话，FLIP 写进去的位移会被 CSS 动画覆盖成 0，
+          // 换列时就只剩卡片瞬间换位、没有流动感。
           const delay = { animationDelay: Math.min(index, 11) * 22 + "ms" };
           return animateLayout ? (
             <motion.div
               key={item.id}
               data-vt-item={item.id}
               layout="position"
+              layoutDependency={grid.cols}
               transition={{ duration: DUR.base, ease: EASE }}
-              className={shell}
-              style={delay}
+              className="h-full"
             >
-              {card}
+              <div className="rise h-full" style={delay}>
+                {card}
+              </div>
             </motion.div>
           ) : (
-            <div key={item.id} data-vt-item={item.id} className={shell} style={delay}>
+            <div key={item.id} data-vt-item={item.id} className="rise h-full" style={delay}>
               {card}
             </div>
           );
         })}
       </section>
+      </LayoutGroup>
 
       {feed.loading && feed.items.length === 0 ? (
-        <div className="mt-5 grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
+        <div
+          style={{ gridTemplateColumns: "repeat(" + grid.cols + ", minmax(0, 1fr))" }}
+          className="mt-5 grid gap-x-5 gap-y-5"
+        >
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="min-h-[340px] animate-pulse rounded-card border border-line bg-paper p-3">
               <div className="h-5 w-24 rounded bg-wash" />

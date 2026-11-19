@@ -42,7 +42,9 @@ function PlatformBadge({ item }: { item: FeedItem }) {
 /** 媒体位：所有卡片同一块地方、同一个比例，没有图也留位，整行才齐。 */
 function Frame({ children }: { children: React.ReactNode }) {
   return (
-    <div data-media className="relative w-full aspect-video overflow-hidden rounded-lg bg-wash">
+    // 单列时卡片能到 1140 宽，16:9 的封面会吃掉整整一屏；封顶 420 之后溢出裁掉，
+    // 视觉上就是一块电影感的宽幅封面，而不是把下面的标题顶出视野
+    <div data-media className="relative w-full aspect-video max-h-[420px] overflow-hidden rounded-lg bg-wash">
       {children}
     </div>
   );
@@ -161,7 +163,7 @@ function TextPanel({ item, label }: { item: FeedItem; label?: string }) {
         style={{ background: hexAlpha(p.tint, 0.06), border: "1px solid " + hexAlpha(p.tint, 0.14) }}
       >
         <Quote size={13} style={{ color: hexAlpha(p.tint, 0.75) }} className="shrink-0" />
-        <p className="mt-1.5 flex-1 overflow-hidden pb-3 text-[13px] leading-[1.7] text-ink/75">{text}</p>
+        <p className="mt-1.5 flex-1 overflow-hidden pb-3 text-[clamp(13px,1.5cqw,17px)] leading-[1.7] text-ink/75">{text}</p>
         {/* 文字按面板高度自适应，底部渐隐收口，不同列宽都不会留一块空白 */}
         <div
           className="pointer-events-none absolute inset-x-0 bottom-[22px] h-14"
@@ -195,7 +197,7 @@ function excerpt(item: FeedItem): string {
 function MetaLine({ item, body }: { item: FeedItem; body: string }) {
   if (body) {
     return (
-      <p className={"clamp-2 mt-1.5 h-[43px] shrink-0 text-[13px] leading-[1.65] text-muted " + (item.kind === "short" ? "border-l-2 border-line pl-2.5" : "")}>
+      <p className={"clamp-2 card-meta mt-1.5 shrink-0 leading-[1.65] text-muted " + (item.kind === "short" ? "border-l-2 border-line pl-2.5" : "")}>
         {body}
       </p>
     );
@@ -206,7 +208,7 @@ function MetaLine({ item, body }: { item: FeedItem; body: string }) {
     ? "点开详情"
     : !item.cover ? "点开看全文" : "");
   return (
-    <p className={"clamp-2 mt-1.5 h-[43px] shrink-0 text-[12px] leading-[1.7] " + (hint ? "text-fade" : "")}>
+    <p className={"clamp-2 card-meta card-meta-quiet mt-1.5 shrink-0 leading-[1.7] " + (hint ? "text-fade" : "")}>
       {hint || "\u00a0"}
     </p>
   );
@@ -247,7 +249,8 @@ function Card({ item, onOpen, vtNames }: Props) {
       whileHover={{ y: -2 }}
       whileTap={{ scale: 0.985 }}
       transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.7 }}
-      className="group flex h-full min-h-[16rem] flex-col rounded-card border border-line bg-paper p-3 text-left no-underline transition-colors hover:border-ink/25 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+      style={{ containerType: "inline-size" } as CSSProperties}
+      className="group card-pad flex h-full min-h-[14rem] flex-col rounded-card border border-line bg-paper text-left no-underline transition-colors hover:border-ink/25 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
     >
       <header className="flex h-5 shrink-0 items-center gap-2 text-[11px]">
         <PlatformBadge item={item} />
@@ -271,7 +274,7 @@ function Card({ item, onOpen, vtNames }: Props) {
 
       <h3
         data-vt="title"
-        className="clamp-2 mt-2.5 h-[46px] shrink-0 text-[16px] font-semibold leading-[1.42] tracking-tight"
+        className="clamp-2 card-title mt-2.5 shrink-0 font-semibold tracking-tight"
         style={vtNames?.title ? { viewTransitionName: vtNames.title } : undefined}
       >
         {item.title}

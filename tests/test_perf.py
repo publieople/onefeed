@@ -43,7 +43,9 @@ def test_feed_cards_are_memoized_and_unwrapped_when_layout_is_off():
     card = read("web/src/components/Card.tsx")
     assert "export default memo(Card)" in card
     feed = read("web/src/pages/FeedPage.tsx")
-    assert 'const shell = "rise h-full";' in feed and "animateLayout ? (" in feed
+    # 进场动画挂在内层：挂外层会压住 FLIP 写的 transform（.rise 是 fill-mode: both）
+    assert 'className="rise h-full"' in feed and "animateLayout ? (" in feed
+    assert 'className="h-full"' in feed
     assert "const openItem = useCallback(" in feed, "openItem 不稳，memo 过的卡片每帧都会收到新 props"
 
 
