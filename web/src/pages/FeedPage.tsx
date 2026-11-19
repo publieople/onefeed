@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
+import { Star } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { useFeed, type FeedItem } from "../api";
 import AiDock from "../components/AiDock";
@@ -21,11 +22,13 @@ export default function FeedPage({ ctx }: Props) {
   const q = params.get("q") ?? "";
   const sort = params.get("sort") ?? "";
   const range: "all" | "today" = params.get("range") === "today" ? "today" : "all";
+  const savedOnly = params.get("saved") === "1";
   const patch = (next: {
     platforms?: string[];
     keyword?: string;
     sort?: string;
     range?: "all" | "today";
+    saved?: boolean;
   }) => {
     const sp = new URLSearchParams(params);
     if (next.platforms) {
@@ -43,6 +46,10 @@ export default function FeedPage({ ctx }: Props) {
     if (next.range !== undefined) {
       if (next.range === "today") sp.set("range", "today");
       else sp.delete("range");
+    }
+    if (next.saved !== undefined) {
+      if (next.saved) sp.set("saved", "1");
+      else sp.delete("saved");
     }
     setParams(sp, { replace: true });
   };
@@ -104,11 +111,11 @@ export default function FeedPage({ ctx }: Props) {
     return Math.floor(d.getTime() / 1000);
   }, [range]);
   const query = useMemo(
-    () => ({ platforms: selected, kind: "", sort: activeSort, q, since }),
-    [selected, activeSort, q, since],
+    () => ({ platforms: selected, kind: "", sort: activeSort, q, since, saved: savedOnly }),
+    [selected, activeSort, q, since, savedOnly],
   );
   const feed = useFeed(query, ctx.reloadKey);
-  const active = selected.length > 0 || q.trim().length > 0;
+  const active = selected.length > 0 || q.trim().length > 0 || savedOnly;
   // 重排动画只在「一屏装得下」时开：项数多的时候逐张滑会拖成一条虫
   const animateLayout = feed.items.length > 0 && feed.items.length <= 12;
 
@@ -202,7 +209,7 @@ export default function FeedPage({ ctx }: Props) {
       return;
     }
     window.scrollTo({ top: 0 });
-  }, [activeSort, selected.join(","), q, range]);
+  }, [activeSort, selected.join(","), q, range, savedOnly]);
 
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -221,7 +228,9 @@ export default function FeedPage({ ctx }: Props) {
   return (
     <div className="pb-24">
       <section className="flex flex-wrap items-center gap-3 pt-6">
-        <h1 className="text-[15px] font-medium">{active ? "筛选结果" : range === "today" ? "今天" : "全部内容"}</h1>
+        <h1 className="text-[15px] font-medium">
+          {savedOnly ? "我的收藏" : active ? "筛选结果" : range === "today" ? "今天" : "全部内容"}
+        </h1>
         <Seg
           id="range"
           value={range}
@@ -240,6 +249,19 @@ export default function FeedPage({ ctx }: Props) {
             { id: "engagement" as const, label: "按热度" },
           ]}
         />
+        <button
+          onClick={() => patch({ saved: !savedOnly })}
+          aria-pressed={savedOnly}
+          title={savedOnly ? "看全部内容" : "只看我收藏过的"}
+          className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[12px] transition ${
+            savedOnly
+              ? "border-ink bg-solid text-solid-fg"
+              : "border-line text-muted hover:border-ink/25 hover:text-ink"
+          }`}
+        >
+          <Star size={12} fill={savedOnly ? "currentColor" : "none"} />
+          已收藏
+        </button>
         <span className="ml-auto text-[12px] text-fade">
           {ctx.summary ? ctx.summary.platforms.length + " 个平台" : "加载中"}
           {newest ? " · 最近采集 " + newest : ""}
@@ -308,14 +330,25 @@ export default function FeedPage({ ctx }: Props) {
 
       {!feed.loading && feed.items.length === 0 ? (
         <div className="mt-5 flex min-h-[420px] flex-col items-center justify-center text-center">
-          <div className="text-[15px] font-medium">这里还没有内容</div>
+          <div className="text-[15px] font-medium">{savedOnly ? "还没有收藏" : "这里还没有内容"}</div>
           <p className="mt-2 text-[13px] text-muted">
-            {active ? "当前筛选下没有匹配，换个条件试试。" : "点右上角刷新，或者先到插件市场装两个来源。"}
+            {savedOnly
+              ? "跟底下的 AI 说「把这几条收藏起来」，或者点结果卡右边的星标。"
+              : active
+                ? "当前筛选下没有匹配，换个条件试试。"
+                : "点右上角刷新，或者先到插件市场装两个来源。"}
           </p>
-          {active ? (
+          {savedOnly ? (
+            <button
+              onClick={() => patch({ saved: false })}
+              className="mt-4 rounded-lg bg-solid px-4 py-2 text-[13px] text-solid-fg"
+            >
+              看全部内容
+            </button>
+          ) : active ? (
             // 空态给的动作要和原因对上：筛选出 0 条时，刷新不会让结果出现，清条件才会
             <button
-              onClick={() => patch({ platforms: [], keyword: "", range: "all", sort: "" })}
+              onClick={() => patch({ platforms: [], keyword: "", range: "all", sort: "", saved: false })}
               className="mt-4 rounded-lg bg-solid px-4 py-2 text-[13px] text-solid-fg"
             >
               清空筛选条件

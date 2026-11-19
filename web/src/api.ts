@@ -25,6 +25,9 @@ export interface FeedItem {
   cluster_platforms: string[];
   reasons: string[];
   fetched_at: number;
+  /** item_marks 拍平：收藏 / 已读（后端 page() 会带） */
+  saved?: boolean;
+  read?: boolean;
 }
 
 export interface ParsedQuery {
@@ -716,6 +719,8 @@ export interface FeedQuery {
   sort: string;
   q: string;
   since?: number | null;
+  /** 只看收藏：AI 存的条目、手点星标的条目都在这一屏 */
+  saved?: boolean;
 }
 
 // 详情页返回时首帧就要有卡片：共享元素变形需要一个真实的落点，
@@ -723,7 +728,14 @@ export interface FeedQuery {
 const feedCache = new Map<string, FeedResponse>();
 
 export function useFeed(query: FeedQuery, reloadKey: number) {
-  const cacheKey = JSON.stringify([query.platforms, query.kind, query.sort, query.q, query.since ?? 0]);
+  const cacheKey = JSON.stringify([
+    query.platforms,
+    query.kind,
+    query.sort,
+    query.q,
+    query.since ?? 0,
+    query.saved ? 1 : 0,
+  ]);
   const seed = feedCache.get(cacheKey);
   const [items, setItems] = useState<FeedItem[]>(() => seed?.items ?? []);
   const [next, setNext] = useState<string | null>(() => seed?.next ?? null);
@@ -741,11 +753,12 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
       if (query.sort) params.set("sort", query.sort);
       if (query.q.trim()) params.set("q", query.q.trim());
       if (query.since) params.set("since", String(query.since));
+      if (query.saved) params.set("saved", "1");
       if (cursor) params.set("cursor", cursor);
       params.set("limit", "30");
       return "/api/feed?" + params.toString();
     },
-    [query.platforms.join(","), query.kind, query.sort, query.q, query.since ?? 0],
+    [query.platforms.join(","), query.kind, query.sort, query.q, query.since ?? 0, query.saved ? 1 : 0],
   );
 
   const load = useCallback(

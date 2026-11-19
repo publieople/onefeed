@@ -1,7 +1,7 @@
 import { useRef, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { prefetchItem } from "../api";
-import { FileText, Heart, Image as ImageIcon, MessageCircle, Play, Quote } from "lucide-react";
+import { FileText, Heart, Image as ImageIcon, MessageCircle, Play, Quote, Star } from "lucide-react";
 import type { FeedItem } from "../api";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
@@ -250,6 +250,11 @@ export default function Card({ item, onOpen, vtNames }: Props) {
       <header className="flex h-5 shrink-0 items-center gap-2 text-[11px]">
         <PlatformBadge item={item} />
         <span className="text-muted">{kindLabel}</span>
+        {item.saved ? (
+          <span className="flex items-center gap-0.5 text-ink/70" title="已收藏">
+            <Star size={11} fill="currentColor" />
+          </span>
+        ) : null}
         {item.published_at ? <span className="ml-auto tabular-nums text-fade">{timeAgo(item.published_at)}</span> : null}
       </header>
 

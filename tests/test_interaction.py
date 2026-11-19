@@ -121,7 +121,7 @@ def test_settings_baseline_and_unload_guard() -> None:
 @case
 def test_empty_state_can_actually_help() -> None:
     assert "清空筛选条件" in FEED
-    assert 'patch({ platforms: [], keyword: "", range: "all", sort: "" })' in FEED
+    assert 'patch({ platforms: [], keyword: "", range: "all", sort: "", saved: false })' in FEED
 
 
 @case
@@ -140,6 +140,18 @@ def test_ask_user_answer_round_trip() -> None:
     # 答过的提问不能在新一轮开始时变回可点（历史里的选项会重新亮起来）
     assert "setAnsweredAsk({})" not in DOCK
     assert "answeredAsk" in DOCK and "onAnswer" in DOCK
+
+
+@case
+def test_saved_view_is_a_filter_not_a_second_page() -> None:
+    # 收藏走 URL 筛选（?saved=1），刷新/返回都还在；空态给的是「看全部内容」而不是刷新
+    assert 'params.get("saved") === "1"' in FEED
+    assert 'sp.set("saved", "1")' in FEED
+    assert "还没有收藏" in FEED
+    assert "看全部内容" in FEED
+    # 卡片上要能看出这条已经收藏了
+    CARD = read("components", "Card.tsx")
+    assert "item.saved" in CARD
 
 
 @case

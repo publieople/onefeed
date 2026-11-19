@@ -416,6 +416,7 @@ def feed(
     q: str | None = Query(None, description="一句话过滤，例：只看今天 B 站的 AI"),
     keyword: str | None = Query(None),
     since: int | None = Query(None, description="unix 秒，只要这之后发布的"),
+    saved: bool = Query(False, description="只看收藏过的条目"),
 ) -> dict:
     if sort not in SORTS:
         raise HTTPException(status_code=422, detail={
@@ -430,7 +431,8 @@ def feed(
         keyword = parsed["keyword"] or keyword
     store = _store(request)
     rows, next_cursor = store.page(platforms=platforms, kind=kind, sort=sort,
-                                   cursor=cursor, limit=limit, keyword=keyword, since=since)
+                                   cursor=cursor, limit=limit, keyword=keyword, since=since,
+                                   saved=saved)
     clusters = store.cluster_sizes([r.get("cluster_id") or "" for r in rows])
     pct = _percentiles(store, rows)
     for row in rows:

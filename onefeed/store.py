@@ -344,7 +344,7 @@ class Store:
     def page(self, platforms: Sequence[str] | None = None, kind: str | None = None,
              sort: str = "freshness", cursor: str | None = None,
              limit: int = 30, keyword: str | None = None,
-             since: int | None = None) -> tuple[list[dict[str, Any]], str | None]:
+             since: int | None = None, saved: bool = False) -> tuple[list[dict[str, Any]], str | None]:
         """游标分页：返回 (rows, next_cursor)。next_cursor 为 None 表示到底了。"""
         limit = max(1, min(int(limit), 100))
         order = SORTS.get(sort, SORTS["freshness"])
@@ -363,6 +363,9 @@ class Store:
         if since:
             where.append(f"{FRESH_KEY} >= ?")
             params.append(int(since))
+        if saved:
+            # 只看我收藏的：Agent 存的条目、手点星标的条目都在这里
+            where.append("m.saved = 1")
         decoded = decode_cursor(cursor)
         if decoded:
             ts, ident = decoded

@@ -126,6 +126,11 @@ def main() -> int:
           "saved_items 与 page 互不干扰")
     store.mark_item("bilibili:ai2", hidden=False)
     check("bilibili:ai2" in [r["id"] for r in store.page(limit=50)[0]], "取消隐藏后回到 feed")
+    # 「只看收藏」是 feed 的一个筛选，不是另一条接口：空看板与有货两态都要对
+    check([r["id"] for r in store.page(saved=True)[0]] == ["bilibili:ai1"], "page(saved=True) 只回收藏")
+    store.mark_item("bilibili:ai1", saved=False)
+    check(store.page(saved=True)[0] == [], "取消收藏后 saved 视角为空")
+    store.mark_item("bilibili:ai1", saved=True)
 
     # ---------------------------------------------------------------- 2) 动作总线
     catalog = act_mod.catalog()
