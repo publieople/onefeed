@@ -181,7 +181,7 @@ function SiblingList() {
       <p className="shrink-0 px-3.5 pb-2 pt-1 text-[11.5px] text-fade">
         同一件事还在 {siblings.length} 个平台出现
       </p>
-      <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-2 pb-2">
+      <ul data-smooth-scroll className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-2 pb-2">
         {siblings.map((sib) => {
           const meta = platform(sib.platform);
           return (

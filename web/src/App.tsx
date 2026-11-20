@@ -21,6 +21,7 @@ import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, t
 import ScrollTop from "./components/ScrollTop";
 import { DUR, EASE, pageVariants } from "./motion";
 import { useScrollSpeedCap } from "./motion/useScrollSpeedCap";
+import { useSmoothWheelScroll } from "./motion/useSmoothWheelScroll";
 
 /** 一条浮出来的提示；带 action 时右侧多一个按钮（撤销这类） */
 interface ToastMsg {
@@ -93,6 +94,9 @@ export default function App() {
   const [help, setHelp] = useState(false);
   // 信息流的滚轮限速：翻得太快会冲到还没取回来的地方，这里按每秒像素上限放行
   useScrollSpeedCap();
+  // 侧栏列表的滚轮缓动：Windows 的 Chrome 滚轮是一次跳一整段，容器自己的
+  // scroll-behavior 管不到滚轮。只在带 data-smooth-scroll 的容器上接管。
+  useSmoothWheelScroll();
   const wasRunning = useRef(false);
   const location = useLocation();
   const reduce = useReducedMotion();

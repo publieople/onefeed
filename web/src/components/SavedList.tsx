@@ -105,7 +105,7 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
         </div>
       )}
       {items.length ? (
-      <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-2 pb-2">
+      <ul data-smooth-scroll className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-2 pb-2">
         {items.map((item) => {
           const meta = platform(item.platform);
           return (

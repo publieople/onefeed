@@ -132,6 +132,13 @@ button:active:not(:disabled) {
   }
 }
 
+/* 侧栏滚动区：键盘翻页、程序化滚动走平滑；滚轮那一路由
+   motion/useSmoothWheelScroll.ts 自己缓动（CSS 的 scroll-behavior 不管滚轮）。
+   reduce 时上面那条 !important 会把这里覆盖回 auto。 */
+[data-smooth-scroll] {
+  scroll-behavior: smooth;
+}
+
 .hairline {
   border-color: rgb(var(--c-line));
 }

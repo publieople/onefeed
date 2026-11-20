@@ -120,3 +120,38 @@ def test_feed_status_and_saved_removal_are_animated():
     top = read("web/src/components/ScrollTop.tsx")
     assert "scale-100 opacity-100" in top and "scale-90 opacity-0" in top
     assert "rise" in read("web/src/agent/AgentHistory.tsx")
+
+def test_sidebars_ease_wheel_scrolling():
+    """侧栏滚轮缓动（2026-11-20）。
+
+    用户报「左右侧边栏仍然没有平滑滚动」。Windows 的 Chrome 滚轮是一次跳一整段，
+    CSS 的 scroll-behavior 只管键盘和程序化滚动。这里钉住三件事：
+    ① 六个侧栏列表都挂了标记；② 缓动只在 document 捕获阶段接管带标记的容器；
+    ③ 每帧写位置必须 behavior:"instant"，否则容器上的 smooth 会把赋值变成
+    浏览器自己的动画，缓动变成抢方向盘（实测每帧只挪 2px）。
+    """
+    hook = read("web/src/motion/useSmoothWheelScroll.ts")
+    assert "data-smooth-scroll" in hook
+    assert "passive: false" in hook and "capture: true" in hook
+    assert "prefers-reduced-motion" in hook
+    assert 'behavior: "instant"' in hook
+    # 到边交回外层：不能把滚轮一路吞掉，否则贴边时页面完全动不了
+    assert "box.scrollTop <= 0 && delta < 0" in hook
+    assert "box.scrollTop >= max - 1 && delta > 0" in hook
+
+    app = read("web/src/App.tsx")
+    assert "useSmoothWheelScroll()" in app
+
+    for rel in (
+        "web/src/agent/AgentSidebar.tsx",
+        "web/src/agent/AgentThread.tsx",
+        "web/src/components/SavedList.tsx",
+        "web/src/components/SummaryList.tsx",
+        "web/src/components/FavoritesList.tsx",
+        "web/src/components/RightRail.tsx",
+    ):
+        assert "data-smooth-scroll" in read(rel), rel + " 的滚动容器没挂缓动标记"
+
+    css = read("web/src/theme.css")
+    assert "[data-smooth-scroll] {" in css
+    assert "scroll-behavior: smooth" in css.split("[data-smooth-scroll] {")[1].split("}")[0]

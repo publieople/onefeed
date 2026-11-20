@@ -15,7 +15,9 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    // 显式 instant：这层挂了 scroll-behavior: smooth（滚轮缓动），
+    // 直接赋 scrollTop 会变成一次平滑滚动，流式刷新时追不上最新的那行。
+    el.scrollTo({ top: el.scrollHeight, behavior: "instant" as ScrollBehavior });
   }, [turns.length, busy, live?.events.length]);
 
   return (
@@ -23,6 +25,7 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
       ref={listRef}
       aria-live="polite"
       aria-relevant="additions text"
+      data-smooth-scroll
       className={"min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain " + padding}
     >
       {turns.length === 0 ? (
