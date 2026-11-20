@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import AgentSidebar from "../agent/AgentSidebar";
 import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
@@ -8,7 +8,6 @@ import TopBar from "../components/TopBar";
 import { DUR, EASE } from "../motion/tokens";
 import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
 import { usePresence } from "../motion/usePresence";
-import { freezeGridWidth } from "./gridFreeze";
 import { useShell } from "./useShell";
 
 /** 左栏两档宽度：展开 240、图标轨 64。写常量是因为宽度要拿去过渡，不能再靠 class 切换。 */
@@ -65,27 +64,10 @@ export default function Shell({
   const reduce = useReducedMotion() ?? false;
 
   /**
-   * 侧栏宽度补间期间，把网格列数钉在**目标宽度**那一档。
-   *
-   * 不钉的话：内容列宽每帧都在变，3 列 370px 的卡先被拉到 426、中途跨过 4 列门槛、
-   * 再塌成 317 —— 260ms 里两次变宽，肉眼看就是「先胖再瘦」。
-   * 这里在补间开始那一刻量一次内容宽度（还没写第一帧），减去两侧目标的差值，
-   * 交给 useGridCols 当稳定宽度用，补间结束自动交回实测值。
+   * 列数不在这里干预：useGridCols 只在窗口尺寸变化时定量，侧栏开合根本不算候选。
+   * 中间列依旧被 flex 挤宽挤窄，卡片跟着变胖变瘦，但换行位置不动 ——
+   * 曾经的「补间期间冻结宽度」只盖住 300ms 动画，结束后照样 3 列翻 4 列，已删。
    */
-  const prevWidths = useRef({ left: leftW, right: railOpen ? RIGHT_W : 0 });
-  useLayoutEffect(() => {
-    const prev = prevWidths.current;
-    const next = { left: leftW, right: railOpen ? RIGHT_W : 0 };
-    prevWidths.current = next;
-    const dLeft = next.left - prev.left;
-    const dRight = next.right - prev.right;
-    if (!dLeft && !dRight) return;
-    const column = document.querySelector("[data-content]");
-    if (!(column instanceof HTMLElement)) return;
-    const base = column.clientWidth;
-    if (base <= 0) return;
-    freezeGridWidth(base - dLeft - dRight, Math.round(DUR.page * 1000) + 80);
-  }, [leftW, railOpen]);
 
   /**
    * 两栏的真实宽度写成 CSS 变量给视口级浮层用。

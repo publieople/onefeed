@@ -253,25 +253,26 @@ def test_modals_lock_the_page_scroll():
     assert "useScrollLock(open)" in read("web/src/components/ShortcutHelp.tsx")
 
 
-def test_grid_cols_hold_steady_while_side_rails_tween():
-    """侧栏宽度补间期间列数不许翻。
+def test_grid_cols_only_follow_window_width():
+    """侧栏开合不许改变信息流列数。
 
-    I-02 实测：收左栏时卡片 3c/370.7 → 3c/426.4 → 4c/317，260ms 内两次变宽。
-    冻结存的是「目标内容宽度」，列数仍由 useGridCols 决定（用户可能选固定几列）。
+    两版错误做法都实测过：①盯网格自身宽度（ResizeObserver）→ 收左栏内容 +176px，
+    3 列 370 当场翻成 4 列 317；②补间期间冻结目标宽度 → 只盖住 300ms 动画，
+    补间结束照样翻。现在宽度只在窗口 resize 与挂载（右栏开栏动画落定后补量一次）时更新。
     """
-    freeze = read("web/src/layout/gridFreeze.ts")
-    assert "useSyncExternalStore" in freeze
-    assert "export function freezeGridWidth" in freeze
-    assert "MAX_CONTENT" in freeze
-
     cols = read("web/src/layout/useGridCols.ts")
-    assert "useGridFreeze()" in cols
-    assert "frozen ?? width" in cols
-    assert "autoColsFor(effective)" in cols
+    # 只认窗口尺寸：网格自身的 ResizeObserver 必须没有，否则侧栏一推就被重算
+    assert "new ResizeObserver" not in cols
+    assert 'window.addEventListener("resize"' in cols
+    # 挂载后补量一次真实宽度，免得带着右栏刷新时一直按全宽算列
+    assert "SETTLE_MS" in cols
+    # 冻结层整条拆掉，别再回来
+    assert "useGridFreeze" not in cols and "frozen" not in cols
+    assert "autoColsFor(width)" in cols
 
     shell = read("web/src/layout/Shell.tsx")
-    assert "freezeGridWidth(base - dLeft - dRight" in shell
-    assert "useLayoutEffect" in shell
+    assert "freezeGridWidth" not in shell and "gridFreeze" not in shell
+    assert not (ROOT / "web/src/layout/gridFreeze.ts").exists()
 
 
 def test_preflight_runs_the_full_gate():

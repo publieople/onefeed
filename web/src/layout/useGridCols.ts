@@ -1,12 +1,19 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { useGridFreeze } from "./gridFreeze";
 
 /**
- * 每行卡片数：按**内容列实测宽度**算，不看视口断点。
+ * 每行卡片数：**只在窗口尺寸变化时重算，侧栏开合不参与**。
  *
- * 左右两侧的栏一落地，视口 1440 时中间只剩一千出头，xl:3 这类断点会把
- * 三张 216px 都放不下的卡硬塞进三列。所以宽度取自网格自身（ResizeObserver），
- * 侧栏开合、窗口缩放都走同一条路。
+ * 曾经的写法是盯网格自身的宽度（ResizeObserver）：左栏一收，内容列宽 +176px，
+ * 3 列 370 的卡当场翻成 4 列 317 —— 用户点一下侧栏，整屏卡片重排一次。
+ * 列数是版式契约，不该被一次开合改写。中间还试过「补间期间冻结目标宽度」，
+ * 治的只是动画那 300ms，补间一结束照样翻，等于没治。
+ *
+ * 现在：宽度只在窗口 resize / 挂载时量一次；侧栏开合期间卡片宽度随 1fr 连续变化，
+ * 列数不动，卡片变胖变瘦但不换行 —— 这正是「侧栏推拉、内容不动」的观感。
+ *
+ * 一个例外：挂载后再补量一次（SETTLE_MS）。右栏是带宽度动画开出来的，
+ * 挂载那一刻内容列还是全宽，等动画落定再抓一次真实宽度，免得带着右栏刷新时
+ * 一直按全宽算列数。补量只发生一次，与用户开合侧栏无关。
  *
  * 选择存 localStorage 而不是 URL：URL 是可分享的筛选状态，列数是设备偏好。
  */
@@ -21,6 +28,8 @@ export const CARD_MIN = 216;
 /** 「自动」的目标卡宽：舒适阅读的上限 */
 const CARD_TARGET = 330;
 const MAX_COLS = 5;
+/** 挂载后补量一次真实宽度的时间点：右栏宽度补间 260ms + 余量 */
+const SETTLE_MS = 420;
 
 function readChoice(): ColsChoice {
   if (typeof localStorage === "undefined") return "auto";
@@ -72,13 +81,14 @@ export interface GridCols {
   cols: number;
   /** 这个宽度最多能放几列 */
   maxFit: number;
+  /** 计列用的宽度：窗口尺寸决定，不随侧栏开合变化 */
   width: number;
 }
 
 export function useGridCols(): GridCols {
   const [choice, setChoiceState] = useState<ColsChoice>(readChoice);
   const [width, setWidth] = useState<number>(initialWidth);
-  // 挂到网格那层（<section>），它的内容宽度就是卡片可用的总宽
+  // 挂到网格那层（<section>），它的宽度就是卡片可用的总宽
   const ref = useRef<HTMLElement>(null);
 
   useLayoutEffect(() => {
@@ -88,14 +98,22 @@ export function useGridCols(): GridCols {
       const next = el.clientWidth;
       if (next > 0) setWidth(next);
     };
-    measure();
-    if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", measure);
-      return () => window.removeEventListener("resize", measure);
-    }
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    // 挂载时量一次，等布局落定
+    let frame = requestAnimationFrame(measure);
+    // 窗口尺寸变了才重量；网格自身变宽变窄（侧栏开合）故意不监听 ——
+    // 这正是「点侧栏整屏重排」的来源。
+    const onResize = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    window.addEventListener("resize", onResize);
+    // 右栏开栏动画结束后补量一次，把落定后的真实宽度抓进来
+    const settle = window.setTimeout(measure, SETTLE_MS);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.clearTimeout(settle);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, []);
 
   const setChoice = useCallback((next: ColsChoice) => {
@@ -103,12 +121,8 @@ export function useGridCols(): GridCols {
     writeChoice(next);
   }, []);
 
-  // 侧栏补间期间用冻结的目标宽度算列数，避免中途 3 列→4 列→3 列地翻
-  const frozen = useGridFreeze();
-  const effective = frozen ?? width;
-  const maxFit = maxFitCols(effective);
-  const cols =
-    choice === "auto" ? Math.min(autoColsFor(effective), maxFit) : Math.min(choice, maxFit);
+  const maxFit = maxFitCols(width);
+  const cols = choice === "auto" ? Math.min(autoColsFor(width), maxFit) : Math.min(choice, maxFit);
 
   return { ref, choice, setChoice, cols, maxFit, width };
 }

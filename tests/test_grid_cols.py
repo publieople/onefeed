@@ -12,9 +12,12 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_column_count_follows_measured_width_not_viewport_breakpoints():
+def test_column_count_follows_window_width_not_side_rails():
     hook = read("web/src/layout/useGridCols.ts")
-    assert "new ResizeObserver" in hook, "列数要跟网格实测宽度走，侧栏开合才认得出"
+    # 反向约定：列数**不能**跟网格自身宽度走。左栏一收内容列 +176px，
+    # 3 列 370 会当场翻成 4 列 317 —— 用户点一下侧栏整屏重排。
+    assert "new ResizeObserver" not in hook, "列数不许被侧栏开合改写"
+    assert 'window.addEventListener("resize"' in hook
     assert "el.clientWidth" in hook
     assert "onefeed.feed.cols" in hook, "列数是设备偏好，存 localStorage，不进 URL"
     assert "CARD_MIN" in hook and "CARD_TARGET" in hook
