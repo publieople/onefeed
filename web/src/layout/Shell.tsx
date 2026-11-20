@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import AgentSidebar from "../agent/AgentSidebar";
 import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
@@ -27,8 +27,9 @@ const RIGHT_W = 320;
  * 1200 起左栏可展开 240，960 起退成 64 图标轨，再窄两栏都不渲染。
  *
  * 左栏展开 = 这一列从 64 变宽成 240，中间列被 flex 挤窄；不是浮层。
- * 宽度不做过渡（实测逐帧重排 30 张卡，收栏只有 26.8fps，见 theme.css 的注释），
- * 换宽一步到位，由中间列的 200ms 位移+淡入接住这一下；右抽屉仍走 translate 滑入滑出。
+ * 宽度跟右栏一样由 framer-motion 补间（DUR.page），两层内容各自定宽、被窄列裁掉，
+ * 所以不会先按 64px 重排再展开。中间列随宽度逐帧回流，这是补宽度的代价 ——
+ * 卡片字号已改成分档 @container，宽度变化不再跨字号档，实测见 theme.css 的注释。
  */
 export default function Shell({
   health,
@@ -57,29 +58,6 @@ export default function Shell({
   const drawerOpen = !pinned && (shell.rightOpen || rail);
   // 抽屉得先留着才能播退场：它滑出去之后才是真的卸载
   const drawer = usePresence(drawerOpen, 240);
-
-  /**
-   * 左栏换宽之后，给中间列挂 200ms 的位移+淡入。
-   * 栏宽是硬切的（过渡会逐帧重排卡片），这一下靠合成层的动效接住，
-   * 读起来像「内容有方向地归位」，而不是整块跳过去。
-   */
-  const [settle, setSettle] = useState<"" | "expand" | "collapse">("");
-  const prevLeft = useRef(shell.left);
-  useEffect(() => {
-    const prev = prevLeft.current;
-    prevLeft.current = shell.left;
-    if (prev === shell.left) return;
-    const dir =
-      prev === "full" && shell.left === "rail"
-        ? "collapse"
-        : prev === "rail" && shell.left === "full"
-          ? "expand"
-          : "";
-    if (!dir) return;
-    setSettle(dir);
-    const timer = window.setTimeout(() => setSettle(""), 220);
-    return () => window.clearTimeout(timer);
-  }, [shell.left]);
 
   const leftW = shell.left === "hidden" ? 0 : shell.left === "full" ? LEFT_W_FULL : LEFT_W_RAIL;
   const railOpen = pinned && (shell.rightOpen || rail);
@@ -159,12 +137,15 @@ export default function Shell({
       <TopBar health={health} progress={progress} onRefresh={onRefresh} />
 
       <div className="flex w-full items-start">
-        {/* 这一层是左栏本身：宽度在这里过渡，展开/收起时才不会整块瞬移。
-            两段内容共用一个容器，点收起时那一列从 240 挤到 64，中间列跟着变宽。 */}
+        {/* 这一层是左栏本身：宽度跟右栏同一套补间，展开/收起时才不会整块瞬移。
+            两段内容共用一个容器，点收起时那一列从 240 挤到 64，中间列跟着变宽。
+            initial={false}：首次挂载直接落在当前宽度，别从上一次的值补一遍。 */}
         {shell.left !== "hidden" ? (
-          <div
+          <motion.div
             data-shell-left={shell.left}
-            style={{ width: leftW }}
+            initial={false}
+            animate={{ width: leftW }}
+            transition={reduce ? { duration: 0 } : { duration: DUR.page, ease: EASE }}
             // z-40：抬到底部渐隐层（AgentLauncher 那条 fixed inset-x-0 h-28，z-30）之上。
             // 那条渐变是为「卡片滚到底淡进纸面」做的，横跨整个视口，会顺手把左栏底部
             // 「稍后再看 / 快捷键 / 设置」刷成灰的，看着像被禁用了。两栏都是不透明纸色底，
@@ -178,7 +159,7 @@ export default function Shell({
             ) : (
               <AgentSidebar collapsed onExpand={shell.toggleLeft} onHelp={onHelp} />
             )}
-          </div>
+          </motion.div>
         ) : null}
 
         {/* 中间列吃掉剩下的宽度：不再写死 max-w，宽屏就真的铺满。
@@ -186,10 +167,7 @@ export default function Shell({
         <main
           id="main"
           tabIndex={-1}
-          className={
-            "min-w-0 flex-1 px-6 outline-none" +
-            (settle === "expand" ? " content-settle-expand" : settle === "collapse" ? " content-settle-collapse" : "")
-          }
+          className="min-w-0 flex-1 px-6 outline-none"
         >
           {/* data-content：内容列的真正边界（含 1400 上限），代位盒子按它算落点，
               而不是量整条 main —— 宽屏上 main 比内容宽，盒子会飘到右侧空白里 */}

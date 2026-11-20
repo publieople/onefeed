@@ -30,15 +30,20 @@ def test_left_rail_transitions_its_own_column_width():
     assert "shell.left === \"full\" ? LEFT_W_FULL : LEFT_W_RAIL" in shell
     # flex item 的 min-width:auto = min-content（子元素自己撑）会把宽度撑住，没有起点
     assert "min-w-0" in shell
-    # 换宽一步到位，不做宽度过渡：过渡期间卡片容器查询每帧重算，实测 240ms 长任务。
-    # 现在由中间列 200ms 位移 + 淡入接住这次跳变。
+    # 左栏宽度跟右栏同一套补间：motion 逐帧写 inline width，不是 CSS 过渡。
+    # 首帧 initial={false} 直接落在当前宽度，避免重新挂载时从旧值补一遍。
+    assert "motion.div" in shell
+    assert "initial={false}" in shell
+    assert "animate={{ width: leftW }}" in shell
+    assert "transition={reduce ? { duration: 0 } : { duration: DUR.page, ease: EASE }}" in shell
     assert "shell-col" in shell
     css = read("web/src/theme.css")
     assert ".shell-col" in css
     col = css.split(".shell-col {")[1].split("}")[0]
-    assert "transition: none" in col, "列宽又加回过渡了：卡片容器查询会逐帧重算"
-    assert "content-settle-expand" in css and "content-settle-collapse" in css
-    assert "content-settle-expand" in shell or "content-settle-collapse" in shell
+    # 宽度既然是逐帧 inline style，就不许再有 CSS 过渡，否则两层动画打架
+    assert "transition: none" in col, "列宽同时挂了 CSS 过渡：会和 motion 的 inline width 打架"
+    # 中间列的「位移+淡入」是硬切换宽的补丁，宽度补间之后必须删掉，不然叠两层
+    assert "content-settle" not in css and "content-settle" not in shell
     # 两层常驻、各自固定宽度：过渡期间展开层不会被重排成 64px 宽
     sidebar = read("web/src/agent/AgentSidebar.tsx")
     assert 'data-shell-layer="full"' in sidebar and 'data-shell-layer="rail"' in sidebar

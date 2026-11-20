@@ -220,6 +220,6 @@ function mount(el: HTMLElement) {
 
 ### 4. 还没做
 
-- 左栏收展仍是瞬切（`.shell-col` 早就去掉了 width 过渡，因为逐帧重排太贵）。同样的道理，如果要做，应改成「内容列不动 + 左栏用 transform 滑」，而不是补宽度。
+- ~~左栏收展仍是瞬切~~ → 2026-11-20 晚已按用户要求改成与右栏同一套宽度补间（`motion.div` + `DUR.page`），实测稳态 13–40ms/帧、与右栏同量级，见 `docs/left-rail-tween-2026-11-20.md`。
 - 右栏在窄屏走抽屉（已有 `drawer-in`），本次没动。
 

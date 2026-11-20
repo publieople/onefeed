@@ -558,45 +558,25 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
     visibility 0s linear 120ms;
 }
 
-/* 栏宽：**不做过渡**，一步到位。
+/* 栏宽由 framer-motion 逐帧写 inline width（Shell 里的 motion.div，DUR.page），
+   不是 CSS 过渡。
 
-   这里原来是 width 260ms 带一点回弹。实测（probes/ops_diag_left*.py，1440x900、
-   961 条真实数据）：内容列宽逐帧变化，会让每张卡重排 —— 30 张卡 × 十几帧，
-   一次收栏 26.8fps、max 帧 147ms、长任务 241ms。把卡片字号从连续 cqw 改成分档
-   @container 之后降到一次 109ms 长任务，再叠 content-visibility / 缩短到 140ms
-   都压不下去（数据见 docs/interaction-perf-review-2026-11-20.md 的复测表）。
-   而"一步换宽"只重排一次：max 53ms、无长任务。
+   历史结论要留着：这里曾经是 width 260ms 带一点回弹，实测（probes/ops_diag_left*.py，
+   1440x900、961 条真实数据）收栏只有 26.8fps、max 帧 147ms、长任务 241ms ——
+   逐帧改内容列宽会让每张卡重排。当时把卡片字号从连续 cqw 改成分档 @container 之后
+   降到一次 109ms 长任务，于是决定"一步换宽、用中间列位移淡入接住"。
+   现在字号仍是分档，且用户明确要左右栏同一套滑入滑出，所以回到补宽度；
+   代价是逐帧回流，实测数据见 docs/left-rail-tween-2026-11-20.md。
 
-   所以宽度直接切，用中间列的 200ms 位移+淡入（transform/opacity，合成层完成，
-   不触发重排）把这一下「接住」——看起来是有方向地归位，而不是硬跳。 */
+   这里必须显式写 transition: none：宽度是逐帧 inline style，
+   万一别处给 .shell-col 加了过渡，浏览器会再补一遍，两层动画会打架。 */
 .shell-col {
   transition: none;
 }
 
-@keyframes content-settle-expand {
-  from { transform: translate3d(-12px, 0, 0); opacity: 0.86; }
-  to { transform: none; opacity: 1; }
-}
-
-@keyframes content-settle-collapse {
-  from { transform: translate3d(12px, 0, 0); opacity: 0.86; }
-  to { transform: none; opacity: 1; }
-}
-
-.content-settle-expand {
-  animation: content-settle-expand 200ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.content-settle-collapse {
-  animation: content-settle-collapse 200ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .side-layer,
-  .side-layer[data-on="false"],
-  .shell-col,
-  .content-settle-expand,
-  .content-settle-collapse {
+  .side-layer[data-on="false"] {
     transition: none !important;
     animation: none !important;
   }
