@@ -1,97 +1,123 @@
 import { useEffect } from "react";
+import Lenis from "lenis";
 
 /**
  * 侧栏滚动区的滚轮缓动。
  *
- * Windows 上的 Chrome 滚轮是一格一格「瞬移」的：一次 wheel 事件直接跳 100~400px，
- * 中间没有帧 —— CSS 的 scroll-behavior 只管键盘和程序化滚动，管不到滚轮。
- * 这里接管带 data-smooth-scroll 的容器：把目标位置攒起来，每帧按指数缓动追过去，
- * 手感接近 macOS 的顺滑，同时不会把页面滚动的限速逻辑顶掉。
+ * 上一版是手写的「位置缓动」：每个 wheel 事件把目标位加上 delta，再逐帧指数逼近。
+ * 它只缓动位置、不累积速度，所以连滚三格读起来是「嗒、嗒、嗒」三段，
+ * 而不是一次带惯性的滑动。这里换成 Lenis：它把滚轮折算成速度并持续积分，
+ * 连滚会把行程叠起来，松手后自然衰减。
  *
- * 不接管的：Ctrl/⌘+滚轮（缩放）、横向滚动、已滚到边（留给 overscroll-behavior 处理）、
- * prefers-reduced-motion。
+ * 一个容器一个实例（wrapper 就是滚动容器本身），不劫持 window 的滚轮：
+ * 页面本体已经有 useScrollSpeedCap 在按每秒像素上限放行，两边叠在一起会互相抢。
+ * 容器用 [data-smooth-scroll] 标记，挂载时机不固定（会话列表、右栏、线程都是后挂的），
+ * 所以用 MutationObserver 增量接管、卸载时销毁。
  */
-const TAU_MS = 55;
-const MIN_STEP = 0.4;
 
-export function installSmoothWheelScroll(): () => void {
-  if (typeof window === "undefined") return () => {};
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return () => {};
-  // macOS 的滚轮本来就带惯性动画，再叠一层缓动会变迟钝；只补 Windows / Linux 的阶梯滚轮
-  if (/Mac|iPhone|iPad/.test(navigator.userAgent)) return () => {};
+const SELECTOR = "[data-smooth-scroll]";
+/** 每帧吃掉剩余距离的比例。0.09 ≈ 300–400ms 稳住，比默认 0.1 略沉一点 */
+const LERP = 0.09;
+/** Windows 一格滚轮 100px 偏肉，略放大到跟手 */
+const WHEEL_MULTIPLIER = 1.15;
 
-  let node: HTMLElement | null = null;
-  let target = 0;
-  let raf = 0;
-  let last = 0;
+const instances = new Map<HTMLElement, Lenis>();
+let paused = false;
+let observer: MutationObserver | null = null;
+let refreshTimer = 0;
+let resizeTimer = 0;
 
-  const animate = (now: number) => {
-    if (!node) {
-      raf = 0;
-      return;
-    }
-    const dt = Math.min(64, Math.max(8, last ? now - last : 16));
-    last = now;
-    const diff = target - node.scrollTop;
-    if (Math.abs(diff) < MIN_STEP) {
-      node.scrollTo({ top: target, behavior: "instant" as ScrollBehavior });
-      raf = 0;
-      return;
-    }
-    // 必须写 behavior:"instant"：容器上有 scroll-behavior: smooth 时，
-    // 直接赋 scrollTop 会被浏览器当成一次平滑滚动，每帧只挪一点点，
-    // 缓动就变成了「和浏览器抢方向盘」。
-    node.scrollTo({ top: node.scrollTop + diff * (1 - Math.exp(-dt / TAU_MS)), behavior: "instant" as ScrollBehavior });
-    raf = requestAnimationFrame(animate);
-  };
-
-  /** 找最近的、真的能滚的带标记容器 */
-  const container = (from: EventTarget | null): HTMLElement | null => {
-    const start = from instanceof Element ? from : null;
-    const found = start?.closest<HTMLElement>("[data-smooth-scroll]");
-    if (!found) return null;
-    const style = getComputedStyle(found);
-    if (style.overflowY !== "auto" && style.overflowY !== "scroll") return null;
-    if (found.scrollHeight <= found.clientHeight + 1) return null;
-    return found;
-  };
-
-  const onWheel = (event: WheelEvent) => {
-    if (event.ctrlKey || event.metaKey || event.defaultPrevented) return;
-    if (!event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-    const box = container(event.target);
-    if (!box) return;
-
-    const max = box.scrollHeight - box.clientHeight;
-    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? box.clientHeight : 1;
-    const delta = event.deltaY * unit;
-    // 到边了就交回去：外层页面还能接住这次滚轮
-    if (box.scrollTop <= 0 && delta < 0) return;
-    if (box.scrollTop >= max - 1 && delta > 0) return;
-
-    event.preventDefault();
-    if (node !== box) {
-      node = box;
-      raf = 0;
-    }
-    if (!raf) {
-      target = box.scrollTop; // 用户可能刚拖过滚动条，重新对齐
-    }
-    target = Math.max(0, Math.min(max, target + delta));
-    if (!raf) {
-      last = 0;
-      raf = requestAnimationFrame(animate);
-    }
-  };
-
-  document.addEventListener("wheel", onWheel, { passive: false, capture: true });
-  return () => {
-    document.removeEventListener("wheel", onWheel, { capture: true });
-    if (raf) cancelAnimationFrame(raf);
-  };
+/** Mac 触控板自带惯性，再套一层会「滑过头」；reduce 交给 Lenis 自己的 respectReducedMotion */
+function shouldSkip(): boolean {
+  if (typeof window === "undefined") return true;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
+  return /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 }
 
-/** 组件里挂一行即可：进页面装好，卸载时拆掉 */
+function create(el: HTMLElement): void {
+  if (instances.has(el) || !el.isConnected) return;
+  const overflowY = window.getComputedStyle(el).overflowY;
+  if (!/(auto|scroll)/.test(overflowY)) return;
+  const lenis = new Lenis({
+    wrapper: el,
+    content: el,
+    lerp: LERP,
+    wheelMultiplier: WHEEL_MULTIPLIER,
+    smoothWheel: true,
+    syncTouch: false,
+    overscroll: false,
+    autoRaf: true,
+    // 容器里自己滚的块（代码块、图片条）交还给浏览器，别被外层吃掉
+    prevent: (node) => node instanceof HTMLElement && Boolean(node.closest("[data-lenis-prevent]")),
+  });
+  if (paused) lenis.stop();
+  instances.set(el, lenis);
+}
+
+function scan(root: ParentNode): void {
+  if (root instanceof HTMLElement && root.matches(SELECTOR)) create(root);
+  root.querySelectorAll(SELECTOR).forEach((node) => {
+    if (node instanceof HTMLElement) create(node);
+  });
+}
+
+function refresh(): void {
+  for (const [el, lenis] of instances) {
+    if (el.isConnected) continue;
+    lenis.destroy();
+    instances.delete(el);
+  }
+  scan(document);
+  // 追加行不会改变容器的盒子尺寸，ResizeObserver 收不到，可滚范围得自己重算
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => {
+    instances.forEach((lenis) => lenis.resize());
+  }, 80);
+}
+
+function scheduleRefresh(): void {
+  // 流式输出时 DOM 每帧都在变，扫描本身要合并，不能一次 mutation 扫一遍整棵树
+  window.clearTimeout(refreshTimer);
+  refreshTimer = window.setTimeout(refresh, 120);
+}
+
+function install(): void {
+  if (observer) return;
+  scan(document);
+  observer = new MutationObserver(scheduleRefresh);
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+function destroy(): void {
+  observer?.disconnect();
+  observer = null;
+  window.clearTimeout(refreshTimer);
+  window.clearTimeout(resizeTimer);
+  instances.forEach((lenis) => lenis.destroy());
+  instances.clear();
+}
+
+/** 在 App 里挂一次：把带 [data-smooth-scroll] 的滚动容器接管成惯性滚动 */
 export function useSmoothWheelScroll(): void {
-  useEffect(() => installSmoothWheelScroll(), []);
+  useEffect(() => {
+    if (shouldSkip()) return;
+    install();
+    return destroy;
+  }, []);
+}
+
+/**
+ * 模态层打开时暂停：确认框、灯箱盖住整页，底下的侧栏不该还能被滚。
+ * Lenis 的 stop() 只是停积分，不动容器样式（autoToggle 才改 overflow）。
+ */
+export function usePauseSidebarScroll(active: boolean): void {
+  useEffect(() => {
+    if (!active) return;
+    paused = true;
+    instances.forEach((lenis) => lenis.stop());
+    return () => {
+      paused = false;
+      instances.forEach((lenis) => lenis.start());
+    };
+  }, [active]);
 }

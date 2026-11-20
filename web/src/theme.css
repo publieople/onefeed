@@ -132,8 +132,9 @@ button:active:not(:disabled) {
   }
 }
 
-/* 侧栏滚动区：键盘翻页、程序化滚动走平滑；滚轮那一路由
-   motion/useSmoothWheelScroll.ts 自己缓动（CSS 的 scroll-behavior 不管滚轮）。
+/* 侧栏滚动区：键盘翻页、程序化滚动走平滑；滚轮那一路由 Lenis 接管
+   （motion/useSmoothWheelScroll.ts 逐帧写 scrollTop，CSS 的 scroll-behavior 不管滚轮）。
+   Lenis 用 behavior: "instant" 写入，所以这里留着 smooth 不会把它拖成每帧 2px。
    reduce 时上面那条 !important 会把这里覆盖回 auto。 */
 [data-smooth-scroll] {
   scroll-behavior: smooth;
@@ -486,22 +487,22 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
   animation: drawer-in 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-/* 右栏常驻时浮出来：只动透明度，不动 transform ——
-   这一栏可能正好是 View Transition 的共享元素，改 transform 会跟转场抢同一个属性 */
-@keyframes rail-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+/* 右栏的进出现由 framer-motion 补宽度（Shell 里的 motion.div），不再用 keyframes：
+   只做 opacity 的进场会让整栏在 0 毫秒内挤开内容区，正文「啪」地跳一下。 */
 
-.rail-in {
-  animation: rail-in 0.22s ease-out both;
+/* 贴着内容列两侧的固定浮层（AI 唤起器、回顶部）。
+   两栏宽度写成 CSS 变量，变量一变它们的 left/right 就变；这里自己补间，
+   别让 Shell 逐帧去写根变量 —— 那是一次全站样式重算。 */
+.shell-inset-x {
+  transition:
+    left 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    right 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* 系统开了「减少动态效果」：进场动画和收放过渡一律不跑，但还是要有节点在 */
 @media (prefers-reduced-motion: reduce) {
   .sheet-in,
-  .drawer-in,
-  .rail-in {
+  .drawer-in {
     animation: none;
   }
 

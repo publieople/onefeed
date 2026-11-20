@@ -80,12 +80,14 @@ def test_bottom_veil_stays_under_the_two_side_columns():
 
     shell = read("web/src/layout/Shell.tsx")
     assert "sticky top-[57px] z-40 h-[calc(100vh-57px)] min-w-0 shrink-0 overflow-hidden border-r border-line bg-paper" in shell
-    assert "rail-in sticky top-[57px] z-40 h-[calc(100vh-57px)] min-h-[420px] w-[320px] shrink-0 border-l border-line" in shell
+    # 右栏改成「外层动宽度、内层定宽」后，z-40 挂在外层的 motion.div 上
+    assert "z-40 flex h-[calc(100vh-57px)] min-h-[420px] shrink-0 justify-end overflow-hidden border-l border-line" in shell
+    assert 'className="h-full w-[320px] shrink-0"' in shell
 
 
 def test_keyframes_and_reduce_motion_are_declared():
     css = read("web/src/theme.css")
-    for name in ("sheet-in", "drawer-in", "rail-in"):
+    for name in ("sheet-in", "drawer-in"):
         assert "@keyframes " + name in css
         assert "." + name + " {" in css
     assert "animation: sheet-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards" in css
@@ -93,6 +95,30 @@ def test_keyframes_and_reduce_motion_are_declared():
     assert "backwards" in css
     assert "@media (prefers-reduced-motion: reduce)" in css
     assert '[data-shell-drawer="right"],' in css
+
+
+def test_right_rail_slides_open_with_a_width_tween():
+    """右栏进出（2026-11-20）。
+
+    实测过：点 chip 后 t<190ms 右栏还不存在，t=254ms 一帧内 aside 出现、宽度已是 320，
+    内容区 1360→1040 同帧完成，然后只剩 opacity 在补 —— 内容「啪」地跳一下。
+    光加 opacity 关键帧治不了这个，得让宽度本身逐帧长出来。
+    """
+    shell = read("web/src/layout/Shell.tsx")
+    assert "<AnimatePresence initial={false}>" in shell
+    assert "initial={{ width: 0, opacity: 0 }}" in shell
+    assert "animate={{ width: RIGHT_W, opacity: 1 }}" in shell
+    assert "exit={{ width: 0, opacity: 0 }}" in shell
+    # 浮层（AI 球、回顶部）按变量让位。变量只在开合那一刻写一次 ——
+    # 逐帧写根元素自定义属性会触发全站样式重算（实测每帧 65–102ms）
+    assert 'document.documentElement.style.setProperty("--shell-right-w", (railOpen ? RIGHT_W : 0) + "px")' in shell
+    assert "onUpdate" not in shell
+    # 浮层自己带 left/right 过渡，别再回来逐帧写变量
+    assert "shell-inset-x" in read("web/src/agent/AgentSurface.tsx")
+    assert "shell-inset-x" in read("web/src/components/ScrollTop.tsx")
+    assert ".shell-inset-x {" in read("web/src/theme.css")
+    # 旧做法：只做 opacity 的 keyframes 会让整栏 0ms 挤开内容区，已删
+    assert "rail-in" not in read("web/src/theme.css")
 
 
 def test_every_surface_that_pops_in_has_a_feedback():
@@ -122,25 +148,35 @@ def test_feed_status_and_saved_removal_are_animated():
     assert "rise" in read("web/src/agent/AgentHistory.tsx")
 
 def test_sidebars_ease_wheel_scrolling():
-    """侧栏滚轮缓动（2026-11-20）。
+    """侧栏滚轮缓动（2026-11-20，第二轮换成 Lenis）。
 
-    用户报「左右侧边栏仍然没有平滑滚动」。Windows 的 Chrome 滚轮是一次跳一整段，
-    CSS 的 scroll-behavior 只管键盘和程序化滚动。这里钉住三件事：
-    ① 六个侧栏列表都挂了标记；② 缓动只在 document 捕获阶段接管带标记的容器；
-    ③ 每帧写位置必须 behavior:"instant"，否则容器上的 smooth 会把赋值变成
-    浏览器自己的动画，缓动变成抢方向盘（实测每帧只挪 2px）。
+    第一版是手写的「位置缓动」：每个 wheel 把目标位加 delta、逐帧指数逼近。
+    它只缓位置、不累积速度，连滚三格是「嗒、嗒、嗒」三段 —— 用户说「和我想象的滑动不一样」。
+    现在每个带标记的容器一个 Lenis 实例：滚轮折成速度持续积分，松手衰减。
+    钉住：① 六个列表都挂了标记；② 每容器一实例、不劫持 window；
+    ③ 挂载时机不固定，靠 MutationObserver 增量接管、卸载销毁；
+    ④ 追加行不改容器盒子尺寸，得手动 resize，否则可滚范围停在旧高度。
     """
     hook = read("web/src/motion/useSmoothWheelScroll.ts")
     assert "data-smooth-scroll" in hook
-    assert "passive: false" in hook and "capture: true" in hook
+    assert "new Lenis({" in hook
+    assert "wrapper: el" in hook
+    assert "lerp: LERP" in hook and "wheelMultiplier: WHEEL_MULTIPLIER" in hook
+    assert "autoRaf: true" in hook
+    # 到边不回弹，也别把滚轮到边后继续吞掉
+    assert "overscroll: false" in hook
     assert "prefers-reduced-motion" in hook
-    assert 'behavior: "instant"' in hook
-    # 到边交回外层：不能把滚轮一路吞掉，否则贴边时页面完全动不了
-    assert "box.scrollTop <= 0 && delta < 0" in hook
-    assert "box.scrollTop >= max - 1 && delta > 0" in hook
+    assert "Mac|iPhone|iPad|iPod" in hook
+    assert "new MutationObserver" in hook
+    assert "lenis.resize()" in hook
+    assert "usePauseSidebarScroll" in hook
 
     app = read("web/src/App.tsx")
     assert "useSmoothWheelScroll()" in app
+
+    # 模态层盖住整页时，底下的侧栏不该还能被滚轮拖着动
+    assert "usePauseSidebarScroll(Boolean(req))" in read("web/src/components/ui/Confirm.tsx")
+    assert "usePauseSidebarScroll(true)" in read("web/src/pages/ItemPage.tsx")
 
     for rel in (
         "web/src/agent/AgentSidebar.tsx",

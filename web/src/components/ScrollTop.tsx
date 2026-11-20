@@ -21,7 +21,7 @@ export default function ScrollTop() {
   return (
     <div
       style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
-      className="pointer-events-none fixed bottom-24 z-30 px-6"
+      className="shell-inset-x pointer-events-none fixed bottom-24 z-30 px-6"
     >
       <div className="mx-auto flex w-full max-w-[1400px] justify-end">
         <button

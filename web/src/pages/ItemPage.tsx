@@ -28,6 +28,7 @@ import { useRailSlot } from "../layout/RailSlot";
 import { createGhost } from "../motion/ghost";
 import { runNav } from "../motion/nav";
 import { pushScope, popScope } from "../motion/useHotkeys";
+import { usePauseSidebarScroll } from "../motion/useSmoothWheelScroll";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
 
@@ -200,6 +201,8 @@ function Lightbox({
   onIndex: (next: number) => void;
 }) {
   const [zoom, setZoom] = useState(false);
+  // 灯箱铺满整页时，侧栏的滚轮惯性也该停下
+  usePauseSidebarScroll(true);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => setZoom(false), [index]);

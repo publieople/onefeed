@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import AgentSidebar from "../agent/AgentSidebar";
 import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
 import type { Health, RunState } from "../api";
 import RightRail, { type RailTab } from "../components/RightRail";
 import TopBar from "../components/TopBar";
+import { DUR, EASE } from "../motion/tokens";
 import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
 import { usePresence } from "../motion/usePresence";
 import { useShell } from "./useShell";
@@ -80,7 +82,8 @@ export default function Shell({
   }, [shell.left]);
 
   const leftW = shell.left === "hidden" ? 0 : shell.left === "full" ? LEFT_W_FULL : LEFT_W_RAIL;
-  const rightW = pinned && (shell.rightOpen || rail) ? RIGHT_W : 0;
+  const railOpen = pinned && (shell.rightOpen || rail);
+  const reduce = useReducedMotion() ?? false;
 
   /**
    * 两栏的真实宽度写成 CSS 变量给视口级浮层用。
@@ -90,10 +93,15 @@ export default function Shell({
    * 夹在内容列上，代位盒子（motion/ghost.ts）再实测 #main，两边口径一致。
    */
   useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty("--shell-left-w", leftW + "px");
-    root.style.setProperty("--shell-right-w", rightW + "px");
-  }, [leftW, rightW]);
+    document.documentElement.style.setProperty("--shell-left-w", leftW + "px");
+  }, [leftW]);
+  // 右栏那一半：只在开合的那一刻写一次。
+  // 曾经逐帧写（让浮层跟着栏的宽度动画一起挪），实测每帧 65–102ms ——
+  // 根元素上的自定义属性被整棵树继承，写一次就是一次全站样式重算。
+  // 现在浮层自己带 shell-inset-x 的 left/right 过渡，由 CSS 补间，别再回来逐帧写。
+  useEffect(() => {
+    document.documentElement.style.setProperty("--shell-right-w", (railOpen ? RIGHT_W : 0) + "px");
+  }, [railOpen]);
   // 离开外壳（比如独立的会话页）时清掉，别把别人也夹住
   useEffect(() => {
     const root = document.documentElement;
@@ -190,13 +198,26 @@ export default function Shell({
           </div>
         </main>
 
-        {pinned && (shell.rightOpen || rail) ? (
-          <RightRail
-            className="rail-in sticky top-[57px] z-40 h-[calc(100vh-57px)] min-h-[420px] w-[320px] shrink-0 border-l border-line"
-            defaultTab={railTab ?? (onItemPage ? "ai" : "saved")}
-            onClose={dismissRail}
-          />
-        ) : null}
+        {/* 右栏：宽度补间，不是 fade-in。栏宽 0 起、AnimatePresence 留到退场结束，
+            内层固定 320 且右对齐 —— 宽度从右缘向左长，里面标题不会跟着横向滑动。 */}
+        <AnimatePresence initial={false}>
+          {railOpen ? (
+            <motion.div
+              key="rail"
+              className="sticky top-[57px] z-40 flex h-[calc(100vh-57px)] min-h-[420px] shrink-0 justify-end overflow-hidden border-l border-line"
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: RIGHT_W, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={reduce ? { duration: 0 } : { duration: DUR.page, ease: EASE }}
+            >
+              <RightRail
+                className="h-full w-[320px] shrink-0"
+                defaultTab={railTab ?? (onItemPage ? "ai" : "saved")}
+                onClose={dismissRail}
+              />
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
 
       {drawer.mounted ? (

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { DUR, EASE } from "../../motion/tokens";
 import { pushScope, popScope } from "../../motion/useHotkeys";
+import { usePauseSidebarScroll } from "../../motion/useSmoothWheelScroll";
 
 /**
  * 全站第一个真对话框。
@@ -63,6 +64,8 @@ export function ConfirmHost() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const restoreRef = useRef<Element | null>(null);
   const reduce = useReducedMotion();
+  // 确认框盖住整页时，底下的侧栏不该还能被滚轮拖着动
+  usePauseSidebarScroll(Boolean(req));
   const titleId = useId();
   const bodyId = useId();
 
