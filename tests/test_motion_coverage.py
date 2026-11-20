@@ -167,13 +167,44 @@ def test_sidebars_ease_wheel_scrolling():
     assert "new Lenis({" in hook
     assert "wrapper: el" in hook
     assert "lerp: LERP" in hook and "wheelMultiplier: WHEEL_MULTIPLIER" in hook
-    assert "autoRaf: true" in hook
-    # 到边不回弹，也别把滚轮到边后继续吞掉
-    assert "overscroll: false" in hook
+    # C-02：不再让每个实例自起一条常驻 rAF（空闲 ~150 回调/秒），
+    # 全部实例共用一条循环，连续 IDLE_FRAMES 帧没人滚就停。
+    assert "autoRaf: false" in hook
+    assert "function pump(" in hook and "lenis.raf(time)" in hook
+    assert "lenis.isScrolling" in hook
+    assert "IDLE_FRAMES" in hook and "cancelAnimationFrame(rafId)" in hook
+    assert "function kick(" in hook
+    # C-03：只扫 addedNodes，流式输出时别每 120ms 全文档重扫 + 全实例 resize
+    assert "record.addedNodes" in hook
+    assert "pendingScan" in hook
+    # C-04：暂停改计数，两层模态嵌套时先关的不能把后关的暂停解掉
+    assert "pauseDepth += 1" in hook and "pauseDepth === 0" in hook
+    # I-04：侧栏到底/到顶时把这一格滚轮交还给页面（Lenis 默认边界也 preventDefault）
+    assert "handOff" in hook and "data-lenis-prevent" in hook
+    assert "overscroll: true" in hook
+    # C-08：程序化滚动走 Lenis 的坐标系，直接赋 scrollTop 会被惯性拉回去
+    assert "export function scrollInstant" in hook
+    assert "immediate: true" in hook
+    assert "scrollInstant(el, el.scrollHeight)" in read("web/src/agent/AgentThread.tsx")
+    # 边界放行链接不上 overscroll-contain：CSS 的滚动链会被它截断，页面照样滚不动
+    for rel in (
+        "web/src/agent/AgentSidebar.tsx",
+        "web/src/agent/AgentThread.tsx",
+        "web/src/components/SavedList.tsx",
+        "web/src/components/SummaryList.tsx",
+        "web/src/components/FavoritesList.tsx",
+        "web/src/components/RightRail.tsx",
+    ):
+        assert "overscroll-contain" not in read(rel), rel + " 的 overscroll-contain 会截断边界放行"
+    # 速度上限是自己 scrollBy 的缓动，只锁 html 的 overflow 拦不住它
+    cap = read("web/src/motion/useScrollSpeedCap.ts")
+    assert "isPageScrollLocked()" in cap
+    locked_block = cap.split("if (isPageScrollLocked()) {")[1][:120]
+    assert "e.preventDefault();" in locked_block and "return;" in locked_block
     assert "prefers-reduced-motion" in hook
     assert "Mac|iPhone|iPad|iPod" in hook
     assert "new MutationObserver" in hook
-    assert "lenis.resize()" in hook
+    assert ".resize()" in hook
     assert "usePauseSidebarScroll" in hook
 
     app = read("web/src/App.tsx")
@@ -196,3 +227,58 @@ def test_sidebars_ease_wheel_scrolling():
     css = read("web/src/theme.css")
     assert "[data-smooth-scroll] {" in css
     assert "scroll-behavior: smooth" in css.split("[data-smooth-scroll] {")[1].split("}")[0]
+
+
+def test_modals_lock_the_page_scroll():
+    """模态层要锁的是 html，不是 body。
+
+    I-05 实测：确认框打开时页面 scrollY 614→1264，灯箱打开时 0→175 ——
+    因为灯箱和收藏对话框都只写 document.body.style.overflow，
+    而真正承载滚动的是 documentElement。
+    """
+    lock = read("web/src/motion/useScrollLock.ts")
+    assert "document.documentElement" in lock
+    assert 'html.style.overflow = "hidden"' in lock
+    # 滚动条消失会让整页横向抖一下，用 gutter 顶住
+    assert "scrollbarGutter" in lock
+    # 计数式：嵌套的两个模态，先关的那个不能把后关的锁解掉
+    assert "depth += 1" in lock and "depth > 0" in lock
+
+    item = read("web/src/pages/ItemPage.tsx")
+    assert "useScrollLock(true)" in item
+    # 旧写法必须清干净，否则两套锁会互相还原成对方的值
+    assert "document.body.style.overflow" not in item
+
+    assert "useScrollLock(Boolean(req))" in read("web/src/components/ui/Confirm.tsx")
+    assert "useScrollLock(open)" in read("web/src/components/ShortcutHelp.tsx")
+
+
+def test_grid_cols_hold_steady_while_side_rails_tween():
+    """侧栏宽度补间期间列数不许翻。
+
+    I-02 实测：收左栏时卡片 3c/370.7 → 3c/426.4 → 4c/317，260ms 内两次变宽。
+    冻结存的是「目标内容宽度」，列数仍由 useGridCols 决定（用户可能选固定几列）。
+    """
+    freeze = read("web/src/layout/gridFreeze.ts")
+    assert "useSyncExternalStore" in freeze
+    assert "export function freezeGridWidth" in freeze
+    assert "MAX_CONTENT" in freeze
+
+    cols = read("web/src/layout/useGridCols.ts")
+    assert "useGridFreeze()" in cols
+    assert "frozen ?? width" in cols
+    assert "autoColsFor(effective)" in cols
+
+    shell = read("web/src/layout/Shell.tsx")
+    assert "freezeGridWidth(base - dLeft - dRight" in shell
+    assert "useLayoutEffect" in shell
+
+
+def test_preflight_runs_the_full_gate():
+    """门禁必须一条命令跑完：分散的命令等于没人跑。"""
+    sh = read("scripts/preflight.ps1")
+    assert "pytest tests -q" in sh
+    assert "tests/run_all.py --offline" in sh
+    assert "web/scripts/check-ui.mjs" in sh
+    assert "npm run build" in sh
+    assert '$LASTEXITCODE -ne 0' in sh

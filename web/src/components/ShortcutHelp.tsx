@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useHotkeys } from "../motion/useHotkeys";
 import { EASE, DUR } from "../motion/tokens";
+import { useScrollLock } from "../motion/useScrollLock";
 
 interface Props {
   open: boolean;
@@ -48,6 +49,7 @@ export default function ShortcutHelp({ open, onClose }: Props) {
 
   const close = useCallback(() => onClose(), [onClose]);
   useHotkeys("dialog", { escape: close }, open);
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;

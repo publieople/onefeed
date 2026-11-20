@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { isPageScrollLocked } from "./useScrollLock";
 
 /**
  * 信息流的速度上限。
@@ -44,7 +45,7 @@ export function useScrollSpeedCap(enabled = true): void {
       const budget = MAX_SPEED * dt;
       const move = Math.sign(pending) * Math.min(Math.abs(pending), budget);
       pending -= move;
-      if (move) window.scrollBy(0, move);
+      if (move && !isPageScrollLocked()) window.scrollBy(0, move);
       if (Math.abs(pending) > 1) {
         raf = requestAnimationFrame(step);
       } else {
@@ -55,6 +56,12 @@ export function useScrollSpeedCap(enabled = true): void {
 
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.defaultPrevented) return;
+      // 模态层锁着整页时滚轮谁也别吃：这里是自己 scrollBy 实现的缓动，
+      // 只给 html 加 overflow:hidden 拦不住它（I-05 的确认框实测 614→1264）。
+      if (isPageScrollLocked()) {
+        e.preventDefault();
+        return;
+      }
       if (!e.deltaY || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
       if (ownsScroll(e.target)) return;
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;

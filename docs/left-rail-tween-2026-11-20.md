@@ -31,11 +31,14 @@
 
 | 操作 | p95 帧 | 最大帧 | 长任务 |
 | --- | --- | --- | --- |
-| left.collapse 240→64 | 47ms | 134ms | 首次 127ms；第 2、3 轮 0 |
-| left.expand 64→240 | 27ms | 40ms | 0 |
-| 对照：right.close 320→0 | 39ms | 53ms | 50ms |
+| left.collapse 240→64（首轮） | 53ms | 186.7ms | 144ms |
+| left.collapse 240→64（稳态） | 47ms | 53.4ms | 0 |
+| left.expand 64→240（首轮） | 53–66ms | 213.5ms | 215ms |
+| left.expand 64→240（稳态） | 27–66ms | 66.8ms | 0 |
+| 对照：right.close 320→0 | 39ms | 26.9ms | 0 |
 
-- 首次那条 127ms 是冷启动（第一次按目标列宽排版 + 图标轨首次绘制），之后同一会话不再复现。
+- 首轮那条 127–215ms 是冷启动（第一次按目标列宽排版 + 图标轨首次绘制），同一会话第 2、3 轮不再复现。
+- 2026-11-20 晚 r2 复测把「展开长任务 0」修正为「首轮 51–215ms、稳态 0」：旧数字是会话预热后的单次采样，见 `docs/p1-fixes-2026-11-20-r2.md`。
 - 卡片 `display:none` 对照：13–27ms/帧 → 剩余成本来自 30 张卡随列宽流失，符合预期。
 - reduce：`[240, 240, 64, 64, …]`，一帧完成。
 - 层可见性：收起后 full `opacity 0 / visibility hidden`、rail 透明 1 且 `elementFromPoint` 命中图标轨按钮；展开反之。`--shell-left-w` 240→64，底部 AI 唤起器 left 460→372 跟随（`shell-inset-x` 260ms 补间）。

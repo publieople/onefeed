@@ -3,6 +3,7 @@ import { memo, useEffect, useRef } from "react";
 import type { FeedItem } from "../api";
 import AgentConsole from "../components/AgentConsole";
 import { platform } from "../platform";
+import { scrollInstant } from "../motion/useSmoothWheelScroll";
 import { HINTS, useAgentActions, useAgentSession } from "./AgentProvider";
 
 /** 一轮对话的内容：用户气泡、Agent 的答复 + 轨迹 + 结果行 + 后续动作。三处形态共用。 */
@@ -15,9 +16,9 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    // 显式 instant：这层挂了 scroll-behavior: smooth（滚轮缓动），
-    // 直接赋 scrollTop 会变成一次平滑滚动，流式刷新时追不上最新的那行。
-    el.scrollTo({ top: el.scrollHeight, behavior: "instant" as ScrollBehavior });
+    // 走 Lenis 自己的坐标系：直接赋 scrollTop 会被惯性拉回去（实测 345→0→900ms 又回 345）。
+    // immediate 写位置，不产生一次追不上的平滑滚动。
+    scrollInstant(el, el.scrollHeight);
   }, [turns.length, busy, live?.events.length]);
 
   return (
@@ -26,7 +27,7 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
       aria-live="polite"
       aria-relevant="additions text"
       data-smooth-scroll
-      className={"min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain " + padding}
+      className={"min-h-0 flex-1 space-y-4 overflow-y-auto " + padding}
     >
       {turns.length === 0 ? (
         <div className="space-y-2.5">

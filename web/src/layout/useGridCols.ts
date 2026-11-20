@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useGridFreeze } from "./gridFreeze";
 
 /**
  * 每行卡片数：按**内容列实测宽度**算，不看视口断点。
@@ -102,8 +103,12 @@ export function useGridCols(): GridCols {
     writeChoice(next);
   }, []);
 
-  const maxFit = maxFitCols(width);
-  const cols = choice === "auto" ? Math.min(autoColsFor(width), maxFit) : Math.min(choice, maxFit);
+  // 侧栏补间期间用冻结的目标宽度算列数，避免中途 3 列→4 列→3 列地翻
+  const frozen = useGridFreeze();
+  const effective = frozen ?? width;
+  const maxFit = maxFitCols(effective);
+  const cols =
+    choice === "auto" ? Math.min(autoColsFor(effective), maxFit) : Math.min(choice, maxFit);
 
   return { ref, choice, setChoice, cols, maxFit, width };
 }

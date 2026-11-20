@@ -132,7 +132,7 @@ export default function AgentSidebar({
           </label>
         </div>
 
-        <div data-smooth-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
+        <div data-smooth-scroll className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           {loading && !items.length ? (
             <p className="flex items-center gap-2 px-2 py-6 text-[12px] text-fade">
               <Loader2 size={12} className="animate-spin" />
@@ -251,7 +251,7 @@ export default function AgentSidebar({
           <Plus size={15} />
         </button>
         <div className="my-1 h-px w-6 bg-line" aria-hidden />
-        <div data-smooth-scroll className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overscroll-contain [scrollbar-width:none]">
+        <div data-smooth-scroll className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto [scrollbar-width:none]">
           {items.slice(0, 14).map((thread) => (
             <button
               key={thread.id}

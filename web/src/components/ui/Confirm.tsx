@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { DUR, EASE } from "../../motion/tokens";
 import { pushScope, popScope } from "../../motion/useHotkeys";
+import { useScrollLock } from "../../motion/useScrollLock";
 import { usePauseSidebarScroll } from "../../motion/useSmoothWheelScroll";
 
 /**
@@ -66,6 +67,8 @@ export function ConfirmHost() {
   const reduce = useReducedMotion();
   // 确认框盖住整页时，底下的侧栏不该还能被滚轮拖着动
   usePauseSidebarScroll(Boolean(req));
+  // 锁 html 而不只是 body：body 锁了 html 照样能滚，弹窗背后的页面会跟着走
+  useScrollLock(Boolean(req));
   const titleId = useId();
   const bodyId = useId();
 

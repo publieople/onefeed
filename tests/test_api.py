@@ -77,7 +77,21 @@ def main() -> int:
         check(f.status_code == 200, "feed 200")
         feed = f.json()
         check(feed["count"] == 6 and len(feed["items"]) == 6, "feed 返回全部")
-        check(feed["items"][0]["id"].endswith(":0"), "feed 默认按时间倒序")
+        # 8b217c3 起 feed 默认按平台轮转交错，不再全局时间倒序：
+        # 断言换成「同一平台内部按时间倒序 + 相邻两条不同平台 + 不重不漏」。
+        ids = [i["id"] for i in feed["items"]]
+        check(len(set(ids)) == 6, "feed 不重不漏")
+        per: dict[str, list[int]] = {}
+        for row in feed["items"]:
+            per.setdefault(row["platform"], []).append(row["published_at"])
+        check(
+            all(v == sorted(v, reverse=True) for v in per.values()),
+            "每个平台内部按时间倒序",
+        )
+        check(
+            feed["items"][0]["platform"] != feed["items"][1]["platform"],
+            "相邻两条不同平台（平台轮转交错）",
+        )
         check(isinstance(feed["items"][0]["stats"], dict), "条目带 stats")
 
         # 平台过滤（逗号分隔多值）

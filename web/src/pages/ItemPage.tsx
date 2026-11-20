@@ -28,6 +28,7 @@ import { useRailSlot } from "../layout/RailSlot";
 import { createGhost } from "../motion/ghost";
 import { runNav } from "../motion/nav";
 import { pushScope, popScope } from "../motion/useHotkeys";
+import { useScrollLock } from "../motion/useScrollLock";
 import { usePauseSidebarScroll } from "../motion/useSmoothWheelScroll";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
@@ -201,8 +202,9 @@ function Lightbox({
   onIndex: (next: number) => void;
 }) {
   const [zoom, setZoom] = useState(false);
-  // 灯箱铺满整页时，侧栏的滚轮惯性也该停下
+  // 灯箱铺满整页时，侧栏的滚轮惯性也该停下，背后的页面也不该还能滚
   usePauseSidebarScroll(true);
+  useScrollLock(true);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => setZoom(false), [index]);
@@ -212,9 +214,7 @@ function Lightbox({
   // 同时压一层 dialog：灯箱盖着整页的时候，底下的 j/k、[、? 都不该再响应，
   // Tab 也只能在灯箱自己的按钮之间走。
   useEffect(() => {
-    const prev = document.body.style.overflow;
     const back = document.activeElement as HTMLElement | null;
-    document.body.style.overflow = "hidden";
     pushScope("dialog");
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
@@ -240,7 +240,6 @@ function Lightbox({
     };
     window.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
       popScope("dialog");
       if (back && document.body.contains(back)) back.focus?.();
@@ -1346,14 +1345,13 @@ function FavoriteDialog({
   const busy = saving || removing;
   const canSave = value.trim().length > 0 && !busy;
 
+  useScrollLock(true);
+
   useEffect(() => {
     restoreRef.current = document.activeElement;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     requestAnimationFrame(() => areaRef.current?.focus());
     const back = restoreRef.current as HTMLElement | null;
     return () => {
-      document.body.style.overflow = prev;
       // 焦点还给「收藏」按钮：关掉之后键盘用户不该落回 body。
       // 同步还，不等 rAF —— 后台标签页里 rAF 会被节流到 1 秒一次，实测焦点要 414ms 才回来。
       if (back && document.body.contains(back)) back.focus?.();
