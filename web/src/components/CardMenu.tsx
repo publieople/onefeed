@@ -30,6 +30,7 @@ export default function CardMenu({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const hadFocus = useRef(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
@@ -40,9 +41,25 @@ export default function CardMenu({
     const below = rect.bottom + 6;
     const top = below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 6) : below;
     setPos({ left, top });
-    const first = ref.current?.querySelector<HTMLElement>('[role="menuitem"]');
-    first?.focus();
   }, [anchor, items.length]);
+
+  // 焦点必须等 pos 落地之后再给：首次渲染 pos 还是 null，这一支直接 return null，
+  // 菜单节点根本不存在 —— 在 layout effect 里同步 focus 会永远拿到 null，
+  // 结果是菜单打开了、键盘却停在「更多操作」上（方向键也因此不动）。
+  useEffect(() => {
+    if (!pos) return;
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    hadFocus.current = true;
+  }, [pos]);
+
+  // 菜单关掉（Esc / 点外面 / 选了某一项）后焦点要回到那个「⋯」：
+  // 菜单节点一卸载焦点就掉到 body，键盘用户得从头 Tab 一遍才能回到原处。
+  useEffect(
+    () => () => {
+      if (hadFocus.current) anchor.focus({ preventScroll: true });
+    },
+    [anchor],
+  );
 
   useEffect(() => {
     const onDown = (event: PointerEvent) => {

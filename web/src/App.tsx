@@ -22,6 +22,12 @@ import ScrollTop from "./components/ScrollTop";
 import { DUR, EASE, pageVariants } from "./motion";
 import { useScrollSpeedCap } from "./motion/useScrollSpeedCap";
 
+/** 一条浮出来的提示；带 action 时右侧多一个按钮（撤销这类） */
+interface ToastMsg {
+  text: string;
+  action?: { label: string; run: () => void };
+}
+
 export interface OutletCtx {
   progress: RunState | null;
   reloadKey: number;
@@ -61,18 +67,29 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState<ToastMsg | null>(null);
+  // 所有 toast 共用一个定时器：之前「全局提示」和「开始刷新」各挂各的 setTimeout，
+  // 谁先到点谁清空，后一条还没读完就被前一条的定时器抹掉了。
+  const toastTimer = useRef<number | null>(null);
+  const showToast = useCallback((next: ToastMsg) => {
+    setToast(next);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    // 带「撤销」的要留够时间让人看清并点下去
+    toastTimer.current = window.setTimeout(() => setToast(null), next.action ? 5200 : 2400);
+  }, []);
+  useEffect(() => () => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  }, []);
   // 任何组件都能报一句结果（卡片菜单复制链接、收藏切换），不必把 toast 状态传下去
   useEffect(() => {
     const onToast = (event: Event) => {
-      const text = (event as CustomEvent<{ text?: string }>).detail?.text;
-      if (!text) return;
-      setToast(text);
-      window.setTimeout(() => setToast(""), 2400);
+      const detail = (event as CustomEvent<{ text?: string; action?: { label: string; run: () => void } }>).detail;
+      if (!detail?.text) return;
+      showToast({ text: detail.text, action: detail.action });
     };
     window.addEventListener("onefeed:toast", onToast);
     return () => window.removeEventListener("onefeed:toast", onToast);
-  }, []);
+  }, [showToast]);
   const [help, setHelp] = useState(false);
   // 信息流的滚轮限速：翻得太快会冲到还没取回来的地方，这里按每秒像素上限放行
   useScrollSpeedCap();
@@ -149,14 +166,13 @@ export default function App() {
   const refresh = useCallback(async () => {
     try {
       await postJSON("/api/refresh");
-      setToast("开始刷新");
+      showToast({ text: "开始刷新" });
       wasRunning.current = true;
       setProgress({ ...IDLE, running: true });
     } catch (err) {
-      setToast((err as Error).message);
+      showToast({ text: (err as Error).message });
     }
-    window.setTimeout(() => setToast(""), 3200);
-  }, []);
+  }, [showToast]);
 
   const bump = useCallback(() => {
     setReloadKey((k) => k + 1);
@@ -169,9 +185,9 @@ export default function App() {
   // 否则面板开了、地址栏也聚焦，看起来像「没聚焦」。
   useHotkeys("global", {
     "/": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
-    // Ctrl/⌘+K 是这类产品的惯例，Chrome 允许页面 preventDefault（不吞的话地址栏会一起聚焦）
+    // Ctrl/⌘+K 是这类产品的惯例，Chrome 允许页面 preventDefault（不吞的话地址栏会一起聚焦）。
+    // 不再绑 mod+shift+k：同一个动作挂两个键，键位表里却只写一个，等于给人一个隐形的坑。
     "mod+k": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
-    "mod+shift+k": () => window.dispatchEvent(new CustomEvent("onefeed:ask")),
     "?": () => setHelp(true),
     t: () => window.dispatchEvent(new CustomEvent("onefeed:theme")),
     r: () => void refresh(),
@@ -231,9 +247,22 @@ export default function App() {
             animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
             exit={{ opacity: 0, y: 12, scale: 0.97, x: "-50%" }}
             transition={{ duration: reduce ? 0 : DUR.base, ease: EASE }}
-            className="fixed bottom-24 left-1/2 z-50 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop"
+            className="fixed bottom-24 left-1/2 z-50 flex items-center gap-3 rounded-full bg-solid py-2.5 pl-5 pr-2.5 text-[13px] text-solid-fg shadow-pop"
           >
-            {toast}
+            {toast.text}
+            {toast.action ? (
+              <button
+                onClick={() => {
+                  const run = toast.action?.run;
+                  setToast(null);
+                  if (toastTimer.current) window.clearTimeout(toastTimer.current);
+                  run?.();
+                }}
+                className="rounded-full bg-solid-fg/15 px-3 py-1 text-[12px] font-medium text-solid-fg transition hover:bg-solid-fg/25"
+              >
+                {toast.action.label}
+              </button>
+            ) : null}
           </motion.div>
         ) : null}
       </AnimatePresence>

@@ -27,6 +27,7 @@ import { useAgentActions } from "../agent/AgentProvider";
 import { useRailSlot } from "../layout/RailSlot";
 import { createGhost } from "../motion/ghost";
 import { runNav } from "../motion/nav";
+import { pushScope, popScope } from "../motion/useHotkeys";
 import { KIND_LABEL, platform } from "../platform";
 import { duration, num, timeAgo } from "../format";
 
@@ -199,26 +200,55 @@ function Lightbox({
   onIndex: (next: number) => void;
 }) {
   const [zoom, setZoom] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => setZoom(false), [index]);
   const step = (delta: number) => onIndex((index + delta + images.length) % images.length);
 
-  // 打开时锁住背后的页面滚动，并接上键盘：Esc 关、左右翻
+  // 打开时锁住背后的页面滚动，并接上键盘：Esc 关、左右翻。
+  // 同时压一层 dialog：灯箱盖着整页的时候，底下的 j/k、[、? 都不该再响应，
+  // Tab 也只能在灯箱自己的按钮之间走。
   useEffect(() => {
     const prev = document.body.style.overflow;
+    const back = document.activeElement as HTMLElement | null;
     document.body.style.overflow = "hidden";
+    pushScope("dialog");
+    closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft") step(-1);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "ArrowLeft") step(-1);
       else if (e.key === "ArrowRight") step(1);
+      else if (e.key === "Tab") {
+        const nodes = Array.from(panelRef.current?.querySelectorAll<HTMLElement>("button") ?? []);
+        if (!nodes.length) return;
+        const first = nodes[0];
+        const last = nodes[nodes.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey && (active === first || !panelRef.current?.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
+      popScope("dialog");
+      if (back && document.body.contains(back)) back.focus?.();
     };
   }, [index, images.length]);
   return createPortal(
     <div
+      ref={panelRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="看图"
       className="fixed inset-0 z-[60] flex flex-col bg-black/90"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -230,6 +260,7 @@ function Lightbox({
           <span className={OVERLAY_HINT}>{zoom ? "点图回到适应屏幕" : "点图看原尺寸"}</span>
         </span>
         <button
+          ref={closeRef}
           aria-label="关闭"
           onClick={onClose}
           className={OVERLAY_BTN}
@@ -1320,10 +1351,9 @@ function FavoriteDialog({
     const back = restoreRef.current as HTMLElement | null;
     return () => {
       document.body.style.overflow = prev;
-      // 焦点还给「收藏」按钮：关掉之后键盘用户不该落回 body
-      requestAnimationFrame(() => {
-        if (back && document.body.contains(back)) back.focus?.();
-      });
+      // 焦点还给「收藏」按钮：关掉之后键盘用户不该落回 body。
+      // 同步还，不等 rAF —— 后台标签页里 rAF 会被节流到 1 秒一次，实测焦点要 414ms 才回来。
+      if (back && document.body.contains(back)) back.focus?.();
     };
   }, []);
 

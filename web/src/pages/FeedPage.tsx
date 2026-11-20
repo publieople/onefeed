@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { Bookmark, Loader2, Star } from "lucide-react";
 import type { OutletCtx } from "../App";
-import { useFeed, type FeedItem } from "../api";
+import { prefetchDetail, useFeed, type FeedItem } from "../api";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
 import ColsPicker from "../components/ui/ColsPicker";
@@ -84,6 +84,8 @@ export default function FeedPage({ ctx }: Props) {
   // 卡片先放大再进详情：把被点的元素作为过渡的那一层。
   // 同时把现在的地址（含筛选条件）交给详情页，返回时才能回到同一屏。
   const openItem = useCallback((id: string, el?: HTMLElement, seed?: FeedItem) => {
+    // 转场要 420ms，这段时间足够把详情请求排上队；点下去才算真意图，不算网络放大
+    prefetchDetail(id);
     // 卡片里的媒体框和标题是共享元素的两端：给它们挂上名字，浏览器才知道这两块要「长大」
     const media = el?.querySelector<HTMLElement>('[data-vt="media"]') ?? null;
     const title = el?.querySelector<HTMLElement>('[data-vt="title"]') ?? null;
@@ -127,7 +129,26 @@ export default function FeedPage({ ctx }: Props) {
   // 所以 48 张封顶（一屏半的量），再多就直接换 —— 连 motion 节点都不建。
   // 系统里关掉动效的人，换列就直接到位。
   const reduceMotion = useReducedMotion();
+  // 重排动画留给「列数变了」——那才是卡片自己挪了地方。换筛选 / 排序是整批换内容，
+  // 30 张卡各挂一套布局测量只换来 160–190ms 的长任务。整块按查询重挂一次，
+  // FLIP 就没有旧投影可对，新卡片用 .rise 进场，跟换了一屏的样子正好对上。
+  const queryKey = JSON.stringify(query);
   const animateLayout = feed.items.length > 0 && feed.items.length <= 48 && !reduceMotion;
+  /**
+   * 换筛选 / 排序的这一刻不要 FLIP：整批内容都换了，没有「同一张卡从 A 挪到 B」
+   * 这回事，但 30 张卡各挂一套投影测量会换来 160–190ms 的长任务。
+   * 等这一屏落定再把投影打开 —— 之后换列数才是真需要它的时候。
+   *
+   * （包装层始终是 motion.div，只切 layout 的值。按项数换 <div>/<motion.div>
+   * 会让 30 张卡在跨过 48 张那条线时整批重挂，触底加载实测 213ms 就是这么来的。）
+   */
+  const [layoutSettled, setLayoutSettled] = useState(false);
+  useEffect(() => {
+    setLayoutSettled(false);
+    const timer = window.setTimeout(() => setLayoutSettled(true), 420);
+    return () => window.clearTimeout(timer);
+  }, [queryKey, feed.items.length]);
+  const layoutOn = animateLayout && layoutSettled;
 
   // 列数一变，文档高度跟着变：浏览器只会把视口钉在原来的滚动偏移上，
   // 正在看的那张卡就被甩出屏幕了。换列前记下「第一张还在视野里的卡」在文档里的位置，
@@ -173,7 +194,9 @@ export default function FeedPage({ ctx }: Props) {
     const el = cardEls()[cursor];
     if (!el) return;
     el.focus({ preventScroll: true });
-    el.scrollIntoView({ block: "nearest" });
+    // 连按 j/k 时「啪、啪」地瞬移很晕；smooth 让镜头跟着光标滑过去，
+    // 后一次按键会重定目标，不会排一串动画。
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor]);
   // 换筛选等于换了一屏卡片，光标要归零，否则 f/j 会跳到别的条目上
@@ -325,10 +348,12 @@ export default function FeedPage({ ctx }: Props) {
             { id: "engagement" as const, label: "按热度" },
           ]}
         />
+        {/* 星标那份数据统一叫「稍后再看」（侧栏、右栏、卡片都是这个词）；
+            这里是筛选入口，所以写「只看…」，跟旁边打开右栏的按钮区分开。 */}
         <button
           onClick={() => patch({ saved: !savedOnly })}
           aria-pressed={savedOnly}
-          title={savedOnly ? "看全部内容" : "只看我收藏过的"}
+          title={savedOnly ? "看全部内容" : "只看稍后再看的"}
           className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[12px] transition ${
             savedOnly
               ? "border-ink bg-solid text-solid-fg"
@@ -336,7 +361,7 @@ export default function FeedPage({ ctx }: Props) {
           }`}
         >
           <Star size={12} fill={savedOnly ? "currentColor" : "none"} />
-          已收藏
+          只看稍后再看
         </button>
         <ColsPicker
           choice={grid.choice}
@@ -367,8 +392,12 @@ export default function FeedPage({ ctx }: Props) {
         />
       </section>
 
-      <p className="mt-4 min-h-[20px] text-[13px] leading-relaxed text-muted">
-        {feed.loading && feed.items.length === 0
+      {/* 换筛选后要立刻有动静：之前这一整屏到新数据回来之前一动不动，
+          体感就是「点了没反应」，实测首帧要等 1 秒。 */}
+      <p className="mt-4 min-h-[20px] text-[13px] leading-relaxed text-muted" aria-live="polite">
+        {feed.loading && feed.items.length > 0
+          ? "正在按新条件筛…"
+          : feed.loading && feed.items.length === 0
           ? "正在取内容…"
           : active
             ? `筛选出 ${feed.items.length} 条，共 ${feed.count} 条命中`
@@ -384,8 +413,12 @@ export default function FeedPage({ ctx }: Props) {
       <LayoutGroup id="feed">
       <section
         ref={grid.ref}
+        aria-busy={feed.loading}
         style={{ gridTemplateColumns: "repeat(" + grid.cols + ", minmax(0, 1fr))" }}
-        className="mt-5 grid items-stretch gap-x-5 gap-y-5"
+        className={
+          "mt-5 grid items-stretch gap-x-5 gap-y-5 transition-opacity duration-150 " +
+          (feed.loading && feed.items.length > 0 ? "opacity-55" : "opacity-100")
+        }
       >
         {feed.items.map((item, index) => {
           // T5：换筛选 / 排序时让留下来的卡片滑到新位置。项数一多，逐张滑会像在拖地，
@@ -404,11 +437,11 @@ export default function FeedPage({ ctx }: Props) {
           // 必须挂在内层：挂在外层的话，FLIP 写进去的位移会被 CSS 动画覆盖成 0，
           // 换列时就只剩卡片瞬间换位、没有流动感。
           const delay = { animationDelay: Math.min(index, 11) * 22 + "ms" };
-          return animateLayout ? (
+          return (
             <motion.div
               key={item.id}
               data-vt-item={item.id}
-              layout="position"
+              layout={layoutOn ? "position" : false}
               layoutDependency={grid.cols}
               transition={{ duration: DUR.base, ease: EASE }}
               className="h-full"
@@ -417,10 +450,6 @@ export default function FeedPage({ ctx }: Props) {
                 {card}
               </div>
             </motion.div>
-          ) : (
-            <div key={item.id} data-vt-item={item.id} className="rise h-full" style={delay}>
-              {card}
-            </div>
           );
         })}
       </section>

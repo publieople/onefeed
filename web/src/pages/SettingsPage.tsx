@@ -22,6 +22,60 @@ import SettingSection from "../components/SettingSection";
 import AiProviders from "../components/AiProviders";
 import { confirmDialog } from "../components/ui/Confirm";
 
+/**
+ * 数字输入框。直接 `Number(e.target.value)` 的问题是：清空输入框会静默变成 0，
+ * 而且 0 低于 min 也不会被拦（表单不在 <form> 里，min/max 只是装饰）。
+ * 这里留一份草稿：打字时只在合法区间内写回表单，清空则等失焦时还原上次的值。
+ */
+function NumberField({
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (next: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const focused = useRef(false);
+  useEffect(() => {
+    // 外部把值改了（恢复默认、保存后回填）时同步，但别打断正在打字的人
+    if (!focused.current) setDraft(String(value));
+  }, [value]);
+  const clamp = (raw: string): number | null => {
+    const n = Math.round(Number(raw));
+    if (!raw.trim() || !Number.isFinite(n)) return null;
+    return Math.min(max, Math.max(min, n));
+  };
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      min={min}
+      max={max}
+      value={draft}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+        const next = clamp(raw);
+        if (next !== null) onChange(next);
+      }}
+      onBlur={(e) => {
+        focused.current = false;
+        const next = clamp(e.target.value);
+        setDraft(String(next ?? value));
+        if (next !== null && next !== value) onChange(next);
+      }}
+      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 text-[13px] outline-none focus:border-ink/40"
+    />
+  );
+}
+
 const AUTH_PLUGINS = ["xiaohongshu", "douyin"];
 const ALL_AUTH_ROWS = [...AUTH_PLUGINS, "bilibili"];
 
@@ -497,24 +551,20 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 <div className="grid grid-cols-2 gap-4">
                   <label className="block">
                     <span className="text-[13px] font-medium">每平台每轮条数</span>
-                    <input
-                      type="number"
+                    <NumberField
+                      value={form.per_plugin_limit}
                       min={1}
                       max={50}
-                      value={form.per_plugin_limit}
-                      onChange={(e) => setForm({ ...form, per_plugin_limit: Number(e.target.value) })}
-                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 text-[13px] outline-none focus:border-ink/40"
+                      onChange={(next) => setForm({ ...form, per_plugin_limit: next })}
                     />
                   </label>
                   <label className="block">
                     <span className="text-[13px] font-medium">详情页评论条数</span>
-                    <input
-                      type="number"
+                    <NumberField
+                      value={form.comments_limit}
                       min={1}
                       max={50}
-                      value={form.comments_limit}
-                      onChange={(e) => setForm({ ...form, comments_limit: Number(e.target.value) })}
-                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 text-[13px] outline-none focus:border-ink/40"
+                      onChange={(next) => setForm({ ...form, comments_limit: next })}
                     />
                   </label>
                   <label className="block">
@@ -533,13 +583,11 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   </label>
                   <label className="block">
                     <span className="text-[13px] font-medium">本地保留天数</span>
-                    <input
-                      type="number"
+                    <NumberField
+                      value={form.prune_days}
                       min={1}
                       max={365}
-                      value={form.prune_days}
-                      onChange={(e) => setForm({ ...form, prune_days: Number(e.target.value) })}
-                      className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 text-[13px] outline-none focus:border-ink/40"
+                      onChange={(next) => setForm({ ...form, prune_days: next })}
                     />
                   </label>
                 </div>
@@ -817,6 +865,9 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   <span className="text-[11px] text-fade">{p.source === "registry" ? "市场安装" : "本地"}</span>
                   <button
                     onClick={() => void toggle(p.id, !p.enabled)}
+                    role="switch"
+                    aria-checked={Boolean(p.enabled)}
+                    aria-label={(p.name || platform(p.id).label) + (p.enabled ? "：已启用" : "：已停用")}
                     className={"ml-auto h-6 w-11 rounded-full p-0.5 transition " + (p.enabled ? "bg-solid" : "bg-line")}
                     title={p.enabled ? "点击停用" : "点击启用"}
                   >
@@ -840,7 +891,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
             exit={{ opacity: 0, y: 10, scale: 0.98, x: "-50%" }}
             transition={{ duration: reduce ? 0 : 0.2, ease: EASE }}
-            className="fixed bottom-6 left-1/2 z-50 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop"
+            className="fixed bottom-24 left-1/2 z-50 rounded-full bg-solid px-5 py-2.5 text-[13px] text-solid-fg shadow-pop"
           >
             {note}
           </motion.div>

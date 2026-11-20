@@ -1,5 +1,5 @@
 import { Check, ListChecks, Loader2, ShieldAlert, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "../api";
 import { platform } from "../platform";
 
@@ -42,6 +42,19 @@ export default function AgentConsole({
     .filter((event) => event.kind === "need_answer")
     .filter((event) => answeredAsk[String(event.data.ask_id)] === undefined)
     .pop();
+  // 一轮 agent 中途可能十几秒没有任何事件（模型在翻库、在写成段的推理）。
+  // 界面零变化会让人以为卡死了，所以静默超过 6 秒就自己往上加秒数。
+  const sinceRef = useRef(Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    sinceRef.current = Date.now();
+    setNow(Date.now());
+    if (!running) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running, events.length]);
+  const quietSeconds = Math.max(0, Math.round((now - sinceRef.current) / 1000));
+
   const steps: string[] = Array.isArray(plan?.data?.steps) ? plan.data.steps.map(String) : [];
   const rows = events.filter(
     (event) =>
@@ -118,9 +131,13 @@ export default function AgentConsole({
       )}
 
       {running ? (
-        <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-fade">
+        <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-fade" aria-live="polite">
           <span className="h-1 w-1 animate-pulse rounded-full bg-ink/60" />
-          {openAsk ? "等你选一下，或直接回一句" : "下一步…"}
+          {openAsk
+            ? "等你选一下，或直接回一句"
+            : quietSeconds >= 6
+              ? "还在翻，已 " + quietSeconds + "s"
+              : "下一步…"}
         </div>
       ) : null}
     </div>

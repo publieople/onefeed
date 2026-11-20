@@ -104,6 +104,9 @@ export default function AiProviders({ value, onChange, status }: Props) {
               )}
               <button
                 onClick={() => update(row.id, { enabled: !row.enabled })}
+                role="switch"
+                aria-checked={Boolean(row.enabled)}
+                aria-label={row.name + (row.enabled ? "：已启用" : "：已停用")}
                 className={"h-5 w-9 shrink-0 rounded-full p-0.5 transition " + (row.enabled ? "bg-solid" : "bg-line")}
                 title={row.enabled ? "点击停用（不上场）" : "点击启用"}
               >

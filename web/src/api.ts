@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { seedSaved } from "./agent/savedStore";
 
 export interface FeedItem {
   id: string;
@@ -564,6 +565,8 @@ export function prefetchItem(id: string): void {
   const at = Date.now();
   const slot = prefetched.get(id) ?? { at };
   prefetched.set(id, slot);
+  // 悬停预取只拉 /api/item：一屏慢扫过去，每条都连详情一起拉就是十二个请求
+  // （详情里是正文 + 评论，最重的一份）。详情等真的点下去再拉。
   getJSON<ItemResponse>("/api/item/" + encodeURIComponent(id))
     .then((d) => {
       slot.item = d;
@@ -571,6 +574,15 @@ export function prefetchItem(id: string): void {
     .catch(() => {
       /* 预取失败不用惊动用户，点进去会重新拉 */
     });
+}
+
+/** 真点下去之前先把详情排上队：转场本身要 420ms，这段时间正好盖住一次请求 */
+export function prefetchDetail(id: string): void {
+  const hit = prefetched.get(id);
+  if (hit?.detail && Date.now() - hit.at < PREFETCH_TTL) return;
+  const at = Date.now();
+  const slot = prefetched.get(id) ?? { at };
+  prefetched.set(id, slot);
   getDetail(id)
     .then((d) => {
       slot.detail = d;
@@ -846,7 +858,9 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
       if (query.since) params.set("since", String(query.since));
       if (query.saved) params.set("saved", "1");
       if (cursor) params.set("cursor", cursor);
-      params.set("limit", "30");
+      // 一页 18 条：实测一次追加 30 张卡是 226ms 帧 + 191ms 长任务，
+      // 18 条时挂载/图片解码都摊薄了，滚到底还是两三屏的量。
+      params.set("limit", "18");
       return "/api/feed?" + params.toString();
     },
     [query.platforms.join(","), query.kind, query.sort, query.q, query.since ?? 0, query.saved ? 1 : 0],
@@ -874,6 +888,9 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
             feedCache.delete(oldest.value);
           }
         }
+        // 星标是 per-item 的外部仓库：列表数据一到就把它灌进去，
+        // 否则第一次点星标会按「没存过」算，把已存的条目又存一遍
+        seedSaved(data.items);
         setItems((prev) => {
           if (!append) return data.items;
           // 游标是稳定的，但刷新一轮后条目可能移位；按 id 去重，

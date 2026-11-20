@@ -107,8 +107,13 @@ export default function FavoritesList({ onOpen }: { onOpen?: () => void }) {
                   }}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <span className="clamp-2 block text-[12.5px] leading-[1.5] text-ink">
-                    {item.favorite_note || "（没写备注）"}
+                  {/* 收藏夹的主文是「你写的备注」，跟稍后再看那种「标题列表」不是一回事：
+                      前面挂一颗心，扫一眼就知道这两栏的数据不一样。 */}
+                  <span className="flex items-start gap-1.5">
+                    <Heart size={11} className="mt-[3px] shrink-0 text-rose-500/80" fill="currentColor" />
+                    <span className="clamp-2 text-[12.5px] leading-[1.5] text-ink">
+                      {item.favorite_note || "（没写备注）"}
+                    </span>
                   </span>
                   <span className="mt-1 flex items-center gap-1.5 text-[11px] text-fade">
                     <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: meta.tint }} />

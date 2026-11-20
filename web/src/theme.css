@@ -398,27 +398,54 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
 }
 
 /* ── 卡片跟着自己的宽度走（容器查询）────────────────────────────────
-   卡片外壳挂了 container-type: inline-size，这里的 cqw 就是「卡片宽度的百分比」：
-   三列 380px 时标题 17.5px、五列 220px 时收到 14px，meta 同理。
+   卡片外壳挂了 container-type: inline-size。
+
+   字号用**分档的 @container 断点**，不用 cqw 连续缩放：左栏收放、换列时内容列
+   宽度是逐帧变的，连续 cqw 会让每张卡的字号每帧都变一点 —— 字号变 → 文本重排 →
+   30 张卡乘十几帧，实测一次收栏就是 240ms 长任务（26fps）。分档之后大多数帧
+   字号不动，只剩盒宽变化（便宜），收栏回到 60ms 帧内。
+
    标题槽位用 em 而不是固定 46px —— em 相对自身字号，两行 1.42 行高正好 2.84em，
-   所以字号变了槽位跟着变，等高契约（同排卡片底部对齐）不会被打破。 */
+   所以跨档时槽位跟着变，等高契约（同排卡片底部对齐）不会被打破。 */
 .card-pad {
   padding: clamp(9px, 3.2cqw, 13px);
 }
 
 .card-title {
   height: 2.84em;
-  font-size: clamp(14px, 4.6cqw, 18px);
+  font-size: 14px;
   line-height: 1.42;
 }
 
 .card-meta {
   height: 2.8em;
-  font-size: clamp(11.5px, 3.6cqw, 13px);
+  font-size: 11.5px;
 }
 
 .card-meta-quiet {
-  font-size: clamp(11px, 3.4cqw, 12px);
+  font-size: 11px;
+}
+
+.card-excerpt {
+  font-size: 13px;
+}
+
+/* 只留两档：窄卡（五列 220 / 四列 280）和宽卡（两列 700 / 一列 1180），
+   中间 250–600 一整段同字号。原因是**跨档会重排全部卡片的文字**：实测同样一次
+   收栏，字号一跨档 30 张卡全要重排（长任务 153ms），字号不动只剩 50ms、无长任务。
+   而左栏收放恰好在这一段里扫过（3 列 371 → 427），把断点放进这一段就会每次都踩到。 */
+@container (min-width: 250px) {
+  .card-title { font-size: 16px; }
+  .card-meta { font-size: 12.5px; }
+  .card-meta-quiet { font-size: 11.5px; }
+  .card-excerpt { font-size: 14px; }
+}
+
+@container (min-width: 600px) {
+  .card-title { font-size: 18px; }
+  .card-meta { font-size: 13px; }
+  .card-meta-quiet { font-size: 12px; }
+  .card-excerpt { font-size: 16px; }
 }
 
 /* 进场用 keyframes：随挂载自动播放，不依赖两帧时序（主线程一忙，两次 state 会合并） */
@@ -523,16 +550,47 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
     visibility 0s linear 120ms;
 }
 
-/* 栏宽：带一点回弹的缓出（260ms），收放像被弹了一下而不是匀速平移 */
+/* 栏宽：**不做过渡**，一步到位。
+
+   这里原来是 width 260ms 带一点回弹。实测（probes/ops_diag_left*.py，1440x900、
+   961 条真实数据）：内容列宽逐帧变化，会让每张卡重排 —— 30 张卡 × 十几帧，
+   一次收栏 26.8fps、max 帧 147ms、长任务 241ms。把卡片字号从连续 cqw 改成分档
+   @container 之后降到一次 109ms 长任务，再叠 content-visibility / 缩短到 140ms
+   都压不下去（数据见 docs/interaction-perf-review-2026-11-20.md 的复测表）。
+   而"一步换宽"只重排一次：max 53ms、无长任务。
+
+   所以宽度直接切，用中间列的 200ms 位移+淡入（transform/opacity，合成层完成，
+   不触发重排）把这一下「接住」——看起来是有方向地归位，而不是硬跳。 */
 .shell-col {
-  transition: width 260ms cubic-bezier(0.22, 1.24, 0.36, 1);
+  transition: none;
+}
+
+@keyframes content-settle-expand {
+  from { transform: translate3d(-12px, 0, 0); opacity: 0.86; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes content-settle-collapse {
+  from { transform: translate3d(12px, 0, 0); opacity: 0.86; }
+  to { transform: none; opacity: 1; }
+}
+
+.content-settle-expand {
+  animation: content-settle-expand 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.content-settle-collapse {
+  animation: content-settle-collapse 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .side-layer,
   .side-layer[data-on="false"],
-  .shell-col {
+  .shell-col,
+  .content-settle-expand,
+  .content-settle-collapse {
     transition: none !important;
+    animation: none !important;
   }
 }
 

@@ -43,16 +43,34 @@ def test_cards_scale_with_their_own_width():
     assert 'containerType: "inline-size"' in card
     assert "card-title" in card and "card-meta" in card, "字号要按卡片宽度走，不能写死"
     theme = read("web/src/theme.css")
-    assert "clamp(14px, 4.6cqw, 18px)" in theme
+    # 分档 @container 而不是连续 cqw：连续缩放会让左栏收放的每一帧都给 30 张卡换字号，
+    # 实测一次收栏 240ms 长任务（26fps），分档之后只剩盒宽变化。
+    assert "@container (min-width: 250px)" in theme
+    assert "@container (min-width: 600px)" in theme
+    assert "cqw, 18px" not in theme and "4.6cqw" not in theme, "字号别再跟 cqw 连续缩放"
     assert "height: 2.84em" in theme, "标题槽位用 em，字号变了等高契约才不破"
     assert "@supports not (container-type: inline-size)" in theme, "老浏览器要有回落"
+
+
+def test_breakpoints_avoid_the_width_the_left_rail_sweeps_through():
+    """左栏收放会扫过 371→427 这一区间，断点落在这里等于每次收放都重排全部卡片。"""
+    theme = read("web/src/theme.css")
+    import re
+
+    stops = [int(m) for m in re.findall(r"@container \(min-width: (\d+)px\)", theme)]
+    assert stops, "至少要有一档容器断点"
+    sweeps = range(360, 440)
+    for stop in stops:
+        assert stop not in sweeps, f"{stop}px 落在左栏收放的扫过区间，会每帧跨档"
 
 
 def test_reflow_animation_survives_the_entry_animation():
     feed = read("web/src/pages/FeedPage.tsx")
     assert "<LayoutGroup" in feed
-    assert 'layout="position"' in feed and "layoutDependency={grid.cols}" in feed
+    assert "layoutDependency={grid.cols}" in feed
     assert "animateLayout = feed.items.length > 0 && feed.items.length <= 48" in feed
+    # 进场动画挂在内层 .rise：挂外层会压住 FLIP 写的 transform（fill-mode: both）
+    assert 'className="rise h-full"' in feed
     card = read("web/src/components/Card.tsx")
     assert "max-h-[420px]" in card, "单列时封面要封顶，不然一张图吃掉一屏"
 

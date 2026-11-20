@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { DUR, EASE } from "../../motion/tokens";
+import { pushScope, popScope } from "../../motion/useHotkeys";
 
 /**
  * 全站第一个真对话框。
@@ -85,10 +86,17 @@ export function ConfirmHost() {
     // 焦点还给触发者：删完一行之后焦点落在 body 上，键盘用户会直接迷路
     const back = restoreRef.current as HTMLElement | null;
     restoreRef.current = null;
-    if (back && typeof back.focus === "function") {
-      requestAnimationFrame(() => back.focus());
-    }
+    // 同步还焦点：rAF 在后台标签页会被节流，弹窗关了焦点却还挂在 body 上
+    if (back && typeof back.focus === "function" && document.body.contains(back)) back.focus();
   }, []);
+
+  // 确认框压一层 dialog：否则底下的全局键照常响应，「?」会在弹窗上再叠一个帮助层、
+  // 「[」会把左栏收起来 —— 弹窗开着的时候，键盘应该只属于这个弹窗。
+  useEffect(() => {
+    if (!req) return;
+    pushScope("dialog");
+    return () => popScope("dialog");
+  }, [req]);
 
   useEffect(() => {
     if (!req) return;

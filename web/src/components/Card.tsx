@@ -13,7 +13,8 @@ import {
   Sparkles,
   Star,
 } from "lucide-react";
-import { useAgentActions, useAgentSession } from "../agent/AgentProvider";
+import { useAgentActions } from "../agent/AgentProvider";
+import { useIsSaved } from "../agent/savedStore";
 import CardMenu, { type CardMenuItem } from "./CardMenu";
 import type { FeedItem } from "../api";
 import { KIND_LABEL, platform } from "../platform";
@@ -83,6 +84,7 @@ function Cover({ item }: { item: FeedItem }) {
           src={item.cover}
           alt=""
           loading="lazy"
+          decoding="async"
           referrerPolicy="no-referrer"
           className="absolute inset-0 h-full w-full object-cover"
           onError={(e) => {
@@ -119,6 +121,7 @@ function ImageGrid({ item }: { item: FeedItem }) {
               src={src}
               alt=""
               loading="lazy"
+              decoding="async"
               referrerPolicy="no-referrer"
               className="absolute inset-0 h-full w-full object-cover"
               onError={(e) => {
@@ -176,7 +179,7 @@ function TextPanel({ item, label }: { item: FeedItem; label?: string }) {
         style={{ background: hexAlpha(p.tint, 0.06), border: "1px solid " + hexAlpha(p.tint, 0.14) }}
       >
         <Quote size={13} style={{ color: hexAlpha(p.tint, 0.75) }} className="shrink-0" />
-        <p className="mt-1.5 flex-1 overflow-hidden pb-3 text-[clamp(13px,1.5cqw,17px)] leading-[1.7] text-ink/75">{text}</p>
+        <p className="card-excerpt mt-1.5 flex-1 overflow-hidden pb-3 leading-[1.7] text-ink/75">{text}</p>
         {/* 文字按面板高度自适应，底部渐隐收口，不同列宽都不会留一块空白 */}
         <div
           className="pointer-events-none absolute inset-x-0 bottom-[22px] h-14"
@@ -237,8 +240,9 @@ function Card({ item, onOpen, vtNames }: Props) {
   const linkRef = useRef<HTMLAnchorElement | null>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const { saved, toggleSave } = { ...useAgentSession(), ...useAgentActions() };
-  const isSaved = saved.has(item.id) || Boolean(item.saved);
+  const { toggleSave } = useAgentActions();
+  // 只订阅自己这一条：整屏卡片读 saved 的话，点一颗星会让 30 张卡一起重渲染
+  const isSaved = useIsSaved(item.id) || Boolean(item.saved);
 
   /** 卡片本身是 <a>：里面这些按钮必须先掐掉跳转，否则点收藏会把人送走 */
   const swallow = (event: React.MouseEvent) => {
@@ -288,7 +292,8 @@ function Card({ item, onOpen, vtNames }: Props) {
   /* 指针停一下就开始预取：转场结束时数据大概率已经就位，不会飞进去撞见骨架屏 */
   const schedulePrefetch = () => {
     if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
-    hoverTimer.current = window.setTimeout(() => prefetchItem(item.id), 260);
+    // 600ms 才认「停在这张卡上」：260ms 时慢扫一屏就会连拉十几条，网络和主线程都在忙
+    hoverTimer.current = window.setTimeout(() => prefetchItem(item.id), 600);
   };
   const cancelPrefetch = () => {
     if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
@@ -352,6 +357,9 @@ function Card({ item, onOpen, vtNames }: Props) {
             src={item.author_avatar}
             alt=""
             loading="lazy"
+            decoding="async"
+            width={16}
+            height={16}
             referrerPolicy="no-referrer"
             className="h-4 w-4 rounded-full object-cover"
             onError={(e) => {

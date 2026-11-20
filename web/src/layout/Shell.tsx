@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import AgentSidebar from "../agent/AgentSidebar";
 import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
 import type { Health, RunState } from "../api";
@@ -25,8 +25,8 @@ const RIGHT_W = 320;
  * 1200 起左栏可展开 240，960 起退成 64 图标轨，再窄两栏都不渲染。
  *
  * 左栏展开 = 这一列从 64 变宽成 240，中间列被 flex 挤窄；不是浮层。
- * 收放都要有过渡：宽度走这一层的 width 过渡（两段内容共用同一层，
- * 所以换分支时那一列还在，能连续变宽变窄）；右抽屉走 translate 滑入滑出。
+ * 宽度不做过渡（实测逐帧重排 30 张卡，收栏只有 26.8fps，见 theme.css 的注释），
+ * 换宽一步到位，由中间列的 200ms 位移+淡入接住这一下；右抽屉仍走 translate 滑入滑出。
  */
 export default function Shell({
   health,
@@ -55,6 +55,29 @@ export default function Shell({
   const drawerOpen = !pinned && (shell.rightOpen || rail);
   // 抽屉得先留着才能播退场：它滑出去之后才是真的卸载
   const drawer = usePresence(drawerOpen, 240);
+
+  /**
+   * 左栏换宽之后，给中间列挂 200ms 的位移+淡入。
+   * 栏宽是硬切的（过渡会逐帧重排卡片），这一下靠合成层的动效接住，
+   * 读起来像「内容有方向地归位」，而不是整块跳过去。
+   */
+  const [settle, setSettle] = useState<"" | "expand" | "collapse">("");
+  const prevLeft = useRef(shell.left);
+  useEffect(() => {
+    const prev = prevLeft.current;
+    prevLeft.current = shell.left;
+    if (prev === shell.left) return;
+    const dir =
+      prev === "full" && shell.left === "rail"
+        ? "collapse"
+        : prev === "rail" && shell.left === "full"
+          ? "expand"
+          : "";
+    if (!dir) return;
+    setSettle(dir);
+    const timer = window.setTimeout(() => setSettle(""), 220);
+    return () => window.clearTimeout(timer);
+  }, [shell.left]);
 
   const leftW = shell.left === "hidden" ? 0 : shell.left === "full" ? LEFT_W_FULL : LEFT_W_RAIL;
   const rightW = pinned && (shell.rightOpen || rail) ? RIGHT_W : 0;
@@ -152,7 +175,14 @@ export default function Shell({
 
         {/* 中间列吃掉剩下的宽度：不再写死 max-w，宽屏就真的铺满。
             可读性靠内层的 1240 上限，而不是把整列缩成一个居中的窄条。 */}
-        <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-6 outline-none">
+        <main
+          id="main"
+          tabIndex={-1}
+          className={
+            "min-w-0 flex-1 px-6 outline-none" +
+            (settle === "expand" ? " content-settle-expand" : settle === "collapse" ? " content-settle-collapse" : "")
+          }
+        >
           {/* data-content：内容列的真正边界（含 1400 上限），代位盒子按它算落点，
               而不是量整条 main —— 宽屏上 main 比内容宽，盒子会飘到右侧空白里 */}
           <div data-content className="mx-auto w-full max-w-[1400px]">

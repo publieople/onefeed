@@ -26,6 +26,7 @@ import {
   type AiResponse,
   type FeedItem,
 } from "../api";
+import { savedStore } from "./savedStore";
 import { createGhost } from "../motion/ghost";
 import { runNav } from "../motion/nav";
 import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
@@ -355,6 +356,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       ]);
       // 回来带 saved 标记的条目：结果行上的星标一开始就得是实心的
       const marked = items.filter((item) => item.saved).map((item) => item.id);
+      for (const id of marked) savedStore.set(id, true);
       if (marked.length) {
         setSaved((prev) => {
           const next = new Set(prev);
@@ -373,6 +375,17 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const listen = useCallback(
     (runId: string) => {
       const events: AgentEvent[] = [];
+      // 一帧最多把轨迹同步给界面一次。之前每个事件都 [...events] 复制整份数组，
+      // 一轮 30 个事件就是 465 次拷贝 + 30 次重渲染，长任务一半花在这上面。
+      let flush = 0;
+      const scheduleFlush = () => {
+        if (flush) return;
+        flush = window.requestAnimationFrame(() => {
+          flush = 0;
+          if (settledRef.current) return;
+          setLive({ run_id: runId, events: events.slice() });
+        });
+      };
       settledRef.current = false;
       cancelledRef.current = false;
       setAnswered({});
@@ -383,7 +396,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         runId,
         (event) => {
           events.push(event);
-          setLive({ run_id: runId, events: [...events] });
+          scheduleFlush();
           if (event.kind === "action") applyUi(event);
           if (event.kind === "done") settle(event, false, events.slice());
           else if (event.kind === "cancelled") settle(event, true, events.slice());
@@ -391,6 +404,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         (msg) => {
           if (settledRef.current) return;
           settledRef.current = true;
+          if (flush) window.cancelAnimationFrame(flush);
           streamRef.current = null;
           clearStopTimer();
           setLive(null);
@@ -492,8 +506,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     [live, say],
   );
 
-  const toggleSave = useCallback(async (id: string) => {
-    const on = !saved.has(id);
+  const applySave = useCallback(async (id: string, on: boolean) => {
+    savedStore.set(id, on);
     setSaved((prev) => {
       const next = new Set(prev);
       if (on) next.add(id);
@@ -505,14 +519,33 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       // 稍后再看那份列表跟卡片星标是同一份数据，改完广播一下让它自己刷新
       window.dispatchEvent(new CustomEvent("onefeed:saved", { detail: { id, saved: on } }));
     } catch {
+      savedStore.set(id, !on);
       setSaved((prev) => {
         const next = new Set(prev);
         if (on) next.delete(id);
         else next.add(id);
         return next;
       });
+      window.dispatchEvent(new CustomEvent("onefeed:toast", { detail: { text: "没存上，稍后再试。" } }));
     }
-  }, [saved]);
+  }, []);
+
+  const toggleSave = useCallback(
+    (id: string) => {
+      const on = !savedStore.get(id);
+      void applySave(id, on);
+      // 星标只有 16px 的图标变色，点错了根本看不出来 —— 给一句提示加一个当场撤销
+      window.dispatchEvent(
+        new CustomEvent("onefeed:toast", {
+          detail: {
+            text: on ? "已加入稍后再看" : "已移出稍后再看",
+            action: { label: "撤销", run: () => void applySave(id, !on) },
+          },
+        }),
+      );
+    },
+    [applySave],
+  );
 
   const refreshHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -696,7 +729,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     }
     // 收起方向：抽屉缩回唤起器。唤起器是收起之后才挂上的，新快照里没有它，
     // 所以代位盒子要挂在 apply 里 —— 那样它只进新快照，正好当终点。
-    const ghost = createGhost({ agent: onItemPage && wide ? "corner" : "pill" });
+    // 到这里的只可能是「抽屉」形态：详情页右栏在上面的分支已经 return 了
+    const ghost = createGhost({ agent: "pill" });
     runNav(
       "back",
       () => {
@@ -715,7 +749,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         return;
       }
       // 打开方向：唤起器还在旧快照里但没有名字，给它挂个代位盒子，抽屉就从它的位置长出来。
-      const ghost = createGhost({ agent: onItemPage && wide ? "corner" : "pill" });
+      const ghost = createGhost({ agent: "pill" });
       ghost.mount();
       runNav(
         "tab",

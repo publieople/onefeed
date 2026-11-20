@@ -39,14 +39,47 @@ def test_progress_poll_skips_identical_state():
     assert "setProgress((prev) => (sameRun(prev, data.state) ? prev : data.state));" in app
 
 
-def test_feed_cards_are_memoized_and_unwrapped_when_layout_is_off():
+def test_feed_cards_are_memoized_and_layout_animation_is_switchable():
     card = read("web/src/components/Card.tsx")
     assert "export default memo(Card)" in card
     feed = read("web/src/pages/FeedPage.tsx")
-    # 进场动画挂在内层：挂外层会压住 FLIP 写的 transform（.rise 是 fill-mode: both）
-    assert 'className="rise h-full"' in feed and "animateLayout ? (" in feed
-    assert 'className="h-full"' in feed
+    # 包装层只留一种写法：按项数在 div / motion.div 之间切换会让跨过阈值时整批重挂，
+    # 现在统一是 motion.div，靠 layout={layoutOn ? "position" : false} 开关。
+    assert 'layout={layoutOn ? "position" : false}' in feed
+    assert "animateLayout ? (" not in feed, "别再按项数切包装元素"
+    assert "const [layoutSettled, setLayoutSettled] = useState(false)" in feed, "换条件时先关布局动画再开，否则重排被 FLIP 拖着走"
     assert "const openItem = useCallback(" in feed, "openItem 不稳，memo 过的卡片每帧都会收到新 props"
+
+
+def test_saving_one_card_does_not_rerender_the_whole_feed():
+    store = read("web/src/agent/savedStore.ts")
+    assert "useSyncExternalStore" in store and "subscribe" in store
+    card = read("web/src/components/Card.tsx")
+    assert "useIsSaved(item.id)" in card, "每张卡只订阅自己那条，点一颗星不该让 30 张卡一起重渲染"
+    provider = read("web/src/agent/AgentProvider.tsx")
+    assert "savedStore.set" in provider and "savedStore.get" in provider
+
+
+def test_feed_page_size_stays_small():
+    api = read("web/src/api.ts")
+    assert 'params.set("limit", "18")' in api, "一页 30 条一次挂 30 张卡，触底就是 226ms 帧 + 191ms 长任务"
+
+
+def test_hover_prefetch_only_fetches_the_item():
+    api = read("web/src/api.ts")
+    item_block = api.split("export function prefetchItem(")[1].split("export function prefetchDetail(")[0]
+    assert "getDetail(" not in item_block, "悬停别连详情一起拉：慢扫一屏就是十几个重请求"
+    assert "/api/item/" in item_block
+    detail_block = api.split("export function prefetchDetail(")[1].split("export function peekItem(")[0]
+    assert "getDetail(" in detail_block
+    card = read("web/src/components/Card.tsx")
+    assert "prefetchItem(item.id), 600)" in card, "悬停去抖要够长，否则扫一屏就全在预取"
+
+
+def test_agent_console_tells_you_it_is_still_working():
+    console = read("web/src/components/AgentConsole.tsx")
+    assert "quietSeconds" in console and "还在翻，已 " in console, "一轮 Agent 可能十几秒没事件，界面不能一直只写「下一步…」"
+    assert 'aria-live="polite"' in console
 
 
 def test_static_assets_pages_are_code_split():

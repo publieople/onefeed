@@ -284,6 +284,21 @@ def test_launcher_fades_into_the_page() -> None:
     assert 'className="pb-32"' in FEED, "信息流底部要给渐隐层留位置"
 
 
+@case
+def test_card_menu_keeps_keyboard_users_in_place() -> None:
+    menu = read("components", "CardMenu.tsx")
+    # 首次渲染 pos 还是 null，菜单节点不存在：在 layout effect 里同步 focus 会永远拿到 null
+    assert "useEffect(() => {\n    if (!pos) return;" in menu
+    assert "hadFocus.current = true" in menu
+    assert "anchor.focus({ preventScroll: true })" in menu, "菜单一卸载焦点就掉到 body，键盘用户得从头 Tab 回来"
+
+
+@case
+def test_confirm_dialog_takes_over_the_hotkey_stack() -> None:
+    confirm = read("components", "ui", "Confirm.tsx")
+    assert 'pushScope("dialog")' in confirm and 'popScope("dialog")' in confirm, "确认框开着时 ? / [ 不该还能用"
+
+
 def main() -> int:
     failed = 0
     for name, fn in CASES:
