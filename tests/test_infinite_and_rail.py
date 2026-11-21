@@ -63,11 +63,12 @@ def test_feed_prefetches_the_next_page_before_reaching_the_bottom():
 
 
 def test_wheel_easing_is_capped_but_inner_scrollers_are_left_alone():
-    """页面本体与侧栏共用一套缓动引擎（2026-11-21，替掉 useScrollSpeedCap）。"""
+    """页面本体与侧栏共用一套缓动引擎（2026-11-21 Lenis 调校档，替掉 useScrollSpeedCap）。"""
     hook = read("web/src/motion/useSmoothWheelScroll.ts")
-    assert "const MAX_SPEED = 2000" in hook and "const MAX_DT = 0.032" in hook
+    assert 'from "lenis"' in hook and "new Lenis(" in hook
+    assert "const DURATION = 0.85" in hook and "autoRaf: false" in hook
     assert "function frame(" in hook
-    assert "ownsScroll(event.target)" in hook, "侧栏/对话流自己的滚动容器不能被接管"
+    assert "node.closest(SELECTOR)" in hook, "页面实例不能接管侧栏里的滚轮"
     assert "prefers-reduced-motion" in hook
     app = read("web/src/App.tsx")
     assert "useSmoothWheelScroll();" in app

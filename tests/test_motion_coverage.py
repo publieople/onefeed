@@ -153,46 +153,48 @@ def test_feed_status_and_saved_removal_are_animated():
     assert "rise" in read("web/src/agent/AgentHistory.tsx")
 
 def test_sidebars_ease_wheel_scrolling():
-    """滚轮缓动：当帧跟手 + 余量滑行，页面本体与侧栏共用一套引擎。
+    """滚轮缓动：Lenis 调校档，页面本体与侧栏共用一套参数与一个 rAF 循环。
 
-    第二版用 Lenis，纯粹的位置缓动（lerp 0.09）：一格滚轮首帧只走 8px、
-    840ms 才停稳，用户说「还是不满意，要更跟手」。第三版改成两段式：
-    事件当帧写掉 delta 的 IMMEDIATE(0.62)，剩下按 TAU_MS(55ms) 指数收尾，
-    再加 MAX_SPEED × dt 的每帧上限防掉帧大跳。
-    钉住：① 六个列表都挂了标记；② 单条 rAF、空闲即停；
-    ③ 侧栏到边这一格转给页面（同一个引擎，不 handOff 给浏览器）；
-    ④ 其它自有滚动容器交回浏览器；⑤ 程序化滚动走引擎坐标系。
+    三代演进：① Lenis 默认 lerp 0.09，一格只走 8px、840ms 才停，嫌拖；
+    ② 自研两段式（当帧走 62% + 指数收尾），一格 71px 在同一帧落地，
+    用户说「还是跳变式」；③ 2026-11-21 从九宫格对照里选了 Lenis 调校档：
+    duration 0.85 + easeOutQuart + wheelMultiplier 1，实测一格 38 帧、
+    最大单步 6px、613ms 收住。
+
+    钉住：① 六个列表都挂 data-smooth-scroll；② 单条 rAF 驱动全部实例、
+    空闲若干帧即停；③ 侧栏到边这一格在捕获阶段拦下、交给页面实例继续缓动，
+    不交给浏览器原生滚；④ 模态层打开时 document 捕获阶段全部吞掉；
+    ⑤ 程序化滚动与 Mac / reduce 的豁免。
     """
     hook = read("web/src/motion/useSmoothWheelScroll.ts")
     assert "data-smooth-scroll" in hook
-    assert "const IMMEDIATE = 0.62" in hook
-    assert "const TAU_MS = 55" in hook
-    assert "const MAX_SPEED = 2000" in hook
-    assert "const MAX_DT = 0.032" in hook
-    assert "const WHEEL_MULTIPLIER = 1.15" in hook
-    # 当帧跟手：push 里先写 delta * IMMEDIATE
-    assert "delta * IMMEDIATE" in hook
-    # 余量指数收尾 + 每帧位移上限
-    assert "Math.exp(" in hook and "clamp(diff * ease, -cap, cap)" in hook
+    # 参数来自预览页 3 号面板
+    assert "const DURATION = 0.85" in hook
+    assert "const WHEEL_MULTIPLIER = 1" in hook
+    assert "1 - Math.pow(1 - t, 4)" in hook
+    assert "duration: DURATION" in hook and "easing: EASING" in hook
+    # autoRaf 默认 false，必须自己喂 raf
+    assert "autoRaf: false" in hook
+    assert "pageLenis.raf(time)" in hook and "lenis.raf(time)" in hook
     # 单条 rAF，连续 IDLE_FRAMES 帧没人滚就停（空闲 0 回调）
-    assert "function frame(" in hook
-    assert "IDLE_FRAMES" in hook and "cancelAnimationFrame(rafId)" in hook
-    assert "function kick(" in hook
+    assert "function frame(" in hook and "function kick(" in hook
+    assert "idleFrames < IDLE_FRAMES" in hook and "cancelAnimationFrame(rafId)" in hook
     # C-04：暂停改计数，两层模态嵌套时先关的不能把后关的暂停解掉
     assert "pauseDepth += 1" in hook and "Math.max(0, pauseDepth - 1)" in hook
-    # 侧栏到底/到顶：这一格顺着滚动链交给页面，不交给浏览器
-    assert "surface = page" in hook
-    assert "handOff" not in hook
-    # 其它自有滚动容器（评论列表等）不接管
-    assert "function ownsScroll(" in hook and "ownsScroll(event.target)" in hook
-    # 滚轮必须在捕获阶段拦，否则内层容器的默认滚动先发生
-    assert 'document.addEventListener("wheel", onWheel, { capture: true, passive: false })' in hook
+    assert "isPageScrollLocked()" in hook
+    # 侧栏到顶/到底：捕获阶段拦下这一格，交给页面实例（不是浏览器原生滚）
+    assert "function onBoxWheel(" in hook and "function forwardToPage(" in hook
+    assert "stopImmediatePropagation" in hook
+    assert "pageLenis.scrollTo(next" in hook
+    # 页面实例不接管侧栏里的滚轮（否则两套实例打架）
+    assert "node.closest(SELECTOR)" in hook
+    # 容器上的 capture 必须在冒泡前，否则容器自己的默认滚动先发生
+    assert 'el.addEventListener("wheel", onBoxWheel, { capture: true, passive: false })' in hook
     # 容器上有 scroll-behavior: smooth 时必须 instant 写，否则每帧只挪 2px
     assert 'behavior: "instant" as ScrollBehavior' in hook
-    # 程序化滚动走引擎坐标系，直接赋 scrollTop 会被旧 target 拉回去
     assert "export function scrollInstant" in hook
     assert "scrollInstant(el, el.scrollHeight)" in read("web/src/agent/AgentThread.tsx")
-    # 边界放行链接不上 overscroll-contain：CSS 的滚动链会被它截断，页面照样滚不动
+    # 边界放行链接不上 overscroll-contain：CSS 的滚动链会被它截断
     for rel in (
         "web/src/agent/AgentSidebar.tsx",
         "web/src/agent/AgentThread.tsx",
@@ -205,9 +207,9 @@ def test_sidebars_ease_wheel_scrolling():
     assert "prefers-reduced-motion" in hook
     assert "Mac|iPhone|iPad|iPod" in hook
     assert "usePauseSidebarScroll" in hook
-    # 不再依赖 Lenis：位置缓动换成了自研两段式
-    assert "new Lenis" not in hook and 'from "lenis"' not in hook
-    assert "\"lenis\"" not in read("web/package.json")
+    # 依赖就是 Lenis 本身，参数写死在这里
+    assert 'from "lenis"' in hook and "new Lenis(" in hook
+    assert '"lenis"' in read("web/package.json")
 
     app = read("web/src/App.tsx")
     assert "useSmoothWheelScroll()" in app
