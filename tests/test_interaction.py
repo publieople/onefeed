@@ -55,7 +55,7 @@ def test_global_scope_survives_list() -> None:
     assert "e.preventDefault()" in HOTKEYS, "命中快捷键没吞浏览器默认动作"
     for key in ('"/"', '"mod+k"', '"?"', "t:", "r:"):
         assert key in APP, "App 全局快捷键缺 " + key
-    assert "pushScope" in APP and "ShortcutHelp" in APP
+    assert "ShortcutHelp" in APP
 
 
 @case
@@ -296,7 +296,23 @@ def test_card_menu_keeps_keyboard_users_in_place() -> None:
 @case
 def test_confirm_dialog_takes_over_the_hotkey_stack() -> None:
     confirm = read("components", "ui", "Confirm.tsx")
-    assert 'pushScope("dialog")' in confirm and 'popScope("dialog")' in confirm, "确认框开着时 ? / [ 不该还能用"
+    assert "useModalScope(Boolean(req))" in confirm, "确认框开着时 ? / [ 不该还能用"
+
+
+@case
+def test_every_dialog_takes_over_the_hotkey_stack() -> None:
+    # 第三轮评审的 C-01：收藏对话框漏了压栈，开着它按 [ 会收左栏、按 t 会切主题。
+    # 别再靠人记——凡是 role="dialog" 的组件，都必须自己挂 useModalScope。
+    root = ROOT / "web" / "src"
+    missing = []
+    for path in root.rglob("*.tsx"):
+        src = path.read_text(encoding="utf-8")
+        if 'role="dialog"' in src and "useModalScope" not in src:
+            missing.append(str(path.relative_to(ROOT)).replace("\\", "/"))
+    assert not missing, "这些弹层开着时键盘还会漏到页面：" + ", ".join(missing)
+    # 计数栈：两层弹窗叠在一起，先关内层不许把外层的 dialog 作用域掀掉
+    assert "depth: Record<Scope, number>" in HOTKEYS
+    assert "if (depth[target] > 0) return;" in HOTKEYS
 
 
 def main() -> int:

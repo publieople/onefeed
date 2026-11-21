@@ -27,7 +27,7 @@ import { useAgentActions } from "../agent/AgentProvider";
 import { useRailSlot } from "../layout/RailSlot";
 import { createGhost } from "../motion/ghost";
 import { runNav } from "../motion/nav";
-import { pushScope, popScope } from "../motion/useHotkeys";
+import { useModalScope } from "../motion/useModalScope";
 import { useScrollLock } from "../motion/useScrollLock";
 import { usePauseSidebarScroll } from "../motion/useSmoothWheelScroll";
 import { KIND_LABEL, platform } from "../platform";
@@ -135,6 +135,9 @@ function Media({ item, media, seek }: { item: FeedItem; media?: DetailMedia; see
               className="h-full w-full"
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
               allowFullScreen
+              // 嵌的是第三方播放器：给它自己的一份源，别让它够到本站的 DOM / localStorage。
+              // allow-same-origin + allow-scripts 是 B 站/抖音播放器能跑起来的最小组合。
+              sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-forms"
               referrerPolicy="no-referrer"
             />
           )}
@@ -213,9 +216,10 @@ function Lightbox({
   // 打开时锁住背后的页面滚动，并接上键盘：Esc 关、左右翻。
   // 同时压一层 dialog：灯箱盖着整页的时候，底下的 j/k、[、? 都不该再响应，
   // Tab 也只能在灯箱自己的按钮之间走。
+  // 灯箱盖着整页时键盘只属于它：作用域由 hook 管，跟收藏框、确认框走同一套计数
+  useModalScope(true);
   useEffect(() => {
     const back = document.activeElement as HTMLElement | null;
-    pushScope("dialog");
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -241,7 +245,6 @@ function Lightbox({
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      popScope("dialog");
       if (back && document.body.contains(back)) back.focus?.();
     };
   }, [index, images.length]);
@@ -1346,6 +1349,9 @@ function FavoriteDialog({
   const canSave = value.trim().length > 0 && !busy;
 
   useScrollLock(true);
+  // 收藏框是弹窗，就得压住底下的全局键：之前漏了这一行，开着它按 [ 会收起左栏、
+  // 按 t 会切主题、按 ? 还会在它上面再叠一层帮助（实测 dialog 1→2）。
+  useModalScope(true);
 
   useEffect(() => {
     restoreRef.current = document.activeElement;

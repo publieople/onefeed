@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FilterBox from "../components/FilterBox";
 import { useLauncherReveal } from "../motion/useLauncherReveal";
+import { useModalScope } from "../motion/useModalScope";
 import { usePresence } from "../motion/usePresence";
 import { useAgentActions, useAgentHistory, useAgentSession, useAgentSurface } from "./AgentProvider";
 import AgentComposer from "./AgentComposer";
@@ -38,7 +39,7 @@ export function AgentLauncher() {
         // 夹在内容列里（外壳把两栏宽度写成 CSS 变量）：只铺视口会在宽屏上飘到空白里
         style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
         className={
-          "shell-inset-x pointer-events-none fixed bottom-0 z-30 px-6 pb-5 transition duration-300 ease-out " + lift
+          "shell-inset-x pointer-events-none fixed bottom-0 z-30 px-6 pb-[calc(1.25rem+env(safe-area-inset-bottom))] transition duration-300 ease-out " + lift
         }
       >
         <div className="mx-auto flex w-full max-w-[1400px] justify-end">
@@ -72,7 +73,7 @@ export function AgentLauncher() {
       data-agent-launcher-wrap="pill"
       style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
       className={
-        "shell-inset-x pointer-events-none fixed bottom-0 z-30 px-6 pb-4 transition duration-300 ease-out " + lift
+        "shell-inset-x pointer-events-none fixed bottom-0 z-30 px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] transition duration-300 ease-out " + lift
       }
     >
       {/* 底部渐隐：卡片滚到这里会淡进纸面，而不是被胶囊硬切一条直线。
@@ -125,6 +126,9 @@ export function AgentSheet({ shown = true, named = true }: { shown?: boolean; na
   const { close, toggleHistory } = useAgentActions();
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const [manual, setManual] = useState(false);
+  // 抽屉自己也是一层弹窗：键盘得压栈（外层 Provider 压的那层是给整个 Agent 面板的，
+  // 抽屉收起时它还在，得各自计数才不会互相掀栈）
+  useModalScope(shown);
 
   // Tab 在抽屉里循环
   useEffect(() => {
@@ -164,7 +168,7 @@ export function AgentSheet({ shown = true, named = true }: { shown?: boolean; na
       ref={sheetRef}
       style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
       className={
-        "shell-inset-x sheet-in fixed bottom-0 z-40 flex justify-center px-6 pb-4 transition duration-[220ms] ease-out " +
+        "shell-inset-x sheet-in fixed bottom-0 z-40 flex justify-center px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] transition duration-[220ms] ease-out " +
         (shown ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0")
       }
     >

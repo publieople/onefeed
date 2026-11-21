@@ -589,3 +589,15 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
 html.theme-vt [data-vt="topbar"] {
   view-transition-name: none !important;
 }
+
+/* 图标按钮视觉上 36px，命中区补到 44px（iOS/安卓的推荐最小点按尺寸）。
+   只扩点击范围，不改布局：::after 是透明层，压住邻近元素也不影响观感。 */
+.hit-44 {
+  position: relative;
+}
+.hit-44::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+}

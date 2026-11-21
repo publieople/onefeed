@@ -121,6 +121,9 @@ const UNDO_TEXT: Record<string, string> = {
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
+  useEffect(() => {
+    document.title = "设置 · OneFeed";
+  }, []);
   const [health, setHealth] = useState<Health | null>(null);
   const [plugins, setPlugins] = useState<PluginsResponse | null>(null);
   const [auth, setAuth] = useState<Record<string, AuthState>>({});

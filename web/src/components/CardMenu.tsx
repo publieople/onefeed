@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useModalScope } from "../motion/useModalScope";
 
 export interface CardMenuItem {
   id: string;
@@ -32,6 +33,8 @@ export default function CardMenu({
   const ref = useRef<HTMLDivElement | null>(null);
   const hadFocus = useRef(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  // 菜单开着时键盘归菜单：否则 [ / t / ? 会在菜单背后改布局、切主题
+  useModalScope(true);
 
   useLayoutEffect(() => {
     const rect = anchor.getBoundingClientRect();

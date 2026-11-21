@@ -42,18 +42,25 @@ export default function AgentConsole({
     .filter((event) => event.kind === "need_answer")
     .filter((event) => answeredAsk[String(event.data.ask_id)] === undefined)
     .pop();
-  // 一轮 agent 中途可能十几秒没有任何事件（模型在翻库、在写成段的推理）。
-  // 界面零变化会让人以为卡死了，所以静默超过 6 秒就自己往上加秒数。
-  const sinceRef = useRef(Date.now());
+  /**
+   * 一轮 agent 中途可能十几秒没有任何事件（模型在翻库、在写成段的推理）。
+   * 旧的心跳只在静默 6 秒后把「下一步…」换成「还在翻，已 Ns」——字数没变、行也没动，
+   * 评审实测 19.28 秒里可见文本一个字没改，看起来就是卡死。
+   * 现在从一开始就在跑秒表，并且带上「现在在干什么」，每秒都真的在变。
+   */
+  const startRef = useRef(0);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    sinceRef.current = Date.now();
+    if (!running) {
+      startRef.current = 0;
+      return;
+    }
+    startRef.current = Date.now();
     setNow(Date.now());
-    if (!running) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [running, events.length]);
-  const quietSeconds = Math.max(0, Math.round((now - sinceRef.current) / 1000));
+  }, [running]);
+  const elapsed = startRef.current ? Math.max(0, Math.round((now - startRef.current) / 1000)) : 0;
 
   const steps: string[] = Array.isArray(plan?.data?.steps) ? plan.data.steps.map(String) : [];
   const rows = events.filter(
@@ -64,6 +71,9 @@ export default function AgentConsole({
       event.kind === "need_answer" ||
       event.kind === "error",
   );
+  // 心跳里的「现在在干什么」：拿最后一行的标题，没有就退回「正在想」
+  const lastRow = rows[rows.length - 1];
+  const phase = lastRow ? String(lastRow.data.title ?? lastRow.name ?? "") : "";
 
   return (
     <div className="space-y-1.5 rounded-xl border border-line/70 bg-wash/40 px-2.5 py-2">
@@ -131,13 +141,22 @@ export default function AgentConsole({
       )}
 
       {running ? (
-        <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-fade" aria-live="polite">
-          <span className="h-1 w-1 animate-pulse rounded-full bg-ink/60" />
-          {openAsk
-            ? "等你选一下，或直接回一句"
-            : quietSeconds >= 6
-              ? "还在翻，已 " + quietSeconds + "s"
-              : "下一步…"}
+        <div className="flex items-baseline gap-1.5 pt-0.5 text-[11px] text-fade">
+          <span className="h-1 w-1 animate-pulse self-center rounded-full bg-ink/60" />
+          {openAsk ? (
+            <span aria-live="polite">等你选一下，或直接回一句</span>
+          ) : (
+            <>
+              <span className="text-muted">还在跑</span>
+              {/* 秒数不进 live region：读屏每秒念一次「还在跑 12 秒」比不念还吵 */}
+              <span className="tabular-nums text-ink/70" aria-hidden>
+                {elapsed.toFixed(0)}s
+              </span>
+              <span className="min-w-0 truncate" aria-live="polite">
+                {phase ? "· " + phase : "· 正在想"}
+              </span>
+            </>
+          )}
         </div>
       ) : null}
     </div>

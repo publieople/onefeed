@@ -77,9 +77,16 @@ def test_hover_prefetch_only_fetches_the_item():
 
 
 def test_agent_console_tells_you_it_is_still_working():
+    # 第三轮评审 I-01：一轮里最长 19.28 秒可见文本一字未变（旧心跳只在静默 6 秒后出现，
+    # 而且仍挤在「下一步…」那一行小字里）。现在从第一秒起就跑秒表、并带当前阶段。
     console = read("web/src/components/AgentConsole.tsx")
-    assert "quietSeconds" in console and "还在翻，已 " in console, "一轮 Agent 可能十几秒没事件，界面不能一直只写「下一步…」"
+    assert "startRef" in console and "elapsed" in console, "没有从开始就跑的秒表"
+    assert "还在跑" in console, "心跳文案没了"
+    assert "setInterval(() => setNow(Date.now()), 1000)" in console, "秒表不是每秒跳"
+    assert "quietSeconds" not in console, "又只剩「静默 6 秒才动」的旧心跳了"
     assert 'aria-live="polite"' in console
+    # 只让阶段变化进 live region，秒数别让读屏每秒念一遍
+    assert 'aria-hidden' in console
 
 
 def test_static_assets_pages_are_code_split():
@@ -87,8 +94,19 @@ def test_static_assets_pages_are_code_split():
     assert 'lazy(() => import("./pages/SettingsPage"))' in app
     assert 'lazy(() => import("./pages/MarketPage"))' in app
     assert 'lazy(() => import("./pages/AgentPage"))' in app
-    assert "import ItemPage from" in app, "详情页必须留在主包：转场要在点击后立刻拿到新快照"
+    # 第三轮评审 C-03：详情页曾经因为「转场要同步拿到新快照」被钉在主包，单包 519KB。
+    # 现在拆成独立 chunk，但同步快照这个前提没丢——点进冷卡前先 await 模块（FeedPage）。
+    assert "lazy(loadItemPageComponent)" in app, "详情页又回主包了"
+    assert "import ItemPage from" not in app
     assert "<Suspense" in app
+    loader = read("web/src/pages/itemPageLoader.ts")
+    assert 'import("./ItemPage")' in loader
+    feed = read("web/src/pages/FeedPage.tsx")
+    assert "if (itemPageLoaded())" in feed and "loadItemPage().then(go)" in feed, (
+        "冷卡没等模块就起转场，新快照会是一屏 Suspense 骨架"
+    )
+    card = read("web/src/components/Card.tsx")
+    assert "loadItemPage()" in card, "卡片没有预热详情页模块"
 
 
 def test_caches_are_bounded():

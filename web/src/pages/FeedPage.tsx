@@ -8,6 +8,7 @@ import Card from "../components/Card";
 import Chips from "../components/Chips";
 import ColsPicker from "../components/ui/ColsPicker";
 import { useGridCols, type ColsChoice } from "../layout/useGridCols";
+import { itemPageLoaded, loadItemPage } from "../pages/itemPageLoader";
 import { runNav } from "../motion/nav";
 import { DUR, EASE } from "../motion/tokens";
 import { useHotkeys, pushScope, popScope } from "../motion/useHotkeys";
@@ -89,24 +90,32 @@ export default function FeedPage({ ctx }: Props) {
     // 卡片里的媒体框和标题是共享元素的两端：给它们挂上名字，浏览器才知道这两块要「长大」
     const media = el?.querySelector<HTMLElement>('[data-vt="media"]') ?? null;
     const title = el?.querySelector<HTMLElement>('[data-vt="title"]') ?? null;
-    runNav(
-      "push",
-      () => {
-        navigate("/item/" + encodeURIComponent(id), {
-          // seed：卡片手里已经有这条数据，详情页拿它垫首屏 —— 新快照里立刻就有
-          // 媒体框和标题这两个共享元素，转场才有两端可插值（不然只剩整页淡出）
-          state: { vt: true, from: location.pathname + location.search, fromId: id, item: seed },
-        });
-        // 进详情从头看；App 的切页滚动对 vt 跳转已让位，这里在快照前滚好
-        window.scrollTo({ top: 0, behavior: "auto" });
-      },
-      {
-        names: [
-          { el: media, name: "of-media" },
-          { el: title, name: "of-title" },
-        ],
-      },
-    );
+    const go = () =>
+      runNav(
+        "push",
+        () => {
+          navigate("/item/" + encodeURIComponent(id), {
+            // seed：卡片手里已经有这条数据，详情页拿它垫首屏 —— 新快照里立刻就有
+            // 媒体框和标题这两个共享元素，转场才有两端可插值（不然只剩整页淡出）
+            state: { vt: true, from: location.pathname + location.search, fromId: id, item: seed },
+          });
+          // 进详情从头看；App 的切页滚动对 vt 跳转已让位，这里在快照前滚好
+          window.scrollTo({ top: 0, behavior: "auto" });
+        },
+        {
+          names: [
+            { el: media, name: "of-media" },
+            { el: title, name: "of-title" },
+          ],
+        },
+      );
+    // 详情页现在是独立 chunk：模块没就位就起转场，新快照会是一屏 Suspense 骨架。
+    // 悬停预热的正常路径这里直接放行；冷点只多等一次模块下载。
+    if (itemPageLoaded()) {
+      go();
+      return;
+    }
+    void loadItemPage().then(go);
     // 稳定引用：否则 memo 过的卡片每帧都收到新 onOpen，白 memo
   }, [navigate, location.pathname, location.search]);
 
@@ -405,8 +414,17 @@ export default function FeedPage({ ctx }: Props) {
       </p>
 
       {feed.error ? (
-        <div className="mt-6 rounded-card border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
-          {feed.error}
+        // 只有一行红字等于「你自己想办法」：接口抖一下就得刷新整页。
+        // 空态反而有两个动作，失败态一个都没有，这是反的。
+        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-card border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
+          <span className="min-w-0 flex-1">{feed.error}</span>
+          <button
+            type="button"
+            onClick={() => ctx.bump()}
+            className="h-8 shrink-0 rounded-full border border-red-300/70 px-3 text-[12.5px] text-red-700 transition hover:bg-red-100"
+          >
+            重试
+          </button>
         </div>
       ) : null}
 

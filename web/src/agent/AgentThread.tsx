@@ -150,6 +150,23 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
             answeredAsk={answeredAsk}
             onAnswer={(askId, selected, free) => void answer(askId, selected, free)}
           />
+          {/* 结果还没回来时先把形状占住：一轮可能要十几秒，底下空着会让人以为它答不出东西。
+              骨架是装饰，别让读屏念出来。 */}
+          <div className="space-y-1.5 pl-8" aria-hidden>
+            <p className="text-[11px] text-fade">结果在回来的路上…</p>
+            {[0, 1].map((row) => (
+              <div
+                key={row}
+                className="flex animate-pulse items-center gap-2.5 rounded-lg border border-line/60 bg-wash/30 px-2 py-1.5"
+              >
+                <span className="h-12 w-16 shrink-0 rounded bg-wash" />
+                <span className="flex-1 space-y-1.5">
+                  <span className="block h-2.5 w-3/4 rounded bg-wash" />
+                  <span className="block h-2 w-1/3 rounded bg-wash" />
+                </span>
+              </div>
+            ))}
+          </div>
           <div className="flex items-center gap-2 pl-1">
             <button
               onClick={() => void stop()}

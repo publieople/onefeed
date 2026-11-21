@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { DUR, EASE } from "../../motion/tokens";
-import { pushScope, popScope } from "../../motion/useHotkeys";
+import { useModalScope } from "../../motion/useModalScope";
 import { useScrollLock } from "../../motion/useScrollLock";
 import { usePauseSidebarScroll } from "../../motion/useSmoothWheelScroll";
 
@@ -98,11 +98,7 @@ export function ConfirmHost() {
 
   // 确认框压一层 dialog：否则底下的全局键照常响应，「?」会在弹窗上再叠一个帮助层、
   // 「[」会把左栏收起来 —— 弹窗开着的时候，键盘应该只属于这个弹窗。
-  useEffect(() => {
-    if (!req) return;
-    pushScope("dialog");
-    return () => popScope("dialog");
-  }, [req]);
+  useModalScope(Boolean(req));
 
   useEffect(() => {
     if (!req) return;

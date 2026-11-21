@@ -45,8 +45,13 @@ def case(fn):
 
 @case
 def card_actions_sit_inside_a_link_without_navigating() -> None:
-    """星标与三点按钮在 <a> 里面，必须先 preventDefault + stopPropagation。"""
-    assert "motion.a" in CARD and 'href={"/item/" + encodeURIComponent(item.id)}' in CARD
+    """卡片是 article + 铺满整张卡的链接；按钮不在 <a> 里，但仍要吞事件。"""
+    assert "motion.article" in CARD and 'href={"/item/" + encodeURIComponent(item.id)}' in CARD
+    # 第三轮评审 C-04：a > button 是非法嵌套。链接必须是自闭合的一条覆盖层，
+    # 内容里不许再出现 </a>（出现就说明按钮又被塞回链接里了）。
+    assert "</a>" not in CARD, "卡片里还有 a 包着按钮，重新变成非法嵌套了"
+    assert "absolute inset-0 z-0" in CARD, "铺满整张卡的链接不见了"
+    assert "pointer-events-auto" in CARD, "页脚按钮没有从「不接指针」的内容层里放出来"
     swallow = CARD.split("const swallow")[1] if "const swallow" in CARD else ""
     assert "preventDefault" in swallow and "stopPropagation" in swallow, "swallow 要同时挡住默认行为与冒泡"
     star = CARD.split('aria-label={isSaved ? "移出稍后再看" : "稍后再看"}')[0]

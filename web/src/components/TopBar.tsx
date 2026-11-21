@@ -75,7 +75,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
             disabled={running}
             title="刷新全部平台"
             aria-label="刷新全部平台"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-muted transition hover:bg-wash disabled:opacity-40"
+            className="flex hit-44 h-9 w-9 items-center justify-center rounded-full text-muted transition hover:bg-wash disabled:opacity-40"
           >
             <RefreshCw size={17} className={running ? "animate-spin" : ""} />
           </button>
@@ -83,7 +83,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
             onClick={flipTheme}
             title={theme === "dark" ? "切换到亮色" : "切换到暗色"}
             aria-label={theme === "dark" ? "切换到亮色" : "切换到暗色"}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-muted transition hover:bg-wash"
+            className="flex hit-44 h-9 w-9 items-center justify-center rounded-full text-muted transition hover:bg-wash"
           >
             {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
           </button>
@@ -92,7 +92,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
             title="插件市场"
             aria-label="插件市场"
             className={({ isActive }) =>
-              "flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-wash " +
+              "flex hit-44 h-9 w-9 items-center justify-center rounded-full transition hover:bg-wash " +
               (isActive ? "text-ink" : "text-muted")
             }
           >
@@ -103,7 +103,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
             title="设置"
             aria-label="设置"
             className={({ isActive }) =>
-              "flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-wash " +
+              "flex hit-44 h-9 w-9 items-center justify-center rounded-full transition hover:bg-wash " +
               (isActive ? "text-ink" : "text-muted")
             }
           >

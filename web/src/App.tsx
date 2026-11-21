@@ -5,11 +5,13 @@ import ShortcutHelp from "./components/ShortcutHelp";
 import Shell from "./layout/Shell";
 import { RailSlotProvider } from "./layout/RailSlot";
 import { ConfirmHost } from "./components/ui/Confirm";
-import { pushScope, popScope, useHotkeys } from "./motion/useHotkeys";
+import { useHotkeys } from "./motion/useHotkeys";
 import FeedPage from "./pages/FeedPage";
-// 详情页必须跟着主包一起到：共享元素转场要在点击后立刻拿到新快照，
-// 拆成异步 chunk 会在转场里插一段空白。其余三页不在转场路径上，按需加载。
-import ItemPage from "./pages/ItemPage";
+import { loadItemPageComponent } from "./pages/itemPageLoader";
+// 详情页曾经必须在主包里：共享元素转场要在点击后立刻拿到新快照，异步 chunk 会在转场里
+// 插一段空白。现在拆成独立 chunk，但这个前提用另一条路保住——卡片悬停/按下就预热模块，
+// 冷点进来先 await 模块就位再起转场（见 pages/itemPageLoader.ts）。主包因此少了整个详情页。
+const ItemPage = lazy(loadItemPageComponent);
 
 const MarketPage = lazy(() => import("./pages/MarketPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
@@ -197,13 +199,6 @@ export default function App() {
     r: () => void refresh(),
   });
 
-  // 帮助层压在快捷键栈顶上，底下的列表/全局键让位
-  useEffect(() => {
-    if (!help) return;
-    pushScope("dialog");
-    return () => popScope("dialog");
-  }, [help]);
-
   const ctx: OutletCtx = { progress, reloadKey, refresh, summary, settings, reloadSettings, bump };
 
   return (
@@ -247,6 +242,8 @@ export default function App() {
         {toast ? (
           <motion.div
             key="toast"
+            role="status"
+            aria-live="polite"
             initial={{ opacity: 0, y: 12, scale: 0.97, x: "-50%" }}
             animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
             exit={{ opacity: 0, y: 12, scale: 0.97, x: "-50%" }}

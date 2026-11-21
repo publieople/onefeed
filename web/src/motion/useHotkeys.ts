@@ -16,16 +16,26 @@ type Handler = (e: KeyboardEvent) => void;
 
 /** 栈底永远是 global；覆盖层压在上面 */
 const stack: Scope[] = ["global"];
+/**
+ * 每种作用域压了几层。同一时刻开两个弹层（确认框上再叠帮助层）时，
+ * 旧实现只留一个 dialog 条目，先关掉的那个一 pop 就把栈顶掀了，
+ * 另一个还开着、全局键却已经复活。这里按计数进出：只有最后一层收走才出栈。
+ */
+const depth: Record<Scope, number> = { global: 0, list: 0, dialog: 0 };
 
 export function pushScope(scope: Scope): void {
+  if (scope === "global") return;
+  depth[scope] += 1;
   if (stack[stack.length - 1] !== scope) stack.push(scope);
 }
 
 export function popScope(scope?: Scope): void {
-  const top = stack[stack.length - 1];
-  if (top === "global") return;
-  if (scope && top !== scope) return;
-  stack.pop();
+  const target = scope ?? stack[stack.length - 1];
+  if (!target || target === "global") return;
+  if (depth[target] > 0) depth[target] -= 1;
+  if (depth[target] > 0) return;
+  const at = stack.lastIndexOf(target);
+  if (at > 0) stack.splice(at, 1);
 }
 
 export function topScope(): Scope {

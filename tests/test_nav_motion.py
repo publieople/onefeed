@@ -111,7 +111,7 @@ def test_app_routes_without_wait_animation() -> None:
 
 @case
 def test_card_is_a_link_and_owns_the_names() -> None:
-    assert "motion.a" in CARD and 'href={"/item/" + encodeURIComponent(item.id)}' in CARD
+    assert "motion.article" in CARD and 'href={"/item/" + encodeURIComponent(item.id)}' in CARD
     assert "e.button !== 0" in CARD, "没把中键 / ⌘点击交还给浏览器"
     assert "e.preventDefault()" in CARD
     assert 'data-vt="media"' in CARD and 'data-vt="title"' in CARD

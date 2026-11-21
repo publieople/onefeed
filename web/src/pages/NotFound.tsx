@@ -1,7 +1,11 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 
 /** 没有匹配路由时的落点：以前是一条空白页，只剩顶栏 */
 export default function NotFound() {
+  useEffect(() => {
+    document.title = "没有这个页面 · OneFeed";
+  }, []);
   return (
     <div className="flex min-h-[60vh] flex-col items-start justify-center gap-3">
       <div className="text-[12px] uppercase tracking-[0.16em] text-fade">404</div>

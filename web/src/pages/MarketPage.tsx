@@ -14,6 +14,9 @@ interface UpdateResult {
 }
 
 export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
+  useEffect(() => {
+    document.title = "插件市场 · OneFeed";
+  }, []);
   const [data, setData] = useState<PluginsResponse | null>(null);
   const [error, setError] = useState("");
   // 每个插件各管各的 pending：以前共用一个 busy 字符串，同时装两个会互相覆盖 spinner

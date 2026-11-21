@@ -1,6 +1,7 @@
 import { memo, useRef, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { prefetchItem } from "../api";
+import { loadItemPage } from "../pages/itemPageLoader";
 import {
   FileText,
   Heart,
@@ -238,6 +239,8 @@ function Card({ item, onOpen, vtNames }: Props) {
   const kindLabel = KIND_LABEL[item.kind] ?? item.kind;
   const hoverTimer = useRef<number | null>(null);
   const linkRef = useRef<HTMLAnchorElement | null>(null);
+  // 卡片根节点：菜单里的「查看 AI 总结」要拿它当转场的起点（媒体框/标题都在它里面）
+  const cardRef = useRef<HTMLElement | null>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const { toggleSave } = useAgentActions();
@@ -285,13 +288,15 @@ function Card({ item, onOpen, vtNames }: Props) {
       id: "summary",
       label: "查看 AI 总结",
       icon: <Sparkles size={13} />,
-      onSelect: () => onOpen(item.id, linkRef.current ?? document.body, item),
+      onSelect: () => onOpen(item.id, cardRef.current ?? document.body, item),
     },
   ];
 
   /* 指针停一下就开始预取：转场结束时数据大概率已经就位，不会飞进去撞见骨架屏 */
   const schedulePrefetch = () => {
     if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+    // 详情页是独立 chunk：hover 一下就把模块拿下来，换算力给「首屏不需要的东西」
+    void loadItemPage();
     // 600ms 才认「停在这张卡上」：260ms 时慢扫一屏就会连拉十几条，网络和主线程都在忙
     hoverTimer.current = window.setTimeout(() => prefetchItem(item.id), 600);
   };
@@ -301,26 +306,40 @@ function Card({ item, onOpen, vtNames }: Props) {
   };
 
   return (
-    <motion.a
-      ref={linkRef}
-      href={"/item/" + encodeURIComponent(item.id)}
-      aria-label={p.label + " · " + kindLabel + " · " + item.title}
-      onClick={(e) => {
-        // 只接管「普通左键单击」这一种。中键、⌘/Ctrl+单击、Shift+单击仍旧交给浏览器：
-        // 聚合器的核心用法就是一次开一堆标签页，不能因为做了转场就把这条路堵死。
-        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        onOpen(item.id, e.currentTarget, item);
-      }}
-      onPointerEnter={schedulePrefetch}
-      onPointerLeave={cancelPrefetch}
-      onFocus={schedulePrefetch}
+    <motion.article
+      ref={cardRef}
       whileHover={{ y: -2 }}
       whileTap={{ scale: 0.985 }}
       transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.7 }}
       style={{ containerType: "inline-size" } as CSSProperties}
-      className="group card-pad flex h-full min-h-[14rem] flex-col rounded-card border border-line bg-paper text-left no-underline transition-colors hover:border-ink/25 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+      className="group card-pad relative flex h-full min-h-[14rem] flex-col rounded-card border border-line bg-paper text-left transition-colors hover:border-ink/25 hover:shadow-card focus-within:ring-2 focus-within:ring-ink/20"
     >
+      {/* 链接铺满整张卡（stretched link）。以前是 <a> 包着内容、里面再放两个按钮，
+          浏览器解析出来是 a > button 的非法嵌套：能点，但语义错、读屏会念成两层控件。
+          现在根是 article，可点面积、中键/⌘点击、右键「在新标签页打开」全都不变。 */}
+      <a
+        ref={linkRef}
+        href={"/item/" + encodeURIComponent(item.id)}
+        aria-label={p.label + " · " + kindLabel + " · " + item.title}
+        onClick={(e) => {
+          // 只接管「普通左键单击」这一种。中键、⌘/Ctrl+单击、Shift+单击仍旧交给浏览器：
+          // 聚合器的核心用法就是一次开一堆标签页，不能因为做了转场就把这条路堵死。
+          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          onOpen(item.id, e.currentTarget, item);
+        }}
+        onPointerEnter={schedulePrefetch}
+        onPointerLeave={cancelPrefetch}
+        onFocus={schedulePrefetch}
+        // 按下的那一刻就开始下模块：等到 click 再下，冷卡要多等一个往返
+        onPointerDown={(e) => {
+          if (e.button === 0) void loadItemPage();
+        }}
+        className="absolute inset-0 z-0 rounded-card focus-visible:outline-none"
+      />
+      {/* 内容层不接指针：点在标题/正文上其实点到的是下面那张铺满的链接。
+          两个按钮各自把自己放回可点层（见页脚）。 */}
+      <div className="pointer-events-none relative flex h-full flex-col">
       <header className="flex h-5 shrink-0 items-center gap-2 text-[11px]">
         <PlatformBadge item={item} />
         <span className="text-muted">{kindLabel}</span>
@@ -387,7 +406,7 @@ function Card({ item, onOpen, vtNames }: Props) {
           ) : null}
         </span>
         {/* 卡片操作：常驻而不是 hover 才出现 —— 触屏没有 hover，键盘用户也不该先猜一下 */}
-        <span className="ml-1.5 flex shrink-0 items-center gap-0.5 border-l border-line pl-1">
+        <span className="pointer-events-auto ml-1.5 flex shrink-0 items-center gap-0.5 border-l border-line pl-1">
           <button
             onClick={(event) => {
               swallow(event);
@@ -419,10 +438,11 @@ function Card({ item, onOpen, vtNames }: Props) {
           </button>
         </span>
       </footer>
+      </div>
       {menuOpen && moreRef.current ? (
         <CardMenu anchor={moreRef.current} items={menuItems} onClose={() => setMenuOpen(false)} />
       ) : null}
-    </motion.a>
+    </motion.article>
   );
 }
 

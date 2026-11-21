@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useHotkeys } from "../motion/useHotkeys";
+import { useModalScope } from "../motion/useModalScope";
 import { EASE, DUR } from "../motion/tokens";
 import { useScrollLock } from "../motion/useScrollLock";
 
@@ -49,6 +50,8 @@ export default function ShortcutHelp({ open, onClose }: Props) {
 
   const close = useCallback(() => onClose(), [onClose]);
   useHotkeys("dialog", { escape: close }, open);
+  // 自己压栈，不靠 App 记得——漏掉一处就是「帮助层开着、底下的 [ 还能收左栏」
+  useModalScope(open);
   useScrollLock(open);
 
   useEffect(() => {
