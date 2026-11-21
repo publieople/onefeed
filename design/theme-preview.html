@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>OneFeed 主题候选 · 2026-11-21</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #e9e9e7; }
+  body { font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; padding: 28px 0 40px; }
+  .wrap { width: 1000px; margin: 0 auto; }
+  .head-title { font-size: 22px; font-weight: 700; color: #1a1a1a; margin: 0 0 4px; }
+  .head-sub { font-size: 13px; color: #666; margin: 0 0 22px; }
+  section.theme { margin-bottom: 26px; }
+  .label { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .label b { font-size: 15px; color: #111 !important; letter-spacing: .02em; }
+  .label span { font-size: 12px; color: #5f5f5f !important; }
+  .app {
+    background: var(--paper); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--shell);
+    overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.08);
+  }
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--paper); }
+  .mark { width: 20px; height: 20px; border-radius: var(--mark-r); background: var(--ink); display: grid; place-items: center; color: var(--paper); font-size: 11px; font-weight: 700; }
+  .brand { font-family: var(--font-head); font-size: 15px; font-weight: 700; letter-spacing: .01em; }
+  .brand em { font-style: normal; font-family: "Inter", "Noto Sans SC", sans-serif; font-size: 9px; letter-spacing: .16em; color: var(--fade); margin-left: 6px; text-transform: uppercase; }
+  .top-right { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--muted); }
+  .ico { width: 15px; height: 15px; border: 1px solid var(--fade); border-radius: var(--mark-r); opacity: .75; }
+  .body { padding: 14px 16px 16px; }
+  .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
+  .h1 { font-family: var(--font-head); font-size: 17px; font-weight: 700; margin-right: 4px; letter-spacing: var(--h-ls); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--pill); padding: 2px; gap: 2px; }
+  .seg i { font-style: normal; font-size: 12px; padding: 3px 9px; border-radius: var(--pill); color: var(--muted); }
+  .seg i.on { background: var(--solid); color: var(--paper); font-weight: 500; }
+  .seg.ghost i.on { background: var(--wash); color: var(--ink); border: 1px solid var(--line); }
+  .chips { display: flex; gap: 4px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--pill); padding: 4px; width: fit-content; max-width: 100%; margin-bottom: 10px; }
+  .chip { font-size: 11.5px; padding: 4px 9px; border-radius: var(--pill); color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+  .chip.on { background: var(--solid); color: var(--paper); }
+  .dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+  .summary { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.6; }
+  .summary b { color: var(--ink); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: var(--card); background: var(--card-bg); padding: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 9px; }
+  .card-top { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fade); }
+  .badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: var(--badge-r); color: #fff; }
+  .b-v2 { background: #778087; } .b-xhs { background: #ff2442; } .b-bili { background: #00a1d6; }
+  .time { margin-left: auto; }
+  .title { font-family: var(--font-head); font-size: 14.5px; font-weight: var(--title-w); line-height: 1.45; letter-spacing: var(--h-ls); margin: 0; }
+  .excerpt { font-size: 12px; line-height: 1.75; color: var(--muted); margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .meta { font-size: 11px; color: var(--fade); margin: 0; font-style: italic; }
+  .foot { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); padding-top: 8px; border-top: var(--foot-border); }
+  .foot .r { margin-left: auto; display: flex; gap: 9px; align-items: center; }
+  .star { color: var(--accent); font-size: 13px; line-height: 1; }
+  .dock { margin-top: 12px; display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); background: var(--dock-bg); border-radius: var(--dock-r); padding: 9px 12px; font-size: 12px; color: var(--muted); box-shadow: var(--shadow); }
+  .dock .send { margin-left: auto; width: 24px; height: 24px; border-radius: var(--pill); background: var(--solid); color: var(--paper); display: grid; place-items: center; font-size: 11px; }
+  .dark .seg i.on { background: #e8eaee; color: #12151a; }
+
+  /* T1 纸上 */
+  .t-paper {
+    --paper: #fdfbf7; --card-bg: #fffefb; --ink: #1a1a1a; --muted: #57534b; --fade: #8b8578;
+    --line: #e6e0d4; --wash: #f4efe4; --solid: #1c1c1c; --accent: #b45309;
+    --shell: 6px; --card: 4px; --pill: 999px; --badge-r: 3px; --mark-r: 3px;
+    --shadow: 0 1px 0 rgba(26,26,26,.04);
+    --font-head: "Noto Serif SC", "Songti SC", serif; --title-w: 600; --h-ls: .01em;
+    --foot-border: 1px solid var(--line); --dock-bg: #fffdf8; --dock-r: 4px;
+  }
+  /* T2 瑞士网格 */
+  .t-swiss {
+    --paper: #fbfbf9; --card-bg: #ffffff; --ink: #0e0e0e; --muted: #55585c; --fade: #9a9c9e;
+    --line: #dedfd9; --wash: #f1f1ec; --solid: #0e0e0e; --accent: #e2401f;
+    --shell: 0px; --card: 2px; --pill: 2px; --badge-r: 0px; --mark-r: 0px;
+    --shadow: none;
+    --font-head: "Noto Sans SC", "PingFang SC", sans-serif; --title-w: 700; --h-ls: -.01em;
+    --foot-border: 1px solid var(--line); --dock-bg: #ffffff; --dock-r: 2px;
+  }
+  /* T3 黑白编辑 */
+  .t-mono {
+    --paper: #ffffff; --card-bg: #ffffff; --ink: #000000; --muted: #525252; --fade: #8a8a8a;
+    --line: #000000; --wash: #f5f5f5; --solid: #000000; --accent: #000000;
+    --shell: 0px; --card: 0px; --pill: 0px; --badge-r: 0px; --mark-r: 0px;
+    --shadow: none;
+    --font-head: "Noto Serif SC", "Songti SC", serif; --title-w: 700; --h-ls: 0em;
+    --foot-border: 2px solid #000; --dock-bg: #fff; --dock-r: 0px;
+  }
+  .t-mono .card { border-width: 1px; }
+  .t-mono .app { border-width: 2px; }
+  .t-mono .summary { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  .t-mono .foot { padding-top: 10px; }
+  /* T4 暖墨 */
+  .t-amber {
+    --paper: #fff8e6; --card-bg: #ffffff; --ink: #0f172a; --muted: #57534e; --fade: #a8a29e;
+    --line: #f2e2c6; --wash: #fdf1d8; --solid: #0f172a; --accent: #b45309;
+    --shell: 10px; --card: 10px; --pill: 999px; --badge-r: 999px; --mark-r: 6px;
+    --shadow: 0 1px 2px rgba(24,16,8,.05);
+    --font-head: "Noto Sans SC", "PingFang SC", sans-serif; --title-w: 600; --h-ls: 0em;
+    --foot-border: 1px solid var(--line); --dock-bg: #fffdf8; --dock-r: 999px;
+  }
+  /* T1 暗色 */
+  .t-paper.dark { --paper: #14120f; --card-bg: #1a1815; --ink: #ece7dc; --muted: #b3ab9d; --fade: #857e72;
+    --line: #2c2a25; --wash: #1f1d19; --solid: #ece7dc; --accent: #e0a45c; --dock-bg: #1a1815; }
+  .t-paper.dark .seg i.on { background: var(--solid); color: #14120f; }
+  .t-paper.dark .mark { color: #14120f; }
+
+  .swatches { display: flex; align-items: center; gap: 5px; margin: -2px 0 8px; }
+  .swatches span { width: 18px; height: 18px; border: 1px solid transparent; border-radius: 3px; display: inline-block; }
+  .swatches em { font-style: normal; font-size: 11px; color: #5f5f5f !important; margin-left: 6px; letter-spacing: .02em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="head-title">OneFeed 主题候选 · 同一份内容，四种排版语言</h1>
+  <p class="head-sub">候选来自 uupm.cc（UI/UX Pro Max）风格库：E-Ink / Paper、Swiss Modernism 2.0、Minimalist Monochrome、Bookmark &amp; Read-Later。中文标题用 Noto Serif SC / Noto Sans SC。</p>
+
+  <!-- T1 -->
+  <section class="theme t-paper">
+    <div class="label"><b>T1 · 纸上</b><span>E-Ink / Paper + Editorial Grid｜暖白纸 + 宋体标题 + 无阴影 + 细发丝线</span></div>
+    <div class="swatches">
+      <span style="background:var(--paper);border-color:var(--line)"></span>
+      <span style="background:var(--card-bg);border-color:var(--line)"></span>
+      <span style="background:var(--ink)"></span>
+      <span style="background:var(--wash);border-color:var(--line)"></span>
+      <span style="background:var(--accent)"></span>
+      <em>纸 #FDFBF7 · 卡 #FFFEFB · 墨 #1A1A1A · 洗 #F4EFE4 · 强调 #B45309</em>
+    </div>
+    <div class="app t-paper">
+      <div class="topbar">
+        <div class="mark">O</div><div class="brand">OneFeed<em>Feed · 7 sources</em></div>
+        <div class="top-right"><span>961 条 · 最近采集 14:49</span><span class="ico"></span><span class="ico"></span><span class="ico"></span></div>
+      </div>
+      <div class="body">
+        <div class="toolbar">
+          <div class="h1">全部内容</div>
+          <div class="seg"><i class="on">全部</i><i>今天</i></div>
+          <div class="seg"><i class="on">按新鲜度</i><i>按热度</i></div>
+          <div class="seg ghost"><i class="on">☆ 已收藏</i></div>
+        </div>
+        <div class="chips">
+          <span class="chip on">全部 961</span>
+          <span class="chip"><i class="dot" style="background:#00a1d6"></i>B 站 175</span>
+          <span class="chip"><i class="dot" style="background:#ff2442"></i>小红书 176</span>
+          <span class="chip"><i class="dot" style="background:#fe2c55"></i>抖音 157</span>
+          <span class="chip"><i class="dot" style="background:#1e80ff"></i>掘金 36</span>
+          <span class="chip"><i class="dot" style="background:#778087"></i>V2EX 77</span>
+        </div>
+        <p class="summary">库里共 <b>961</b> 条；主要来自 知乎热榜 240 条、小红书 176 条、B 站 175 条；同一件事最多有 6 个平台在讲。</p>
+        <div class="grid">
+          <div class="card">
+            <div class="card-top"><span class="badge b-v2">V2EX</span><span>动态</span><span class="time">9 小时前</span></div>
+            <p class="title">求助帖：2 年被裁 3 次，简历花掉还能找到工作吗？</p>
+            <p class="excerpt">首先先自我介绍一下吧，本人女，29 岁，未婚未育，河南小镇做题家出身，南航本 + 南大硕，希望不要被熟人刷到……</p>
+            <div class="foot"><span>puksua43</span><span class="r"><span>64</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+          <div class="card">
+            <div class="card-top"><span class="badge b-xhs">小红书</span><span>图文</span><span class="time">5 小时前</span></div>
+            <p class="title">有没有计算机学生的极品 ID</p>
+            <p class="excerpt">浅蓝底蓝色大字的计算机学生 ID 主题封面，画面含装饰线条、星号及英文手写元素。</p>
+            <div class="foot"><span>R.</span><span class="r"><span>3</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+        </div>
+        <div class="dock"><span>问 OneFeed：把今天 B 站和知乎的 AI 内容挑出来</span><span class="send">↑</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- T2 -->
+  <section class="theme t-swiss">
+    <div class="label"><b>T2 · 瑞士网格</b><span>Swiss Modernism 2.0｜零圆角、发丝网格、单一朱红强调、数字对齐</span></div>
+    <div class="swatches">
+      <span style="background:var(--paper);border-color:var(--line)"></span>
+      <span style="background:var(--card-bg);border-color:var(--line)"></span>
+      <span style="background:var(--ink)"></span>
+      <span style="background:var(--wash);border-color:var(--line)"></span>
+      <span style="background:var(--accent)"></span>
+      <em>底 #FBFBF9 · 卡 #FFFFFF · 墨 #0E0E0E · 洗 #F1F1EC · 朱红 #E2401F</em>
+    </div>
+    <div class="app t-swiss">
+      <div class="topbar">
+        <div class="mark">O</div><div class="brand">OneFeed<em>Feed · 7 sources</em></div>
+        <div class="top-right"><span>961 条 · 最近采集 14:49</span><span class="ico"></span><span class="ico"></span><span class="ico"></span></div>
+      </div>
+      <div class="body">
+        <div class="toolbar">
+          <div class="h1">全部内容</div>
+          <div class="seg"><i class="on">全部</i><i>今天</i></div>
+          <div class="seg"><i class="on">按新鲜度</i><i>按热度</i></div>
+          <div class="seg ghost"><i class="on">☆ 已收藏</i></div>
+        </div>
+        <div class="chips">
+          <span class="chip on">全部 961</span>
+          <span class="chip"><i class="dot" style="background:#00a1d6"></i>B 站 175</span>
+          <span class="chip"><i class="dot" style="background:#ff2442"></i>小红书 176</span>
+          <span class="chip"><i class="dot" style="background:#fe2c55"></i>抖音 157</span>
+          <span class="chip"><i class="dot" style="background:#1e80ff"></i>掘金 36</span>
+          <span class="chip"><i class="dot" style="background:#778087"></i>V2EX 77</span>
+        </div>
+        <p class="summary">库里共 <b>961</b> 条；主要来自 知乎热榜 240 条、小红书 176 条、B 站 175 条；同一件事最多有 6 个平台在讲。</p>
+        <div class="grid">
+          <div class="card">
+            <div class="card-top"><span class="badge b-v2">V2EX</span><span>动态</span><span class="time">9 小时前</span></div>
+            <p class="title">求助帖：2 年被裁 3 次，简历花掉还能找到工作吗？</p>
+            <p class="excerpt">首先先自我介绍一下吧，本人女，29 岁，未婚未育，河南小镇做题家出身，南航本 + 南大硕，希望不要被熟人刷到……</p>
+            <div class="foot"><span>puksua43</span><span class="r"><span>64</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+          <div class="card">
+            <div class="card-top"><span class="badge b-xhs">小红书</span><span>图文</span><span class="time">5 小时前</span></div>
+            <p class="title">有没有计算机学生的极品 ID</p>
+            <p class="excerpt">浅蓝底蓝色大字的计算机学生 ID 主题封面，画面含装饰线条、星号及英文手写元素。</p>
+            <div class="foot"><span>R.</span><span class="r"><span>3</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+        </div>
+        <div class="dock"><span>问 OneFeed：把今天 B 站和知乎的 AI 内容挑出来</span><span class="send">↑</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- T3 -->
+  <section class="theme t-mono">
+    <div class="label"><b>T3 · 黑白编辑</b><span>Minimalist Monochrome｜纯黑白 + 零圆角 + 宋体大标题 + 平台色成为唯一彩色</span></div>
+    <div class="swatches">
+      <span style="background:var(--paper);border-color:var(--line)"></span>
+      <span style="background:var(--card-bg);border-color:var(--line)"></span>
+      <span style="background:var(--ink)"></span>
+      <span style="background:var(--wash);border-color:var(--line)"></span>
+      <span style="background:var(--accent)"></span>
+      <em>底 #FFFFFF · 墨 #000000 · 洗 #F5F5F5 · 线 #000000（1–2px）</em>
+    </div>
+    <div class="app t-mono">
+      <div class="topbar">
+        <div class="mark">O</div><div class="brand">OneFeed<em>Feed · 7 sources</em></div>
+        <div class="top-right"><span>961 条 · 最近采集 14:49</span><span class="ico"></span><span class="ico"></span><span class="ico"></span></div>
+      </div>
+      <div class="body">
+        <div class="toolbar">
+          <div class="h1">全部内容</div>
+          <div class="seg"><i class="on">全部</i><i>今天</i></div>
+          <div class="seg"><i class="on">按新鲜度</i><i>按热度</i></div>
+          <div class="seg ghost"><i class="on">☆ 已收藏</i></div>
+        </div>
+        <div class="chips">
+          <span class="chip on">全部 961</span>
+          <span class="chip"><i class="dot" style="background:#00a1d6"></i>B 站 175</span>
+          <span class="chip"><i class="dot" style="background:#ff2442"></i>小红书 176</span>
+          <span class="chip"><i class="dot" style="background:#fe2c55"></i>抖音 157</span>
+          <span class="chip"><i class="dot" style="background:#1e80ff"></i>掘金 36</span>
+          <span class="chip"><i class="dot" style="background:#778087"></i>V2EX 77</span>
+        </div>
+        <p class="summary">库里共 <b>961</b> 条；主要来自 知乎热榜 240 条、小红书 176 条、B 站 175 条；同一件事最多有 6 个平台在讲。</p>
+        <div class="grid">
+          <div class="card">
+            <div class="card-top"><span class="badge b-v2">V2EX</span><span>动态</span><span class="time">9 小时前</span></div>
+            <p class="title">求助帖：2 年被裁 3 次，简历花掉还能找到工作吗？</p>
+            <p class="excerpt">首先先自我介绍一下吧，本人女，29 岁，未婚未育，河南小镇做题家出身，南航本 + 南大硕，希望不要被熟人刷到……</p>
+            <div class="foot"><span>puksua43</span><span class="r"><span>64</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+          <div class="card">
+            <div class="card-top"><span class="badge b-xhs">小红书</span><span>图文</span><span class="time">5 小时前</span></div>
+            <p class="title">有没有计算机学生的极品 ID</p>
+            <p class="excerpt">浅蓝底蓝色大字的计算机学生 ID 主题封面，画面含装饰线条、星号及英文手写元素。</p>
+            <div class="foot"><span>R.</span><span class="r"><span>3</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+        </div>
+        <div class="dock"><span>问 OneFeed：把今天 B 站和知乎的 AI 内容挑出来</span><span class="send">↑</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- T4 -->
+  <section class="theme t-amber">
+    <div class="label"><b>T4 · 暖墨</b><span>Bookmark &amp; Read-Later｜琥珀强调 + 大圆角 + 卡片投影</span></div>
+    <div class="swatches">
+      <span style="background:var(--paper);border-color:var(--line)"></span>
+      <span style="background:var(--card-bg);border-color:var(--line)"></span>
+      <span style="background:var(--ink)"></span>
+      <span style="background:var(--wash);border-color:var(--line)"></span>
+      <span style="background:var(--accent)"></span>
+      <em>底 #FFFAF0 · 卡 #FFFFFF · 墨 #0F172A · 洗 #FDF6EC · 琥珀 #B45309</em>
+    </div>
+    <div class="app t-amber">
+      <div class="topbar">
+        <div class="mark">O</div><div class="brand">OneFeed<em>Feed · 7 sources</em></div>
+        <div class="top-right"><span>961 条 · 最近采集 14:49</span><span class="ico"></span><span class="ico"></span><span class="ico"></span></div>
+      </div>
+      <div class="body">
+        <div class="toolbar">
+          <div class="h1">全部内容</div>
+          <div class="seg"><i class="on">全部</i><i>今天</i></div>
+          <div class="seg"><i class="on">按新鲜度</i><i>按热度</i></div>
+          <div class="seg ghost"><i class="on">☆ 已收藏</i></div>
+        </div>
+        <div class="chips">
+          <span class="chip on">全部 961</span>
+          <span class="chip"><i class="dot" style="background:#00a1d6"></i>B 站 175</span>
+          <span class="chip"><i class="dot" style="background:#ff2442"></i>小红书 176</span>
+          <span class="chip"><i class="dot" style="background:#fe2c55"></i>抖音 157</span>
+          <span class="chip"><i class="dot" style="background:#1e80ff"></i>掘金 36</span>
+          <span class="chip"><i class="dot" style="background:#778087"></i>V2EX 77</span>
+        </div>
+        <p class="summary">库里共 <b>961</b> 条；主要来自 知乎热榜 240 条、小红书 176 条、B 站 175 条；同一件事最多有 6 个平台在讲。</p>
+        <div class="grid">
+          <div class="card">
+            <div class="card-top"><span class="badge b-v2">V2EX</span><span>动态</span><span class="time">9 小时前</span></div>
+            <p class="title">求助帖：2 年被裁 3 次，简历花掉还能找到工作吗？</p>
+            <p class="excerpt">首先先自我介绍一下吧，本人女，29 岁，未婚未育，河南小镇做题家出身，南航本 + 南大硕，希望不要被熟人刷到……</p>
+            <div class="foot"><span>puksua43</span><span class="r"><span>64</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+          <div class="card">
+            <div class="card-top"><span class="badge b-xhs">小红书</span><span>图文</span><span class="time">5 小时前</span></div>
+            <p class="title">有没有计算机学生的极品 ID</p>
+            <p class="excerpt">浅蓝底蓝色大字的计算机学生 ID 主题封面，画面含装饰线条、星号及英文手写元素。</p>
+            <div class="foot"><span>R.</span><span class="r"><span>3</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+        </div>
+        <div class="dock"><span>问 OneFeed：把今天 B 站和知乎的 AI 内容挑出来</span><span class="send">↑</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- T1 dark -->
+  <section class="theme t-paper dark">
+    <div class="label"><b>T1 · 纸上（夜间）</b><span>同一套变量改暗：暖黑纸 + 米白墨，不用纯黑底</span></div>
+    <div class="swatches">
+      <span style="background:var(--paper);border-color:var(--line)"></span>
+      <span style="background:var(--card-bg);border-color:var(--line)"></span>
+      <span style="background:var(--ink)"></span>
+      <span style="background:var(--wash);border-color:var(--line)"></span>
+      <span style="background:var(--accent)"></span>
+      <em>夜底 #14120F · 卡 #1A1815 · 墨 #ECE7DC · 洗 #1F1D19 · 暖强调 #E0A45C</em>
+    </div>
+    <div class="app t-paper dark">
+      <div class="topbar">
+        <div class="mark">O</div><div class="brand">OneFeed<em>Feed · 7 sources</em></div>
+        <div class="top-right"><span>961 条 · 最近采集 14:49</span><span class="ico"></span><span class="ico"></span><span class="ico"></span></div>
+      </div>
+      <div class="body">
+        <div class="toolbar">
+          <div class="h1">全部内容</div>
+          <div class="seg"><i class="on">全部</i><i>今天</i></div>
+          <div class="seg"><i class="on">按新鲜度</i><i>按热度</i></div>
+          <div class="seg ghost"><i class="on">☆ 已收藏</i></div>
+        </div>
+        <div class="chips">
+          <span class="chip on">全部 961</span>
+          <span class="chip"><i class="dot" style="background:#00a1d6"></i>B 站 175</span>
+          <span class="chip"><i class="dot" style="background:#ff2442"></i>小红书 176</span>
+          <span class="chip"><i class="dot" style="background:#fe2c55"></i>抖音 157</span>
+          <span class="chip"><i class="dot" style="background:#1e80ff"></i>掘金 36</span>
+          <span class="chip"><i class="dot" style="background:#778087"></i>V2EX 77</span>
+        </div>
+        <p class="summary">库里共 <b>961</b> 条；主要来自 知乎热榜 240 条、小红书 176 条、B 站 175 条；同一件事最多有 6 个平台在讲。</p>
+        <div class="grid">
+          <div class="card">
+            <div class="card-top"><span class="badge b-v2">V2EX</span><span>动态</span><span class="time">9 小时前</span></div>
+            <p class="title">求助帖：2 年被裁 3 次，简历花掉还能找到工作吗？</p>
+            <p class="excerpt">首先先自我介绍一下吧，本人女，29 岁，未婚未育，河南小镇做题家出身，南航本 + 南大硕，希望不要被熟人刷到……</p>
+            <div class="foot"><span>puksua43</span><span class="r"><span>64</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+          <div class="card">
+            <div class="card-top"><span class="badge b-xhs">小红书</span><span>图文</span><span class="time">5 小时前</span></div>
+            <p class="title">有没有计算机学生的极品 ID</p>
+            <p class="excerpt">浅蓝底蓝色大字的计算机学生 ID 主题封面，画面含装饰线条、星号及英文手写元素。</p>
+            <div class="foot"><span>R.</span><span class="r"><span>3</span><span class="star">★</span><span>⋯</span></span></div>
+          </div>
+        </div>
+        <div class="dock"><span>问 OneFeed：把今天 B 站和知乎的 AI 内容挑出来</span><span class="send">↑</span></div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
