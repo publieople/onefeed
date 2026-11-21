@@ -257,6 +257,35 @@ def test_modals_lock_the_page_scroll():
     assert "useScrollLock(open)" in read("web/src/components/ShortcutHelp.tsx")
 
 
+def test_page_limit_follows_content_and_lift_keeps_its_transition():
+    """两个实测过的回归（2026-11-21）。
+
+    ① 信息流追加卡片只让 body 长高，html 盒尺寸不变 —— Lenis 挂在 documentElement
+       上的 ResizeObserver 收不到，limit 冻结在首屏 1916，滚到那儿就再也下不去。
+    ② .shell-inset-x 整条写了 transition，把 Tailwind 的 transition duration-300
+       顶掉，AI 唤起器收起时 opacity 从 1 直接跳 0（零中间帧）。
+    """
+    hook = read("web/src/motion/useSmoothWheelScroll.ts")
+    assert "function syncPageLimit()" in hook
+    assert "pageLenis.limit === pageLimit()" in hook
+    assert "bodyObserver.observe(document.body)" in hook
+    assert "syncPageLimit();" in hook.split("function forwardToPage")[1][:400]
+
+    css = read("web/src/theme.css")
+    lift = css.split(".shell-inset-x.shell-lift {")[1].split("}")[0]
+    assert "transform 300ms" in lift and "opacity 300ms" in lift
+    sheet = css.split(".shell-inset-x.shell-lift-sheet {")[1].split("}")[0]
+    assert "transform 220ms" in sheet and "opacity 220ms" in sheet
+    # reduce 下不跑，但节点还在
+    assert "  .shell-inset-x.shell-lift,\n  .shell-inset-x.shell-lift-sheet {" in css
+
+    surface = read("web/src/agent/AgentSurface.tsx")
+    assert surface.count("shell-inset-x shell-lift ") == 2, "唤起器的两个分支都要带收起过渡"
+    assert "shell-inset-x shell-lift-sheet " in surface
+    # 旧的 Tailwind 过渡必须清掉：留着也只会被 shell-lift 顶掉，读代码的人会以为它在生效
+    assert "transition duration-300 ease-out" not in surface
+
+
 def test_grid_cols_only_follow_window_width():
     """侧栏开合不许改变信息流列数。
 

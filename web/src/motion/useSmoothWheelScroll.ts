@@ -39,6 +39,9 @@ let pauseDepth = 0;
 let installed = false;
 let observer: MutationObserver | null = null;
 let resizeTimer = 0;
+let bodyObserver: ResizeObserver | null = null;
+let pageResizeTimer = 0;
+let lastLimitSync = 0;
 
 function shouldSkip(): boolean {
   if (typeof window === "undefined") return true;
@@ -95,8 +98,23 @@ function pageLimit(): number {
   return Math.max(0, doc.scrollHeight - window.innerHeight);
 }
 
+/**
+ * 页面上限变了就重算。
+ *
+ * Lenis 自己也在 content（默认 document.documentElement）上挂了 ResizeObserver，
+ * 但信息流是往 body 里追加卡片：body 长高、html 的盒子尺寸不变，那条观察收不到，
+ * limit 就一直停在首次加载的 1916 —— 于是滚到 1916 再也下不去（2026-11-21 的卡死）。
+ * 这里直接盯 body 的高度，外加滚轮时对一次实时值兜底。
+ */
+function syncPageLimit(): void {
+  if (!pageLenis) return;
+  if (pageLenis.limit === pageLimit()) return;
+  pageLenis.resize();
+}
+
 function forwardToPage(delta: number): void {
   if (!pageLenis) return;
+  syncPageLimit();
   const base = Number.isFinite(pageLenis.targetScroll) ? pageLenis.targetScroll : window.scrollY;
   const next = Math.max(0, Math.min(pageLimit(), base + delta));
   pageLenis.scrollTo(next, { duration: DURATION, easing: EASING, lock: true });
@@ -124,6 +142,12 @@ function onBoxWheel(event: WheelEvent): void {
 
 function onWheelCapture(event: WheelEvent): void {
   kick();
+  // 内容刚加载完时观察回调可能还没跑；滚轮这一下先对一次上限，别把目标 clamp 在旧值
+  const now = performance.now();
+  if (now - lastLimitSync > 120) {
+    lastLimitSync = now;
+    syncPageLimit();
+  }
   if (pauseDepth > 0 || isPageScrollLocked()) {
     event.preventDefault();
     event.stopPropagation();
@@ -178,6 +202,11 @@ function install(): void {
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
+  bodyObserver = new ResizeObserver(() => {
+    window.clearTimeout(pageResizeTimer);
+    pageResizeTimer = window.setTimeout(syncPageLimit, 80);
+  });
+  bodyObserver.observe(document.body);
   scan();
 }
 
@@ -185,6 +214,10 @@ function destroy(): void {
   document.removeEventListener("wheel", onWheelCapture, { capture: true });
   observer?.disconnect();
   observer = null;
+  bodyObserver?.disconnect();
+  bodyObserver = null;
+  window.clearTimeout(pageResizeTimer);
+  lastLimitSync = 0;
   for (const el of [...boxes.keys()]) detach(el);
   pageLenis?.destroy();
   pageLenis = null;

@@ -39,7 +39,7 @@ export function AgentLauncher() {
         // 夹在内容列里（外壳把两栏宽度写成 CSS 变量）：只铺视口会在宽屏上飘到空白里
         style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
         className={
-          "shell-inset-x pointer-events-none fixed bottom-0 z-30 px-6 pb-[calc(1.25rem+env(safe-area-inset-bottom))] transition duration-300 ease-out " + lift
+          "shell-inset-x shell-lift pointer-events-none fixed bottom-0 z-30 px-6 pb-[calc(1.25rem+env(safe-area-inset-bottom))] " + lift
         }
       >
         <div className="mx-auto flex w-full max-w-[1400px] justify-end">
@@ -73,7 +73,7 @@ export function AgentLauncher() {
       data-agent-launcher-wrap="pill"
       style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
       className={
-        "shell-inset-x pointer-events-none fixed bottom-0 z-30 px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] transition duration-300 ease-out " + lift
+        "shell-inset-x shell-lift pointer-events-none fixed bottom-0 z-30 px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] " + lift
       }
     >
       {/* 底部渐隐：卡片滚到这里会淡进纸面，而不是被胶囊硬切一条直线。
@@ -168,7 +168,7 @@ export function AgentSheet({ shown = true, named = true }: { shown?: boolean; na
       ref={sheetRef}
       style={{ left: "var(--shell-left-w, 0px)", right: "var(--shell-right-w, 0px)" }}
       className={
-        "shell-inset-x sheet-in fixed bottom-0 z-40 flex justify-center px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] transition duration-[220ms] ease-out " +
+        "shell-inset-x shell-lift-sheet sheet-in fixed bottom-0 z-40 flex justify-center px-6 pb-[calc(1rem+env(safe-area-inset-bottom))] " +
         (shown ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0")
       }
     >

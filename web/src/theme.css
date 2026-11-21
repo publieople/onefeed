@@ -506,6 +506,26 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
     right 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* 浮层自己的收放（唤起器收进底边、抽屉滑下去）。
+   必须写进同一个 transition：transition-property 是整条覆盖的，两个类各写一条，
+   后出现的那条会把另一条的属性全顶掉 —— 2026-11-21 的 AI 条收起动画就是这么丢的
+   （实测 class 一切，opacity 从 1 直接跳到 0，中间零帧）。 */
+.shell-inset-x.shell-lift {
+  transition:
+    left 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    right 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 300ms ease-out,
+    opacity 300ms ease-out;
+}
+
+.shell-inset-x.shell-lift-sheet {
+  transition:
+    left 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    right 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 220ms ease-out,
+    opacity 220ms ease-out;
+}
+
 /* 系统开了「减少动态效果」：进场动画和收放过渡一律不跑，但还是要有节点在 */
 @media (prefers-reduced-motion: reduce) {
   .sheet-in,
@@ -514,7 +534,9 @@ html.nav-vt.nav-vt-back::view-transition-new(of-agent) {
   }
 
   [data-shell-drawer="right"],
-  [data-agent-surface="sheet"] {
+  [data-agent-surface="sheet"],
+  .shell-inset-x.shell-lift,
+  .shell-inset-x.shell-lift-sheet {
     transition: none;
   }
 }
