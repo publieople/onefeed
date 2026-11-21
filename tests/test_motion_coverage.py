@@ -153,38 +153,44 @@ def test_feed_status_and_saved_removal_are_animated():
     assert "rise" in read("web/src/agent/AgentHistory.tsx")
 
 def test_sidebars_ease_wheel_scrolling():
-    """侧栏滚轮缓动（2026-11-20，第二轮换成 Lenis）。
+    """滚轮缓动：当帧跟手 + 余量滑行，页面本体与侧栏共用一套引擎。
 
-    第一版是手写的「位置缓动」：每个 wheel 把目标位加 delta、逐帧指数逼近。
-    它只缓位置、不累积速度，连滚三格是「嗒、嗒、嗒」三段 —— 用户说「和我想象的滑动不一样」。
-    现在每个带标记的容器一个 Lenis 实例：滚轮折成速度持续积分，松手衰减。
-    钉住：① 六个列表都挂了标记；② 每容器一实例、不劫持 window；
-    ③ 挂载时机不固定，靠 MutationObserver 增量接管、卸载销毁；
-    ④ 追加行不改容器盒子尺寸，得手动 resize，否则可滚范围停在旧高度。
+    第二版用 Lenis，纯粹的位置缓动（lerp 0.09）：一格滚轮首帧只走 8px、
+    840ms 才停稳，用户说「还是不满意，要更跟手」。第三版改成两段式：
+    事件当帧写掉 delta 的 IMMEDIATE(0.62)，剩下按 TAU_MS(55ms) 指数收尾，
+    再加 MAX_SPEED × dt 的每帧上限防掉帧大跳。
+    钉住：① 六个列表都挂了标记；② 单条 rAF、空闲即停；
+    ③ 侧栏到边这一格转给页面（同一个引擎，不 handOff 给浏览器）；
+    ④ 其它自有滚动容器交回浏览器；⑤ 程序化滚动走引擎坐标系。
     """
     hook = read("web/src/motion/useSmoothWheelScroll.ts")
     assert "data-smooth-scroll" in hook
-    assert "new Lenis({" in hook
-    assert "wrapper: el" in hook
-    assert "lerp: LERP" in hook and "wheelMultiplier: WHEEL_MULTIPLIER" in hook
-    # C-02：不再让每个实例自起一条常驻 rAF（空闲 ~150 回调/秒），
-    # 全部实例共用一条循环，连续 IDLE_FRAMES 帧没人滚就停。
-    assert "autoRaf: false" in hook
-    assert "function pump(" in hook and "lenis.raf(time)" in hook
-    assert "lenis.isScrolling" in hook
+    assert "const IMMEDIATE = 0.62" in hook
+    assert "const TAU_MS = 55" in hook
+    assert "const MAX_SPEED = 2000" in hook
+    assert "const MAX_DT = 0.032" in hook
+    assert "const WHEEL_MULTIPLIER = 1.15" in hook
+    # 当帧跟手：push 里先写 delta * IMMEDIATE
+    assert "delta * IMMEDIATE" in hook
+    # 余量指数收尾 + 每帧位移上限
+    assert "Math.exp(" in hook and "clamp(diff * ease, -cap, cap)" in hook
+    # 单条 rAF，连续 IDLE_FRAMES 帧没人滚就停（空闲 0 回调）
+    assert "function frame(" in hook
     assert "IDLE_FRAMES" in hook and "cancelAnimationFrame(rafId)" in hook
     assert "function kick(" in hook
-    # C-03：只扫 addedNodes，流式输出时别每 120ms 全文档重扫 + 全实例 resize
-    assert "record.addedNodes" in hook
-    assert "pendingScan" in hook
     # C-04：暂停改计数，两层模态嵌套时先关的不能把后关的暂停解掉
-    assert "pauseDepth += 1" in hook and "pauseDepth === 0" in hook
-    # I-04：侧栏到底/到顶时把这一格滚轮交还给页面（Lenis 默认边界也 preventDefault）
-    assert "handOff" in hook and "data-lenis-prevent" in hook
-    assert "overscroll: true" in hook
-    # C-08：程序化滚动走 Lenis 的坐标系，直接赋 scrollTop 会被惯性拉回去
+    assert "pauseDepth += 1" in hook and "Math.max(0, pauseDepth - 1)" in hook
+    # 侧栏到底/到顶：这一格顺着滚动链交给页面，不交给浏览器
+    assert "surface = page" in hook
+    assert "handOff" not in hook
+    # 其它自有滚动容器（评论列表等）不接管
+    assert "function ownsScroll(" in hook and "ownsScroll(event.target)" in hook
+    # 滚轮必须在捕获阶段拦，否则内层容器的默认滚动先发生
+    assert 'document.addEventListener("wheel", onWheel, { capture: true, passive: false })' in hook
+    # 容器上有 scroll-behavior: smooth 时必须 instant 写，否则每帧只挪 2px
+    assert 'behavior: "instant" as ScrollBehavior' in hook
+    # 程序化滚动走引擎坐标系，直接赋 scrollTop 会被旧 target 拉回去
     assert "export function scrollInstant" in hook
-    assert "immediate: true" in hook
     assert "scrollInstant(el, el.scrollHeight)" in read("web/src/agent/AgentThread.tsx")
     # 边界放行链接不上 overscroll-contain：CSS 的滚动链会被它截断，页面照样滚不动
     for rel in (
@@ -196,19 +202,16 @@ def test_sidebars_ease_wheel_scrolling():
         "web/src/components/RightRail.tsx",
     ):
         assert "overscroll-contain" not in read(rel), rel + " 的 overscroll-contain 会截断边界放行"
-    # 速度上限是自己 scrollBy 的缓动，只锁 html 的 overflow 拦不住它
-    cap = read("web/src/motion/useScrollSpeedCap.ts")
-    assert "isPageScrollLocked()" in cap
-    locked_block = cap.split("if (isPageScrollLocked()) {")[1][:120]
-    assert "e.preventDefault();" in locked_block and "return;" in locked_block
     assert "prefers-reduced-motion" in hook
     assert "Mac|iPhone|iPad|iPod" in hook
-    assert "new MutationObserver" in hook
-    assert ".resize()" in hook
     assert "usePauseSidebarScroll" in hook
+    # 不再依赖 Lenis：位置缓动换成了自研两段式
+    assert "new Lenis" not in hook and 'from "lenis"' not in hook
+    assert "\"lenis\"" not in read("web/package.json")
 
     app = read("web/src/App.tsx")
     assert "useSmoothWheelScroll()" in app
+    assert "useScrollSpeedCap" not in app, "页面限速器已被同一套引擎取代"
 
     # 模态层盖住整页时，底下的侧栏不该还能被滚轮拖着动
     assert "usePauseSidebarScroll(Boolean(req))" in read("web/src/components/ui/Confirm.tsx")
@@ -227,7 +230,6 @@ def test_sidebars_ease_wheel_scrolling():
     css = read("web/src/theme.css")
     assert "[data-smooth-scroll] {" in css
     assert "scroll-behavior: smooth" in css.split("[data-smooth-scroll] {")[1].split("}")[0]
-
 
 def test_modals_lock_the_page_scroll():
     """模态层要锁的是 html，不是 body。

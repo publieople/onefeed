@@ -138,9 +138,9 @@ button:active:not(:disabled) {
   }
 }
 
-/* 侧栏滚动区：键盘翻页、程序化滚动走平滑；滚轮那一路由 Lenis 接管
-   （motion/useSmoothWheelScroll.ts 逐帧写 scrollTop，CSS 的 scroll-behavior 不管滚轮）。
-   Lenis 用 behavior: "instant" 写入，所以这里留着 smooth 不会把它拖成每帧 2px。
+/* 侧栏滚动区：键盘翻页、程序化滚动走平滑；滚轮那一路由 motion/useSmoothWheelScroll.ts
+   接管（逐帧写 scrollTop，CSS 的 scroll-behavior 管不到滚轮）。
+   引擎用 behavior: "instant" 写入，所以这里留着 smooth 不会把它拖成每帧 2px。
    reduce 时上面那条 !important 会把这里覆盖回 auto。 */
 [data-smooth-scroll] {
   scroll-behavior: smooth;

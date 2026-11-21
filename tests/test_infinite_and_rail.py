@@ -62,10 +62,13 @@ def test_feed_prefetches_the_next_page_before_reaching_the_bottom():
     assert "seen.has(entry.id)" in api, "追加要按 id 去重，重复 key 会直接报错"
 
 
-def test_wheel_speed_is_capped_but_inner_scrollers_are_left_alone():
-    cap = read("web/src/motion/useScrollSpeedCap.ts")
-    assert "MAX_SPEED" in cap and "MAX_DT" in cap
-    assert "requestAnimationFrame(step)" in cap
-    assert "ownsScroll(e.target)" in cap, "侧栏/对话流自己的滚动容器不能被接管"
-    assert "prefers-reduced-motion" in cap
-    assert "useScrollSpeedCap();" in read("web/src/App.tsx")
+def test_wheel_easing_is_capped_but_inner_scrollers_are_left_alone():
+    """页面本体与侧栏共用一套缓动引擎（2026-11-21，替掉 useScrollSpeedCap）。"""
+    hook = read("web/src/motion/useSmoothWheelScroll.ts")
+    assert "const MAX_SPEED = 2000" in hook and "const MAX_DT = 0.032" in hook
+    assert "function frame(" in hook
+    assert "ownsScroll(event.target)" in hook, "侧栏/对话流自己的滚动容器不能被接管"
+    assert "prefers-reduced-motion" in hook
+    app = read("web/src/App.tsx")
+    assert "useSmoothWheelScroll();" in app
+    assert "useScrollSpeedCap" not in app

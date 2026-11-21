@@ -16,7 +16,7 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    // 走 Lenis 自己的坐标系：直接赋 scrollTop 会被惯性拉回去（实测 345→0→900ms 又回 345）。
+    // 走缓动引擎的坐标系：直接赋 scrollTop 会被下一帧的旧 target 拉回去（实测 345→0→900ms 又回 345）。
     // immediate 写位置，不产生一次追不上的平滑滚动。
     scrollInstant(el, el.scrollHeight);
   }, [turns.length, busy, live?.events.length]);
