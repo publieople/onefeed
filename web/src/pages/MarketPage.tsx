@@ -132,7 +132,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
     <div className="pb-24 pt-6">
       <div className="flex items-end gap-3">
         <div>
-          <h1 className="text-[19px] font-semibold tracking-tight">插件市场</h1>
+          <h1 className="font-display text-[19px] font-semibold tracking-tight">插件市场</h1>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {pending.length ? (
@@ -184,7 +184,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-[15px] font-semibold">{entry.name || entry.id}</h2>
+                  <h2 className="font-display text-[15px] font-semibold">{entry.name || entry.id}</h2>
                   <span className="text-[11px] text-fade">
                     {entry.installed && entry.installed_version && entry.update_available
                       ? "v" + entry.installed_version + " → v" + (entry.latest_version || entry.version)

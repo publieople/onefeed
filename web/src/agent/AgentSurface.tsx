@@ -52,7 +52,7 @@ export function AgentLauncher() {
             data-agent-launcher="corner"
             tabIndex={shown ? 0 : -1}
             className={
-              "flex h-10 items-center gap-2 rounded-full border border-line/70 bg-paper/85 pl-2.5 pr-4 text-[12.5px] text-muted shadow-[0_4px_14px_rgba(20,20,20,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:text-ink " +
+              "flex h-10 items-center gap-2 rounded-full border border-line/70 bg-paper/85 pl-2.5 pr-4 text-[12.5px] text-muted shadow-[0_4px_14px_rgba(26,22,14,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:text-ink " +
               reach
             }
             aria-label="打开 AI 助手"
@@ -94,7 +94,7 @@ export function AgentLauncher() {
           data-agent-launcher="pill"
           tabIndex={shown ? 0 : -1}
           className={
-            "flex h-11 w-full max-w-[760px] items-center gap-2 rounded-full border border-line/70 bg-paper/80 px-3 text-left shadow-[0_4px_14px_rgba(20,20,20,0.06)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:shadow-[0_10px_26px_rgba(20,20,20,0.12)] focus-visible:-translate-y-0.5 focus-visible:border-ink/25 focus-visible:bg-paper " +
+            "flex h-11 w-full max-w-[760px] items-center gap-2 rounded-full border border-line/70 bg-paper/80 px-3 text-left shadow-[0_4px_14px_rgba(26,22,14,0.06)] transition duration-200 hover:-translate-y-0.5 hover:border-ink/25 hover:bg-paper hover:shadow-[0_10px_26px_rgba(26,22,14,0.12)] focus-visible:-translate-y-0.5 focus-visible:border-ink/25 focus-visible:bg-paper " +
             reach
           }
           aria-label="打开 AI 助手"
@@ -178,7 +178,7 @@ export function AgentSheet({ shown = true, named = true }: { shown?: boolean; na
         <div
           data-vt="agent"
           style={named ? { viewTransitionName: "of-agent" } : undefined}
-          className="flex max-h-[62vh] min-h-[200px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
+          className="flex max-h-[62vh] min-h-[200px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_18px_50px_rgba(26,22,14,0.14)]"
         >
           <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
             <Sparkles size={14} className="text-ink" />

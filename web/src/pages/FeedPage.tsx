@@ -336,7 +336,7 @@ export default function FeedPage({ ctx }: Props) {
   return (
     <div className="pb-32">
       <section className="flex flex-wrap items-center gap-3 pt-6">
-        <h1 className="text-[15px] font-medium">
+        <h1 className="font-display text-[15px] font-semibold tracking-tight">
           {savedOnly ? "我的收藏" : active ? "筛选结果" : range === "today" ? "今天" : "全部内容"}
         </h1>
         <Seg

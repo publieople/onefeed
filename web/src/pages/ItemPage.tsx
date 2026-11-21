@@ -1009,7 +1009,7 @@ export default function ItemPage() {
       <h1
         data-vt="title"
         style={{ viewTransitionName: "of-title" }}
-        className="mt-3 text-[26px] font-semibold leading-[1.35] tracking-tight"
+        className="mt-3 font-display text-[26px] font-semibold leading-[1.35] tracking-tight"
       >
         {item.title}
       </h1>
@@ -1262,7 +1262,7 @@ export default function ItemPage() {
           className={
             "flex h-10 items-center justify-center gap-1.5 rounded-lg border px-4 text-[13px] transition " +
             (favorited
-              ? "border-ink/30 bg-wash text-ink"
+              ? "border-accent/40 bg-wash text-accent"
               : "border-line text-muted hover:border-ink/25 hover:text-ink")
           }
         >

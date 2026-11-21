@@ -217,7 +217,7 @@ export default function Shell({
           }
         >
           <RightRail
-            className="h-full rounded-card border border-line shadow-[0_18px_50px_rgba(20,20,20,0.14)]"
+            className="h-full rounded-card border border-line shadow-[0_18px_50px_rgba(26,22,14,0.14)]"
             defaultTab={railTab ?? (onItemPage ? "ai" : "saved")}
             onClose={dismissRail}
           />

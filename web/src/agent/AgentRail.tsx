@@ -56,7 +56,7 @@ export default function AgentRail() {
       data-vt="agent"
       style={{ viewTransitionName: "of-agent" }}
       aria-label="AI 助手"
-      className="sticky top-[76px] flex h-[calc(100vh-96px)] min-h-[420px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_10px_30px_rgba(20,20,20,0.06)]"
+      className="sticky top-[76px] flex h-[calc(100vh-96px)] min-h-[420px] flex-col overflow-hidden rounded-card border border-line bg-paper shadow-[0_10px_30px_rgba(26,22,14,0.06)]"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3.5">
         <Sparkles size={14} className="text-muted" />

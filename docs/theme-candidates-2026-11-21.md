@@ -1,6 +1,8 @@
 # OneFeed 换主题：uupm.cc 风格库调研与四套候选
 
 日期 2026-11-21。目的：给 OneFeed 换一套设计主题，先出可选方案与推荐，不动代码。
+
+> 结论：用户选了 **T1「纸上」**（E-Ink/Paper + Editorial Grid），亮暗两套已实装，见 [theme-t1-2026-11-21.md](theme-t1-2026-11-21.md)。
 配套预览：`design/theme-preview.html`，截图 [2026-11-21-theme-candidates.png](images/2026-11-21-theme-candidates.png)（同一份真实内容渲染 5 屏：四个候选 + 推荐方案的夜间版）。
 
 ---

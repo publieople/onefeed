@@ -9,7 +9,7 @@ export default function NotFound() {
   return (
     <div className="flex min-h-[60vh] flex-col items-start justify-center gap-3">
       <div className="text-[12px] uppercase tracking-[0.16em] text-fade">404</div>
-      <h1 className="text-[24px] font-semibold tracking-tight">这个地址没有内容</h1>
+      <h1 className="font-display text-[24px] font-semibold tracking-tight">这个地址没有内容</h1>
       <p className="text-[13px] text-muted">可能是链接拼错了，或者条目已经被删掉。</p>
       <div className="mt-2 flex gap-2">
         <Link to="/" className="rounded-full bg-solid px-4 py-2 text-[13px] text-solid-fg">

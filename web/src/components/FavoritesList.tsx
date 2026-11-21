@@ -110,7 +110,7 @@ export default function FavoritesList({ onOpen }: { onOpen?: () => void }) {
                   {/* 收藏夹的主文是「你写的备注」，跟稍后再看那种「标题列表」不是一回事：
                       前面挂一颗心，扫一眼就知道这两栏的数据不一样。 */}
                   <span className="flex items-start gap-1.5">
-                    <Heart size={11} className="mt-[3px] shrink-0 text-rose-500/80" fill="currentColor" />
+                    <Heart size={11} className="mt-[3px] shrink-0 text-accent" fill="currentColor" />
                     <span className="clamp-2 text-[12.5px] leading-[1.5] text-ink">
                       {item.favorite_note || "（没写备注）"}
                     </span>

@@ -2,39 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 亮色 */
+/* 亮色：纸上主题（暖白纸 + 墨色字 + 一丝赭石强调） */
 :root {
-  --c-ink: 20 22 26;
-  --c-muted: 107 114 128;
-  --c-fade: 154 161 171;
-  --c-line: 233 234 236;
-  --c-paper: 255 255 255;
-  --c-wash: 247 248 249;
-  --c-solid: 20 22 26;
+  --c-ink: 26 26 26;
+  --c-muted: 87 83 75;
+  --c-fade: 139 133 120;
+  --c-line: 230 224 212;
+  --c-paper: 253 251 247;
+  --c-card: 255 254 251;
+  --c-wash: 244 239 228;
+  --c-solid: 28 28 28;
   --c-solid-fg: 255 255 255;
+  /* 强调色只给星标、收藏心形、当前项，不做大面积色块 */
+  --c-accent: 180 83 9;
   /* 危险动作（删插件、清 key）：亮色下压深一点，别用刺眼的纯红 */
   --c-danger: 185 40 46;
   --c-danger-fg: 255 255 255;
-  --shadow-card: 0 1px 2px rgba(20, 22, 26, 0.04);
-  --shadow-pop: 0 12px 40px rgba(20, 22, 26, 0.1);
+  --shadow-card: 0 1px 0 rgba(26, 26, 26, 0.04);
+  --shadow-pop: 0 16px 40px rgba(26, 22, 14, 0.12);
   color-scheme: light;
 }
 
-/* 暗色：同一个语义，只换值；组件里不写死颜色 */
+/* 暗色：同一个语义，只换值；组件里不写死颜色（暖黑纸，不用纯黑） */
 html.dark {
-  --c-ink: 232 234 238;
-  --c-muted: 158 166 178;
-  --c-fade: 118 126 138;
-  --c-line: 44 48 56;
-  --c-paper: 15 17 21;
-  --c-wash: 24 27 32;
-  --c-solid: 238 240 243;
-  --c-solid-fg: 18 20 24;
+  --c-ink: 236 231 220;
+  --c-muted: 179 171 157;
+  --c-fade: 133 126 114;
+  --c-line: 44 42 37;
+  --c-paper: 20 18 15;
+  --c-card: 26 24 21;
+  --c-wash: 31 29 25;
+  --c-solid: 236 231 220;
+  --c-solid-fg: 20 18 15;
+  --c-accent: 224 164 92;
   /* 暗色下加深底反而看不清，往上提一档 */
   --c-danger: 214 66 74;
   --c-danger-fg: 255 255 255;
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-pop: 0 16px 44px rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 16px 44px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
 
@@ -48,7 +53,8 @@ body {
   margin: 0;
   background: rgb(var(--c-paper));
   color: rgb(var(--c-ink));
-  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  /* 纸上主题的正文：优先 Noto Sans SC（本机已装，与 design/theme-preview.html 一致），再退系统字体 */
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   /* 换主题时整页颜色渐变过去，别硬切 */
   transition: background-color 0.24s ease, color 0.24s ease;
@@ -210,6 +216,7 @@ button:active:not(:disabled) {
 .nav-active {
   color: rgb(var(--c-ink));
   background: rgb(var(--c-wash));
+  box-shadow: inset 2px 0 0 rgb(var(--c-accent));
 }
 
 /* 换主题：View Transitions 的对角扫过。

@@ -411,7 +411,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
 
   return (
     <div className="pb-28 pt-6">
-      <h1 className="text-[19px] font-semibold tracking-tight">设置</h1>
+      <h1 className="font-display text-[19px] font-semibold tracking-tight">设置</h1>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[184px_minmax(0,1fr)]">
         <nav aria-label="设置分类" className="hidden lg:block">
@@ -442,7 +442,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                 transition={{ duration: reduce ? 0 : 0.24, ease: EASE }}
                 className="fixed bottom-6 left-1/2 z-40"
               >
-                <div className="flex items-center gap-2 rounded-full border border-line bg-paper px-2 py-1.5 pl-4 shadow-[0_12px_34px_rgba(20,20,20,0.16)]">
+                <div className="flex items-center gap-2 rounded-full border border-line bg-paper px-2 py-1.5 pl-4 shadow-[0_12px_34px_rgba(26,22,14,0.16)]">
                   <span className="text-[13px] text-ink">有未保存的改动</span>
                   <button
                     onClick={() => void saveSettings()}

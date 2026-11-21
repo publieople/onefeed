@@ -15,7 +15,7 @@ export function applyTheme(next: Theme): void {
   }
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", next === "dark" ? "#0f1115" : "#ffffff");
+    ?.setAttribute("content", next === "dark" ? "#14120f" : "#fdfbf7");
 }
 
 /** 用户选过就用用户的，没选过跟系统走。 */

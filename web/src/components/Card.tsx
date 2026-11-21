@@ -312,7 +312,7 @@ function Card({ item, onOpen, vtNames }: Props) {
       whileTap={{ scale: 0.985 }}
       transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.7 }}
       style={{ containerType: "inline-size" } as CSSProperties}
-      className="group card-pad relative flex h-full min-h-[14rem] flex-col rounded-card border border-line bg-paper text-left transition-colors hover:border-ink/25 hover:shadow-card focus-within:ring-2 focus-within:ring-ink/20"
+      className="group card-pad relative flex h-full min-h-[14rem] flex-col rounded-card border border-line bg-card text-left transition-colors hover:border-ink/25 hover:shadow-card focus-within:ring-2 focus-within:ring-ink/20"
     >
       {/* 链接铺满整张卡（stretched link）。以前是 <a> 包着内容、里面再放两个按钮，
           浏览器解析出来是 a > button 的非法嵌套：能点，但语义错、读屏会念成两层控件。
@@ -344,7 +344,7 @@ function Card({ item, onOpen, vtNames }: Props) {
         <PlatformBadge item={item} />
         <span className="text-muted">{kindLabel}</span>
         {item.saved ? (
-          <span className="flex items-center gap-0.5 text-ink/70" title="已收藏">
+          <span className="flex items-center gap-0.5 text-accent" title="已收藏">
             <Star size={11} fill="currentColor" />
           </span>
         ) : null}
@@ -362,7 +362,7 @@ function Card({ item, onOpen, vtNames }: Props) {
 
       <h3
         data-vt="title"
-        className="clamp-2 card-title mt-2.5 shrink-0 font-semibold tracking-tight"
+        className="clamp-2 card-title mt-2.5 shrink-0 font-display font-semibold tracking-tight"
         style={vtNames?.title ? { viewTransitionName: vtNames.title } : undefined}
       >
         {item.title}
@@ -417,7 +417,7 @@ function Card({ item, onOpen, vtNames }: Props) {
             title={isSaved ? "移出稍后再看" : "稍后再看"}
             className={
               "flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-wash " +
-              (isSaved ? "text-ink" : "text-fade hover:text-ink")
+              (isSaved ? "text-accent" : "text-fade hover:text-ink")
             }
           >
             <Star size={13} fill={isSaved ? "currentColor" : "none"} />

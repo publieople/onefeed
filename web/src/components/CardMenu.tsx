@@ -115,7 +115,7 @@ export default function CardMenu({
           move(-1);
         }
       }}
-      className="rise fixed z-50 w-[196px] rounded-xl border border-line bg-paper p-1 shadow-[0_16px_40px_rgba(20,20,20,0.18)]"
+      className="rise fixed z-50 w-[196px] rounded-xl border border-line bg-paper p-1 shadow-[0_16px_40px_rgba(26,22,14,0.18)]"
     >
       {items.map((item) => (
         <button

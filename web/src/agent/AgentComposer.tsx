@@ -29,8 +29,8 @@ export default function AgentComposer({ wide = false }: { wide?: boolean }) {
         "flex h-12 items-center gap-2 border bg-paper/95 px-3 transition-[border-color,box-shadow,border-radius] duration-200 " +
         (expanded ? "rounded-[22px] " : "rounded-full ") +
         (focused
-          ? "border-ink/35 shadow-[0_12px_34px_rgba(20,20,20,0.16)]"
-          : "border-line shadow-[0_10px_30px_rgba(20,20,20,0.12)]")
+          ? "border-ink/35 shadow-[0_12px_34px_rgba(26,22,14,0.16)]"
+          : "border-line shadow-[0_10px_30px_rgba(26,22,14,0.12)]")
       }
     >
       <motion.span
