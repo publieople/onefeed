@@ -17,7 +17,7 @@ import {
   type SettingsValues,
 } from "../api";
 import { timeAgo } from "../format";
-import { platform } from "../platform";
+import { PLATFORMS, platform } from "../platform";
 import SettingSection from "../components/SettingSection";
 import AiProviders from "../components/AiProviders";
 import { confirmDialog } from "../components/ui/Confirm";
@@ -149,8 +149,14 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
       setPlugins(p);
       setForm((prev) => {
         if (prev) return prev;
-        setBaseline(JSON.stringify(s.settings));
-        return s.settings;
+        // 冷却表默认是空的（= 全用内置默认），这里把生效值摊平出来，
+        // 用户看到的是真实的「B 站 5 分钟」，而不是一片空白。
+        const merged: SettingsValues = {
+          ...s.settings,
+          platform_intervals: { ...(s.intervals ?? {}), ...(s.settings.platform_intervals ?? {}) },
+        };
+        setBaseline(JSON.stringify(merged));
+        return merged;
       });
       const states = await Promise.all(
         ALL_AUTH_ROWS.map((id) =>
@@ -595,6 +601,43 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   </label>
                 </div>
 
+                <div className="rounded-lg border border-line px-3.5 py-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-[13px] font-medium">平台抓取间隔</span>
+                    <span className="text-[11px] text-fade">单位：分钟 · 0 = 不限制</span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-fade">
+                    同一个平台两次抓取之间至少隔这么久。抓太密容易撞上平台风控，
+                    被限流时接口会返回空列表，看起来就像「这个平台今天没内容」。
+                    手点刷新也受这个限制；真急着抓，可在刷新完成的提示里点「仍要抓」。
+                  </p>
+                  <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
+                    {PLATFORMS.map((p) => (
+                      <label key={p.id} className="block">
+                        <span className="text-[12px] text-muted">{p.label}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1440}
+                          step={1}
+                          aria-label={p.label + " 抓取间隔（分钟）"}
+                          value={Math.round((form.platform_intervals[p.id] ?? 0) / 60)}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const minutes =
+                              raw === "" ? 0 : Math.max(0, Math.min(1440, Math.round(Number(raw) || 0)));
+                            setForm({
+                              ...form,
+                              platform_intervals: { ...form.platform_intervals, [p.id]: minutes * 60 },
+                            });
+                          }}
+                          className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-3 text-[13px] outline-none focus:border-ink/40"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
                 <label className="flex items-start gap-2.5 rounded-lg border border-line px-3.5 py-3">
                   <input
                     type="checkbox"
@@ -890,6 +933,8 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
         {note ? (
           <motion.div
             key="note"
+            role="status"
+            aria-live="polite"
             initial={{ opacity: 0, y: 10, scale: 0.98, x: "-50%" }}
             animate={{ opacity: 1, y: 0, scale: 1, x: "-50%" }}
             exit={{ opacity: 0, y: 10, scale: 0.98, x: "-50%" }}

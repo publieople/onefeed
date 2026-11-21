@@ -15,7 +15,7 @@ from typing import Any, Iterable
 
 from plugin_runtime.host import PluginHost, default_plugins_dir
 
-from . import market, smart
+from . import market, settings as settings_mod, smart
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = ROOT / "fixtures"
@@ -23,6 +23,10 @@ FIXTURES_DIR = ROOT / "fixtures"
 
 def demo_mode() -> bool:
     return os.environ.get("ONEFEED_DEMO") == "1"
+
+
+class FixtureMissing(RuntimeError):
+    """DEMO 模式下这个平台没有本地样例。算「跳过」，不算抓取失败。"""
 
 
 def sync_installed(store, root: Path | None = None) -> int:
@@ -79,9 +83,23 @@ class RefreshRunner:
         with self._lock:
             return bool(self._state["running"])
 
+    def _cooldown(self, pid: str, now: int) -> int:
+        """还要等多少秒才能抓这个平台（0 = 可以抓）。"""
+        interval = int(settings_mod.platform_intervals().get(pid, 0))
+        if interval <= 0:
+            return 0
+        last = self.store.last_pull_at(pid)
+        if not last:
+            return 0
+        return max(0, last + interval - now)
+
     def trigger(self, platforms: Iterable[str] | None = None,
-                warmup: bool = False) -> tuple[bool, dict[str, Any]]:
-        """返回 (是否真的启动, 当前状态)。已在跑时返回 (False, 状态)。"""
+                warmup: bool = False, force: bool = False) -> tuple[bool, dict[str, Any]]:
+        """返回 (是否真的启动, 当前状态)。已在跑时返回 (False, 状态)。
+
+        force=True 跳过平台冷却（用户明确要求「现在就抓」时用）。
+        冷却是按平台算的，不是整轮算：B 站刚抓过，不该拦住知乎。
+        """
         with self._lock:
             if self._state["running"]:
                 return False, json.loads(json.dumps(self._state))
@@ -89,16 +107,36 @@ class RefreshRunner:
             if not ids:
                 self._state.update({"error": "没有可用的插件", "finished_at": int(time.time())})
                 return False, json.loads(json.dumps(self._state))
-            self._state = {
-                "running": True, "started_at": int(time.time()), "finished_at": 0,
-                "done": 0, "total": len(ids), "error": "", "warmup": warmup,
-                "market": {"checked": 0, "updated": [], "failed": []},
-                "plugins": {pid: {"status": "queued", "count": 0, "error": "", "ms": 0}
-                            for pid in ids},
+            now = int(time.time())
+            # 演示模式不联网，冷却没有意义；warmup 是显式补样例，也不该被拦
+            cooling = {} if (force or warmup or demo_mode()) else {
+                pid: self._cooldown(pid, now) for pid in ids
             }
-            self._thread = threading.Thread(target=self._run, args=(ids, warmup),
-                                            name="onefeed-refresh", daemon=True)
-            self._thread.start()
+            plugins: dict[str, Any] = {}
+            for pid in ids:
+                wait = int(cooling.get(pid, 0))
+                if wait > 0:
+                    plugins[pid] = {
+                        "status": "skipped", "count": 0, "error": "", "ms": 0,
+                        "next_at": now + wait,
+                        "note": f"平台冷却中，还要等 {wait} 秒",
+                    }
+                else:
+                    plugins[pid] = {"status": "queued", "count": 0, "error": "", "ms": 0}
+            active = [pid for pid in ids if plugins[pid]["status"] == "queued"]
+            self._state = {
+                "running": bool(active), "started_at": now,
+                "finished_at": 0 if active else now,
+                "done": len(ids) - len(active), "total": len(ids),
+                "error": "" if active else "都在平台冷却中，这一轮没有实际抓取",
+                "warmup": warmup,
+                "market": {"checked": 0, "updated": [], "failed": []},
+                "plugins": plugins,
+            }
+            if active:
+                self._thread = threading.Thread(target=self._run, args=(active, warmup),
+                                                name="onefeed-refresh", daemon=True)
+                self._thread.start()
             return True, json.loads(json.dumps(self._state))
 
     # ------------------------------------------------------------ 内部
@@ -106,10 +144,10 @@ class RefreshRunner:
         with self._lock:
             entry = self._state["plugins"].setdefault(pid, {})
             entry.update(fields)
-            if fields.get("status") in ("ok", "failed"):
+            if fields.get("status") in ("ok", "failed", "skipped"):
                 self._state["done"] = sum(
                     1 for p in self._state["plugins"].values()
-                    if p.get("status") in ("ok", "failed"))
+                    if p.get("status") in ("ok", "failed", "skipped"))
 
     def _run(self, ids: list[str], warmup: bool) -> None:
         try:
@@ -134,7 +172,7 @@ class RefreshRunner:
             for pid in ids:
                 started = time.time()
                 self._set(pid, status="running")
-                run_id = self.store.start_run(pid)
+                run_id = self.store.start_run(pid, demo=demo_mode())
                 try:
                     items = self._load(pid)
                     count = self.store.upsert_items(items)
@@ -142,6 +180,10 @@ class RefreshRunner:
                         self._dump(pid, items)
                     self.store.finish_run(run_id, True, count)
                     self._set(pid, status="ok", count=count,
+                              ms=int((time.time() - started) * 1000))
+                except FixtureMissing as exc:  # 演示模式没导出这个平台：跳过就好，不必报警
+                    self.store.finish_run(run_id, False, 0, str(exc))
+                    self._set(pid, status="skipped", note=str(exc), count=0,
                               ms=int((time.time() - started) * 1000))
                 except Exception as exc:  # 单个插件失败不影响其它平台
                     tb = traceback.format_exc().strip().splitlines()
@@ -164,7 +206,8 @@ class RefreshRunner:
         if demo_mode():
             path = FIXTURES_DIR / f"{pid}.json"
             if not path.exists():
-                raise RuntimeError(f"DEMO 模式下没有 {path.name}，先在线跑一次 --warmup")
+                raise FixtureMissing(
+                    f"演示模式没有 {path.name} 的样例（在线跑一次 --warmup 就能补上）")
             data = json.loads(path.read_text(encoding="utf-8"))
             return [it for it in data.get("items", []) if isinstance(it, dict)]
         return self.host.pull(pid, limit=self.limit)

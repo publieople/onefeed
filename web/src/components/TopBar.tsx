@@ -71,7 +71,7 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
             {done}/{total}
           </span>
           <button
-            onClick={onRefresh}
+            onClick={() => onRefresh()}
             disabled={running}
             title="刷新全部平台"
             aria-label="刷新全部平台"

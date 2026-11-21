@@ -67,7 +67,8 @@ def _sse(event: dict[str, Any]) -> str:
 
 
 def _apply_settings(request: Request, conf: dict[str, Any],
-                    touched: set[str] | None = None) -> list[str]:
+                    touched: set[str] | None = None,
+                    prev_registry: str | None = None) -> list[str]:
     """把设置落到活着的对象上，返回"这次真正生效了什么"给前端显示。"""
     runner = _runner(request)
     applied: list[str] = []
@@ -94,7 +95,8 @@ def _apply_settings(request: Request, conf: dict[str, Any],
         sync_installed(_store(request), target)
         applied.append(f"插件目录 → {target}")
 
-    if touched and "registry_url" in touched:
+    if touched and "registry_url" in touched and prev_registry is not None \
+            and settings_mod.registry_url() != prev_registry:
         applied.append(f"registry → {settings_mod.registry_url()}（下一轮采集起用新源）")
     return applied
 
@@ -157,19 +159,30 @@ def get_settings(request: Request) -> dict:
                      "registry_url": settings_mod.registry_url(),
                      "state_dir": str(state_root())},
         "defaults": settings_mod.DEFAULTS,
+        # 生效中的平台冷却（内置默认 + 用户覆盖），设置页拿它填初始值
+        "intervals": settings_mod.platform_intervals(conf.get("platform_intervals")),
         "sorts": list(settings_mod.SORTS),
     }
 
 
 @router.put("/settings")
 def put_settings(request: Request, payload: dict[str, Any] = Body(default={})) -> dict:
+    # 保存前的生效值：只报告"真的变了"的项。前端整表提交，不能把每项都算成改过。
+    before = settings_mod.load()
+    prev_registry = settings_mod.registry_url()
+    prev_intervals = settings_mod.platform_intervals(before.get("platform_intervals"))
     try:
         conf = settings_mod.save(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={
             "code": "bad_settings", "message": str(exc),
             "hint": "看 /api/settings 里的 defaults 与允许范围"})
-    applied = _apply_settings(request, conf, set(payload or {}))
+    applied = _apply_settings(request, conf, set(payload or {}), prev_registry)
+    after_intervals = settings_mod.platform_intervals(conf.get("platform_intervals"))
+    changed_intervals = [pid for pid, sec in after_intervals.items()
+                         if sec != prev_intervals.get(pid)]
+    if changed_intervals:
+        applied.append(f"平台间隔 → {len(changed_intervals)} 个平台改过（下一次抓取生效）")
     return {"ok": True, "settings": _mask(conf), "applied": applied, "ai": ai_mod.status(),
             "resolved": {"plugins_dir": str(settings_mod.resolve_plugins_dir(
                 str(conf.get("plugins_dir") or ""))),
@@ -813,8 +826,10 @@ def media(request: Request, item_id: str, slot: str,
 @router.post("/refresh", status_code=202)
 def refresh(request: Request, payload: dict[str, Any] = Body(default={})) -> dict:
     platforms = payload.get("platforms") if isinstance(payload, dict) else None
+    # force=true：用户明确要求「现在就抓」，越过平台冷却（默认不越：防的是风控）
+    force = bool(payload.get("force")) if isinstance(payload, dict) else False
     _COMMENT_CACHE.clear()  # 新一轮采集后评论可能变了，别拿旧缓存糊弄
-    started, state = _runner(request).trigger(platforms=platforms)
+    started, state = _runner(request).trigger(platforms=platforms, force=force)
     if not started:
         raise HTTPException(status_code=409, detail={
             "code": "refresh_running", "message": "已经在刷新了",

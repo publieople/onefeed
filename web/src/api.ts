@@ -68,7 +68,10 @@ export interface RunState {
   done: number;
   total: number;
   error: string;
-  plugins: Record<string, { status: string; count: number; error: string; ms: number }>;
+  plugins: Record<
+    string,
+    { status: string; count: number; error: string; ms: number; note?: string; next_at?: number }
+  >;
 }
 
 export interface MarketEntry {
@@ -148,6 +151,8 @@ export interface SettingsValues {
   comments_limit: number;
   default_sort: string;
   prune_days: number;
+  /** {平台: 秒}，0 = 该平台不限制；空表表示全用内置默认 */
+  platform_intervals: Record<string, number>;
   auto_update: boolean;
   /** 总结时是否把图片交给多模态模型（关掉只读文字，省钱） */
   vision_summary: boolean;
@@ -164,6 +169,8 @@ export interface SettingsResponse {
   ai: AiStatus;
   resolved: { plugins_dir: string; registry_url: string; state_dir?: string };
   defaults: SettingsValues;
+  /** 生效中的平台冷却（内置默认 + 覆盖），设置页用它填初始值 */
+  intervals?: Record<string, number>;
   sorts: string[];
 }
 

@@ -19,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 
@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS runs (
     plugin      TEXT NOT NULL DEFAULT '',
     ok          INTEGER NOT NULL DEFAULT 0,
     count       INTEGER NOT NULL DEFAULT 0,
-    error       TEXT NOT NULL DEFAULT ''
+    error       TEXT NOT NULL DEFAULT '',
+    -- 1 = 演示模式的重放。演示不联网，不该消耗平台的调用预算，也就不算冷却。
+    demo        INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
 
@@ -114,7 +116,9 @@ JSON_COLUMNS = ("images", "tags", "extra")
 
 # 没有发布时间时（小红书首页流、知乎热榜就不给），排序按「采集时间 - 24h」估个位：
 # 真正新鲜的先上，无时间的也不会永远沉底；显示层仍然不写时间，不编造。
-FRESH_KEY = "COALESCE(NULLIF(i.published_at, 0), i.fetched_at - 86400)"
+# 没有发布时间的条目（知乎热榜、部分评论流）不能当成「一天前」：
+# 减一天会让刚抓回来的东西永远排不到第一屏，刷新后看着像没变。
+FRESH_KEY = "COALESCE(NULLIF(i.published_at, 0), i.fetched_at)"
 # 跨平台不能直接比计数（B 站 5 千播放和知乎 400 万热度不是一个量级），
 # 所以热度统一用「本平台内分位」：刷新后重算 engage_score（0–1000），排序只比这个分。
 ENGAGE_RAW = "(like_count + comment_count * 2 + share_count * 3 + view_count * 0.05)"
@@ -320,6 +324,12 @@ class Store:
                              "WHERE saved = 1 AND saved_at = 0")
             if version < 7:
                 conn.executescript(FAVORITES_SCHEMA)
+            if version < 8:
+                # 冷却功能上线前的历史 runs 不知道是不是真调用，一律当作不消耗预算：
+                # 否则升级后第一件事就是「所有平台都在冷却中」。
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+                if "demo" not in columns:
+                    conn.execute("ALTER TABLE runs ADD COLUMN demo INTEGER NOT NULL DEFAULT 1")
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
         self.recompute_engage()
@@ -982,10 +992,11 @@ class Store:
         return cur.rowcount
 
     # ------------------------------------------------------------ runs
-    def start_run(self, plugin: str) -> int:
+    def start_run(self, plugin: str, demo: bool = False) -> int:
         with self._write_lock:
             cur = self.conn.execute(
-                "INSERT INTO runs (started_at, plugin) VALUES (?, ?)", (int(time.time()), plugin))
+                "INSERT INTO runs (started_at, plugin, demo) VALUES (?, ?, ?)",
+                (int(time.time()), plugin, 1 if demo else 0))
             self.conn.commit()
         return int(cur.lastrowid)
 
@@ -995,6 +1006,19 @@ class Store:
                 "UPDATE runs SET finished_at = ?, ok = ?, count = ?, error = ? WHERE id = ?",
                 (int(time.time()), 1 if ok else 0, int(count), error[:500], run_id))
             self.conn.commit()
+
+    def last_pull_at(self, plugin: str) -> int:
+        """这个平台上一次真的被抓的时间（不论成败，演示模式的重放不算）。
+
+        冷却要按「尝试过」算，不是按「抓到过」算：失败的那次同样是一次调用，
+        算成功的话失败平台会被反复重试，正好撞在风控最敏感的时候。
+        """
+        row = self.conn.execute(
+            "SELECT MAX(COALESCE(NULLIF(finished_at, 0), started_at)) AS t"
+            " FROM runs WHERE plugin = ? AND COALESCE(demo, 0) = 0",
+            (plugin,),
+        ).fetchone()
+        return int(row["t"] or 0)
 
     def recent_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         rows = self.conn.execute(

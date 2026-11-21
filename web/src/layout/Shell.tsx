@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Info } from "lucide-react";
 import AgentSidebar from "../agent/AgentSidebar";
 import { useAgentActions, useAgentSurface } from "../agent/AgentProvider";
 import type { Health, RunState } from "../api";
@@ -141,6 +142,23 @@ export default function Shell({
         跳到内容
       </a>
       <TopBar health={health} progress={progress} onRefresh={onRefresh} />
+
+      {/* 演示模式不是「坏掉」，但必须说清楚：它读的是本地样例，刷新只是重放同一批。
+          不说就会被当成「刷新不生效」——2026-11-21 用户就是这么问的。 */}
+      {health?.demo ? (
+        <div
+          role="status"
+          className="border-b border-line bg-wash/70 px-5 py-1.5 text-[12px] text-muted"
+        >
+          <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-1.5">
+            <Info size={13} className="shrink-0" />
+            <span>离线演示模式：内容来自本地样例，刷新只会重放同一批。</span>
+            <span className="text-fade">
+              要抓实时内容，用不带 <code className="rounded bg-paper px-1 font-mono">--demo</code> 的方式启动。
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex w-full items-start">
         {/* 这一层是左栏本身：宽度跟右栏同一套补间，展开/收起时才不会整块瞬移。

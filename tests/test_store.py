@@ -131,13 +131,15 @@ def main() -> int:
         none, _ = store.page(platforms=["nope"], limit=10)
         check(none == [], "不存在的平台返回空")
 
-        # published_at 缺失：排序退回采集时间，但字段本身仍是 0（显示层不编时间）
+        # published_at 缺失：排序退回采集时间，但字段本身仍是 0（显示层不编时间）。
+        # 以前这里减 86400，刚抓到的无时间条目会被当成"一天前"，刷新后永远上不了首屏。
         store.upsert_items([{"id": "demo:noTime", "platform": "demo", "kind": "list", "title": "无时间"}])
         page_all, _ = store.page(limit=10)
         no_time = next(r for r in page_all if r["id"] == "demo:noTime")
         check(no_time["published_at"] == 0, "缺 time 的条目 published_at 保持 0")
         check(any(r["id"] == "demo:noTime" for r in page_all), "缺 time 的条目不会被丢")
-        check(page_all.index(no_time) > 0, "缺 time 的条目按采集时间估算排位、不抢最新")
+        demo_rows = [r for r in page_all if r["platform"] == "demo"]
+        check(demo_rows[0]["id"] == "demo:noTime", "缺 time 的条目按采集时间排在本平台最前，刚抓的不会沉底")
 
         # runs
         run_id = store.start_run("demo")

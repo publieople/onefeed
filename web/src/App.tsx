@@ -98,6 +98,12 @@ export default function App() {
   // 每帧还有 MAX_SPEED × dt 上限，冲不进还没取回来的地方。
   useSmoothWheelScroll();
   const wasRunning = useRef(false);
+  // 演示模式：不联网，刷新只是重放同一份本地样例。轮询里要据实说明，
+  // 否则用户会以为「点了刷新但内容没动」是坏了（2026-11-21 就是这么被问的）。
+  const demoRef = useRef(false);
+  // 轮询里要能触发「仍要抓」，但 refresh 定义在轮询 effect 之后（会在依赖数组里 TDZ），
+  // 所以走一遍 ref
+  const refreshRef = useRef<(force?: boolean) => void>(() => {});
   const location = useLocation();
   const reduce = useReducedMotion();
   // 走 View Transition 的那一次跳转不播进场动画：新页要立刻以最终样子进快照
@@ -132,6 +138,7 @@ export default function App() {
       const [s, h] = await Promise.all([getJSON<Summary>("/api/summary"), getJSON<Health>("/api/health")]);
       setSummary(s);
       setHealth(h);
+      demoRef.current = Boolean(h.demo);
     } catch {
       /* 摘要失败不影响主流程 */
     }
@@ -153,6 +160,32 @@ export default function App() {
         if (wasRunning.current && !data.state.running && data.state.done > 0) {
           setReloadKey((k) => k + 1);
           void loadSummary();
+          // 一轮结束后据实说清楚：加了几条、谁失败、谁在冷却。
+          // 之前只闪一句「开始刷新」，内容没变时用户没法判断是没抓到还是坏了。
+          const rows = Object.entries(data.state.plugins ?? {});
+          const added = rows.reduce(
+            (n, [, p]) => n + (p.status === "ok" ? Number(p.count || 0) : 0),
+            0,
+          );
+          const failed = rows.filter(([, p]) => p.status === "failed");
+          const cooling = rows.filter(([, p]) => p.status === "skipped");
+          if (demoRef.current) {
+            showToast({ text: "演示模式：内容来自本地样例，这一轮只是重放，不会有新内容" });
+          } else if (!added && !failed.length && cooling.length) {
+            const now = Math.floor(Date.now() / 1000);
+            const wait = Math.min(
+              ...cooling.map(([, p]) => Math.max(1, Number(p.next_at || 0) - now)),
+            );
+            showToast({
+              text: "平台都在冷却中，最早 " + wait + " 秒后才能再抓",
+              action: { label: "仍要抓", run: () => refreshRef.current(true) },
+            });
+          } else {
+            const bits = ["刷新完成：新增 " + added + " 条"];
+            if (failed.length) bits.push(failed.length + " 个平台失败");
+            if (cooling.length) bits.push(cooling.length + " 个平台冷却中");
+            showToast({ text: bits.join(" · ") });
+          }
         }
         wasRunning.current = data.state.running;
       } catch {
@@ -165,18 +198,41 @@ export default function App() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [loadSummary]);
+  }, [loadSummary, showToast]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force: boolean = false) => {
+    // 按钮把 React 事件当第一个参数传进来时 force 会是个对象；只认严格 true，
+    // 否则 JSON.stringify 整个 SyntheticEvent 会当场报 circular structure。
+    const bypass = force === true;
     try {
-      await postJSON("/api/refresh");
-      showToast({ text: "开始刷新" });
+      const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", { force: bypass });
+      const state = res?.state;
+      // 全部平台都在冷却时后端不会起线程：这一刻就能说清楚，不必等下一轮轮询。
+      if (state && !state.running && state.error && state.error.includes("冷却")) {
+        const now = Math.floor(Date.now() / 1000);
+        const waits = Object.values(state.plugins ?? {})
+          .map((p) => Number(p.next_at || 0) - now)
+          .filter((n) => n > 0);
+        const wait = waits.length ? Math.min(...waits) : 0;
+        showToast({
+          text: "平台都在冷却中，最早 " + wait + " 秒后才能再抓",
+          action: { label: "仍要抓", run: () => refreshRef.current(true) },
+        });
+        setProgress(state);
+        wasRunning.current = false;
+        return;
+      }
+      showToast({ text: bypass ? "开始抓取（已跳过平台冷却）" : "开始刷新" });
       wasRunning.current = true;
-      setProgress({ ...IDLE, running: true });
+      setProgress(state ?? { ...IDLE, running: true });
     } catch (err) {
       showToast({ text: (err as Error).message });
     }
   }, [showToast]);
+
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
   const bump = useCallback(() => {
     setReloadKey((k) => k + 1);

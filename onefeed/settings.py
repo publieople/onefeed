@@ -18,6 +18,21 @@ from plugin_runtime.paths import state_root
 
 DEFAULT_REGISTRY = "https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json"
 
+# 平台冷却：同一个平台两次抓取之间至少隔多久（秒）。
+# 平台风控看的是调用频率，抓得太密会直接给空列表或 403 —— 比抓慢更糟：
+# 空列表会被当成「这个平台今天没内容」，用户看到的就是内容凭空变少。
+# 0 = 不限。用户可以在设置里按平台覆盖。
+DEFAULT_INTERVALS: dict[str, int] = {
+    "bilibili": 300,
+    "xiaohongshu": 600,
+    "douyin": 600,
+    "zhihu": 600,
+    "zhihu-hot": 180,
+    "juejin": 300,
+    "v2ex": 300,
+}
+MAX_INTERVAL = 86400
+
 DEFAULTS: dict[str, Any] = {
     "plugins_dir": "",
     "registry_url": "",
@@ -25,6 +40,8 @@ DEFAULTS: dict[str, Any] = {
     "comments_limit": 20,
     "default_sort": "freshness",
     "prune_days": 14,
+    # {平台: 秒}；留空表示用 DEFAULT_INTERVALS。设成 0 = 该平台不限。
+    "platform_intervals": {},
     # 自动更新：每轮采集前问一次 registry，有新版就静默升级。
     # 默认关：现场演示时远端悄悄改插件不是好事；要开就是一键。
     "auto_update": False,
@@ -72,6 +89,20 @@ def load() -> dict[str, Any]:
         if value:
             data[key] = value
     return data
+
+
+def platform_intervals(overrides: dict[str, Any] | None = None) -> dict[str, int]:
+    """内置默认 + 用户覆盖，键是插件 id。0 表示不限。"""
+    conf = load().get("platform_intervals") if overrides is None else overrides
+    out = dict(DEFAULT_INTERVALS)
+    if isinstance(conf, dict):
+        for key, value in conf.items():
+            try:
+                seconds = int(value)
+            except (TypeError, ValueError):
+                continue
+            out[str(key).strip()[:32]] = max(0, min(MAX_INTERVAL, seconds))
+    return out
 
 
 def registry_url() -> str:
@@ -167,6 +198,24 @@ def validate(patch: dict[str, Any]) -> dict[str, Any]:
         if not (low <= value <= high):
             raise ValueError(f"{key} 必须在 {low}–{high} 之间")
         out[key] = value
+
+    if "platform_intervals" in patch:
+        raw = patch["platform_intervals"]
+        if not isinstance(raw, dict):
+            raise ValueError("platform_intervals 必须是 {平台: 秒数} 这样的对象")
+        cleaned: dict[str, int] = {}
+        for key, value in raw.items():
+            pid = str(key).strip()[:32]
+            if not pid:
+                continue
+            try:
+                seconds = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"「{pid}」的抓取间隔必须是整数秒") from None
+            if not (0 <= seconds <= MAX_INTERVAL):
+                raise ValueError(f"「{pid}」的抓取间隔必须在 0–{MAX_INTERVAL} 秒之间")
+            cleaned[pid] = seconds
+        out["platform_intervals"] = cleaned
 
     if "auto_update" in patch:
         value = patch["auto_update"]

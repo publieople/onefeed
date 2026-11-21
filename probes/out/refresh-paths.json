@@ -1,0 +1,8 @@
+{
+  "toast_right_after_click": "平台都在冷却中，最早 3457 秒后才能再抓\n仍要抓",
+  "still_fetch": 1,
+  "toast_after_force": "开始抓取（已跳过平台冷却）",
+  "interval_before": "5",
+  "save_toast": "已保存：平台间隔 → 1 个平台改过（下一次抓取生效）",
+  "interval_restored_toast": "已保存：平台间隔 → 1 个平台改过（下一次抓取生效）"
+}
