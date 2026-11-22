@@ -170,6 +170,13 @@ def main() -> int:
     check(xhs["state"] == "need_login" and xhs["can_login"] is True, "小红书未登录")
     check("登录窗口" in xhs["hint"], "提示告诉用户点登录窗口")
 
+    rows = client.get("/api/auth").json()["rows"]
+    ids = [r["plugin"] for r in rows]
+    check({"xiaohongshu", "douyin", "zhihu", "bilibili"} <= set(ids), "登录行清单覆盖全部内置登录流程（含知乎）")
+    check(all(r.get("can_login") or r.get("cli") for r in rows), "每个登录行都带 can_login/cli 标记")
+    zhihu = client.get("/api/auth/zhihu").json()
+    check(zhihu["state"] == "need_login" and zhihu["can_login"] is True, "知乎未登录且可开登录窗口")
+
     cookie_path = Path(_TMP_STATE) / "cookies" / "xiaohongshu.json"
     cookie_path.parent.mkdir(parents=True, exist_ok=True)
     cookie_path.write_text('{"cookies":[{"name":"id_token","value":"x"}]}', encoding="utf-8")

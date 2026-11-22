@@ -122,6 +122,19 @@ export interface AuthState {
   cookies?: number;
 }
 
+/** /api/auth 返回的登录行：哪些平台有登录流程以后端为准，前端不再抄名单 */
+export interface AuthRow {
+  plugin: string;
+  can_login?: boolean;
+  cli?: boolean;
+  label?: string;
+  login_url?: string;
+  impact?: string;
+  cookie_names?: string[];
+  hint?: string;
+  command?: string;
+}
+
 export interface LoginStatus {
   plugin: string;
   state: "idle" | "opened" | "waiting" | "ok" | "closed" | "error";
@@ -302,6 +315,11 @@ export interface AiTestResult {
 /** 测一个模型通不通：传已保存的 id，或传还没保存的 base_url + model + key */
 export function aiTest(body: Record<string, unknown>): Promise<AiTestResult> {
   return postJSON<AiTestResult>("/api/ai/test", body);
+}
+
+/** 设置页「登录态」的行清单（含 can_login / cli 标记） */
+export function authRows(): Promise<{ rows: AuthRow[] }> {
+  return getJSON("/api/auth");
 }
 
 export function aiChat(message: string, extra: Record<string, unknown> = {}): Promise<AiResponse> {

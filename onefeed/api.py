@@ -1032,6 +1032,19 @@ def _cookie_names(path: Path) -> list[str]:
     return []
 
 
+def _login_flow_hint() -> str:
+    window = "、".join(str(s["label"]) for s in auth_mod.SPECS.values())
+    cli = "、".join(str(s["label"]) for s in auth_mod.CLI_SPECS.values())
+    return f"有内置登录窗口的平台：{window}；{cli} 用 CLI 登录"
+
+
+@router.get("/auth")
+def auth_rows() -> dict:
+    """设置页「登录态」的行清单：后端有哪些登录流程，前端就画哪些行。"""
+    rows = [auth_mod.describe(pid) for pid in (*auth_mod.SPECS, *auth_mod.CLI_SPECS)]
+    return {"rows": rows}
+
+
 @router.get("/auth/{plugin_id}")
 def auth(request: Request, plugin_id: str) -> dict:
     """登录四态：not_required / available / need_login / error。"""
@@ -1069,7 +1082,7 @@ def auth_login(plugin_id: str) -> dict:
     except KeyError:
         raise HTTPException(status_code=400, detail={
             "code": "no_login_flow", "message": f"{plugin_id} 没有内置登录流程",
-            "hint": "只有小红书、抖音需要登录；B 站用 bili CLI"})
+            "hint": _login_flow_hint()})
     except Exception as exc:
         raise HTTPException(status_code=500, detail={
             "code": "login_failed", "message": f"{type(exc).__name__}: {exc}"[:300],
@@ -1084,7 +1097,7 @@ def auth_login_status(plugin_id: str) -> dict:
     except KeyError:
         raise HTTPException(status_code=400, detail={
             "code": "no_login_flow", "message": f"{plugin_id} 没有内置登录流程",
-            "hint": "只有小红书、抖音需要登录"})
+            "hint": _login_flow_hint()})
 
 
 @router.post("/auth/{plugin_id}/logout")
@@ -1094,7 +1107,7 @@ def auth_logout(plugin_id: str) -> dict:
     except KeyError:
         raise HTTPException(status_code=400, detail={
             "code": "no_login_flow", "message": f"{plugin_id} 没有内置登录流程",
-            "hint": "只有小红书、抖音需要登录"})
+            "hint": _login_flow_hint()})
     return {"ok": True, **result}
 
 

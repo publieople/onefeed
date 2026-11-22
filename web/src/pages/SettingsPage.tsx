@@ -5,10 +5,12 @@ import type { OutletCtx } from "../App";
 import {
   agentRuns,
   agentUndo,
+  authRows as fetchAuthRows,
   getJSON,
   postJSON,
   putJSON,
   type AgentRunRow,
+  type AuthRow,
   type AuthState,
   type Health,
   type LoginStatus,
@@ -76,9 +78,6 @@ function NumberField({
   );
 }
 
-const AUTH_PLUGINS = ["xiaohongshu", "douyin"];
-const ALL_AUTH_ROWS = [...AUTH_PLUGINS, "bilibili"];
-
 const SECTIONS = [
   { id: "status", label: "运行状态" },
   { id: "collect", label: "采集与排序" },
@@ -134,6 +133,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const [health, setHealth] = useState<Health | null>(null);
   const [plugins, setPlugins] = useState<PluginsResponse | null>(null);
   const [auth, setAuth] = useState<Record<string, AuthState>>({});
+  const [authRows, setAuthRows] = useState<string[]>([]);
   const [login, setLogin] = useState<Record<string, LoginStatus>>({});
   const [note, setNote] = useState("");
   const [form, setForm] = useState<SettingsValues | null>(null);
@@ -147,10 +147,11 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
 
   const load = useCallback(async () => {
     try {
-      const [h, p, s] = await Promise.all([
+      const [h, p, s, rowsResp] = await Promise.all([
         getJSON<Health>("/api/health"),
         getJSON<PluginsResponse>("/api/plugins"),
         getJSON<SettingsResponse>("/api/settings"),
+        fetchAuthRows().catch(() => ({ rows: [] as AuthRow[] })),
       ]);
       setHealth(h);
       setPlugins(p);
@@ -165,14 +166,18 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
         setBaseline(JSON.stringify(merged));
         return merged;
       });
+      // 行清单以后端 /api/auth 为准：有登录流程的平台由后端登记，前端别再抄一份名单。
+      // 老后端没有该接口时退回已装插件，至少不会把整个登录区弄没。
+      const candidates = rowsResp.rows.length ? rowsResp.rows.map((r) => r.plugin) : p.installed.map((i) => i.id);
       const states = await Promise.all(
-        ALL_AUTH_ROWS.map((id) =>
-          getJSON<AuthState>("/api/auth/" + id).catch((err: Error) => ({ plugin: id, state: "error" as const, message: err.message })),
+        candidates.map((id) =>
+          getJSON<AuthState>("/api/auth/" + id).catch((err: Error): AuthState => ({ plugin: id, state: "error", message: err.message })),
         ),
       );
       const map: Record<string, AuthState> = {};
       for (const s2 of states) map[s2.plugin] = s2;
       setAuth(map);
+      setAuthRows(states.filter((st) => st.can_login || st.cli).map((st) => st.plugin));
     } catch (err) {
       setNote((err as Error).message);
     }
@@ -411,7 +416,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const resolved = ctx.settings?.resolved;
   const ai = ctx.settings?.ai;
   const providerCount = form?.ai_providers?.length ?? 0;
-  const authReady = ALL_AUTH_ROWS.filter((id) => auth[id]?.state === "available").length;
+  const authReady = authRows.filter((id) => auth[id]?.state === "available").length;
   const installed = plugins?.installed ?? [];
   const enabledCount = installed.filter((p) => p.enabled).length;
 
@@ -846,7 +851,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
           <SettingSection
             id="auth"
             title="登录态"
-            desc="小红书、抖音、B 站"
+            desc={authRows.length ? authRows.map((id) => platform(id).label).join("、") : "检查各平台的登录状态"}
             summary={
               <>
                 <span>{authReady} 个平台已登录</span>
@@ -859,7 +864,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
           >
             <p className="text-[12px] text-fade">登录窗口是独立的 Chrome，登录完会自动关掉。</p>
             <ul className="mt-3 space-y-2">
-              {ALL_AUTH_ROWS.map((id) => {
+              {authRows.map((id) => {
                 const state = auth[id];
                 const meta = STATE_TEXT[state?.state ?? "need_login"] ?? STATE_TEXT.need_login;
                 const pending = login[id]?.state === "opened" || login[id]?.state === "waiting";
