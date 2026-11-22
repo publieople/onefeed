@@ -278,7 +278,7 @@ export default function App() {
           >
             <Routes location={location}>
               <Route path="/" element={<FeedPage ctx={ctx} />} />
-              <Route path="/item/:id" element={<ItemPage />} />
+              <Route path="/item/:id" element={<ItemPage ctx={ctx} />} />
               <Route path="/market" element={<MarketPage ctx={ctx} />} />
               <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
               <Route path="/agent" element={<AgentPage />} />

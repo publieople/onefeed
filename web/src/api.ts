@@ -156,6 +156,8 @@ export interface SettingsValues {
   auto_update: boolean;
   /** 总结时是否把图片交给多模态模型（关掉只读文字，省钱） */
   vision_summary: boolean;
+  /** 新打开一条时用哪档总结粒度：brief / balanced / detailed */
+  summary_depth?: SummaryDepth | string;
   ai_base_url: string;
   ai_model: string;
   /** 只写不读：后端返回时永远为空串 */
@@ -642,6 +644,15 @@ export interface SummaryChapter {
   title?: string;
 }
 
+/** 总结粒度。brief 只留骨架，detailed 写全话。 */
+export type SummaryDepth = "brief" | "balanced" | "detailed";
+
+export const SUMMARY_DEPTH_LABEL: Record<SummaryDepth, string> = {
+  brief: "简洁",
+  balanced: "平衡",
+  detailed: "详细",
+};
+
 export interface SummaryPayload {
   tldr: string;
   points: SummaryPoint[];
@@ -660,6 +671,8 @@ export interface SummaryPayload {
   ms: number;
   generated_at: number;
   note?: string;
+  /** 这份总结是按哪一档粒度生成的；老缓存或规则兜底可能没有 */
+  depth?: SummaryDepth | string;
 }
 
 export interface SummaryResponse {
@@ -685,17 +698,78 @@ export interface SummaryStreamHandlers {
 }
 
 /**
+ * SSE 帧解析。总结和条目对话是同一套帧格式（data: {type,...}\n\n），
+ * 所以只写一遍：谁用谁把事件翻译成自己的回调。
+ */
+async function pumpStream(
+  resp: Response,
+  signal: AbortSignal,
+  onFrame: (frame: Record<string, unknown>) => void,
+  onError: (message: string) => void,
+): Promise<void> {
+  const reader = resp.body!.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let cut = buf.indexOf("\n\n");
+      while (cut >= 0) {
+        const chunk = buf.slice(0, cut);
+        buf = buf.slice(cut + 2);
+        cut = buf.indexOf("\n\n");
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const body = line.slice(5).trim();
+          if (!body) continue;
+          let frame: Record<string, unknown>;
+          try {
+            frame = JSON.parse(body) as Record<string, unknown>;
+          } catch {
+            continue; /* 坏帧丢掉，别因为一行解析失败把整段输出作废 */
+          }
+          onFrame(frame);
+        }
+      }
+    }
+  } catch (err) {
+    if (!signal.aborted) onError(err instanceof Error ? err.message : "连接断了");
+  }
+}
+
+/** 流里的错误体不一定是 JSON（503 可能是代理页），拿不到就退回状态码文案 */
+async function failureText(resp: Response, fallback: string): Promise<string> {
+  try {
+    const body = await resp.json();
+    return body?.detail?.message ?? body?.error?.message ?? body?.detail ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * 流式总结。用 fetch 读 ReadableStream 而不是 EventSource：EventSource 收不到 404 的错误体，
  * 也没法 abort；猜错路径时用户只会看到「连接失败」，这里能给出具体原因。
+ * depth 不传就由后端按设置页的默认档决定，回来时 payload.depth 会告诉我们用的是哪档。
  * 返回一个取消函数。
  */
-export function streamSummary(id: string, refresh: boolean, h: SummaryStreamHandlers): () => void {
+export function streamSummary(
+  id: string,
+  refresh: boolean,
+  h: SummaryStreamHandlers,
+  depth?: SummaryDepth | "",
+): () => void {
   const ctrl = new AbortController();
-  const qs = refresh ? "?refresh=1" : "";
+  const qs = new URLSearchParams();
+  if (refresh) qs.set("refresh", "1");
+  if (depth) qs.set("depth", depth);
+  const suffix = qs.toString() ? "?" + qs.toString() : "";
   void (async () => {
     let resp: Response;
     try {
-      resp = await fetch("/api/item/" + encodeURIComponent(id) + "/summary/stream" + qs, {
+      resp = await fetch("/api/item/" + encodeURIComponent(id) + "/summary/stream" + suffix, {
         signal: ctrl.signal,
         headers: { Accept: "text/event-stream" },
       });
@@ -707,40 +781,79 @@ export function streamSummary(id: string, refresh: boolean, h: SummaryStreamHand
       h.onError(resp.status === 404 ? "没有这条内容" : `请求失败（${resp.status}）`);
       return;
     }
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
+    await pumpStream(
+      resp,
+      ctrl.signal,
+      (frame) => {
+        if (frame.type === "meta") h.onMeta?.(frame as never);
+        else if (frame.type === "status") h.onStatus?.(String(frame.phase ?? ""));
+        else if (frame.type === "delta") h.onDelta(String(frame.text ?? ""));
+        else if (frame.type === "done") h.onDone(frame.summary as SummaryPayload, Boolean(frame.from_cache));
+        else if (frame.type === "error") h.onError(String(frame.message ?? "生成失败"));
+      },
+      h.onError,
+    );
+  })();
+  return () => ctrl.abort();
+}
+
+/** 一轮问答。role 只有 user / assistant 两种，够用了。 */
+export interface ItemChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export interface ItemChatHandlers {
+  /** 模型在思考但还没出字，用来把「卡住了」换成「在想」 */
+  onStatus?: (phase: string) => void;
+  onDelta: (text: string) => void;
+  onDone: (provider?: string) => void;
+  onError: (message: string) => void;
+}
+
+/**
+ * 就当前这条内容提问。带上已经生成的总结和最近几轮历史，
+ * 这样模型知道用户看到的是什么，不用重新问「你说哪条」。
+ */
+export function streamItemChat(
+  id: string,
+  body: { message: string; depth?: string; summary?: SummaryPayload | null; history?: ItemChatTurn[] },
+  h: ItemChatHandlers,
+): () => void {
+  const ctrl = new AbortController();
+  void (async () => {
+    let resp: Response;
     try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let cut = buf.indexOf("\n\n");
-        while (cut >= 0) {
-          const chunk = buf.slice(0, cut);
-          buf = buf.slice(cut + 2);
-          cut = buf.indexOf("\n\n");
-          for (const line of chunk.split("\n")) {
-            if (!line.startsWith("data:")) continue;
-            const body = line.slice(5).trim();
-            if (!body) continue;
-            let event: Record<string, unknown>;
-            try {
-              event = JSON.parse(body) as Record<string, unknown>;
-            } catch {
-              continue; /* 坏帧丢掉，别因为一行解析失败把整份总结作废 */
-            }
-            if (event.type === "meta") h.onMeta?.(event as never);
-            else if (event.type === "status") h.onStatus?.(String(event.phase ?? ""));
-            else if (event.type === "delta") h.onDelta(String(event.text ?? ""));
-            else if (event.type === "done") h.onDone(event.summary as SummaryPayload, Boolean(event.from_cache));
-            else if (event.type === "error") h.onError(String(event.message ?? "生成失败"));
-          }
-        }
-      }
+      resp = await fetch("/api/item/" + encodeURIComponent(id) + "/chat/stream", {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({
+          message: body.message,
+          depth: body.depth || undefined,
+          summary: body.summary ?? undefined,
+          history: (body.history ?? []).slice(-6),
+        }),
+      });
     } catch (err) {
-      if (!ctrl.signal.aborted) h.onError(err instanceof Error ? err.message : "连接断了");
+      if (!ctrl.signal.aborted) h.onError(err instanceof Error ? err.message : "请求失败");
+      return;
     }
+    if (!resp.ok || !resp.body) {
+      h.onError(await failureText(resp, `请求失败（${resp.status}）`));
+      return;
+    }
+    await pumpStream(
+      resp,
+      ctrl.signal,
+      (frame) => {
+        if (frame.type === "status") h.onStatus?.(String(frame.phase ?? ""));
+        else if (frame.type === "delta") h.onDelta(String(frame.text ?? ""));
+        else if (frame.type === "done") h.onDone(frame.provider ? String(frame.provider) : undefined);
+        else if (frame.type === "error") h.onError(String(frame.message ?? "没能回答"));
+      },
+      h.onError,
+    );
   })();
   return () => ctrl.abort();
 }

@@ -603,35 +603,49 @@ def _cache_chunks(payload: dict, size: int = 18) -> list[str]:
     return [raw[i:i + size] for i in range(0, len(raw), size)] or [""]
 
 
+def _depth(raw: Any) -> str:
+    """档位归一：不认识的值回落设置里的默认档。旧链接、手改的 URL 都不该报错。"""
+    value = str(raw or "").strip()
+    if value in summary_mod.DEPTHS:
+        return value
+    return summary_mod.configured_depth()
+
+
 @router.get("/item/{item_id}/summary")
-def item_summary(request: Request, item_id: str, refresh: bool = Query(False)) -> dict:
-    """AI 总结：插件交素材、宿主出摘要，模型不可用时按素材顺序摘原句。"""
+def item_summary(request: Request, item_id: str, refresh: bool = Query(False),
+                 depth: str = Query("")) -> dict:
+    """AI 总结：插件交素材、宿主出摘要，模型不可用时按素材顺序摘原句。
+
+    每一档单独缓存：切档位看到的是那一档自己的正文，不是上一档的。
+    """
     store = _store(request)
     row = store.get_item(item_id)
     if row is None:
         raise HTTPException(status_code=404, detail={
             "code": "item_not_found", "message": f"没有这条内容：{item_id}",
             "hint": "从 /api/feed 的返回里取 id"})
+    level = _depth(depth)
 
     if not refresh:
-        cached = store.get_summary(item_id)
+        cached = store.get_summary(item_id, level)
         if cached and isinstance(cached.get("payload"), dict) and cached["payload"].get("tldr") is not None:
             return {"ok": True, "summary": cached["payload"], "from_cache": True,
                     "fetched_at": cached["fetched_at"]}
 
     try:
-        payload = summary_mod.build(store, _runner(request).host, row)
+        payload = summary_mod.build(store, _runner(request).host, row, level)
     except Exception as exc:  # noqa: BLE001 - 前端只要一句原因
         return {"ok": False, "error": str(exc)[:300]}
 
-    store.save_summary(item_id, payload)
+    store.save_summary(item_id, payload, level)
     return {"ok": True, "summary": payload, "from_cache": False,
             "fetched_at": int(time.time())}
 
 
 @router.get("/item/{item_id}/summary/stream")
 def item_summary_stream(request: Request, item_id: str,
-                        refresh: bool = Query(False)) -> StreamingResponse:
+                        refresh: bool = Query(False),
+                        depth: str = Query("")) -> StreamingResponse:
     """AI 总结（流式）：一行行吐，用户不用干等十几秒盯一块骨架屏。
 
     事件协议：meta → delta* → done（或 error），每条都是 data: {json}\n\n。
@@ -643,12 +657,13 @@ def item_summary_stream(request: Request, item_id: str,
             "code": "item_not_found", "message": f"没有这条内容：{item_id}",
             "hint": "从 /api/feed 的返回里取 id"})
     host = _runner(request).host
+    level = _depth(depth)
 
     def events() -> Any:
         # 先发一个注释行：浏览器收到首块才会把状态从「连接中」切过来
         yield ": open\n\n"
         if not refresh:
-            cached = store.get_summary(item_id)
+            cached = store.get_summary(item_id, level)
             if cached and isinstance(cached.get("payload"), dict) \
                     and cached["payload"].get("tldr") is not None:
                 payload = cached["payload"]
@@ -660,15 +675,73 @@ def item_summary_stream(request: Request, item_id: str,
                 yield _sse({"type": "done", "from_cache": True, "summary": payload})
                 return
         try:
-            for event in summary_mod.stream_build(store, host, row):
+            for event in summary_mod.stream_build(store, host, row, level):
                 if event.get("type") == "done" and isinstance(event.get("summary"), dict):
                     try:
-                        store.save_summary(item_id, event["summary"])
+                        store.save_summary(item_id, event["summary"], level)
                     except Exception:  # noqa: BLE001 - 存不进缓存也别让流断在半路
                         pass
                 yield _sse(event)
         except Exception as exc:  # noqa: BLE001 - 前端只要一句原因
             yield _sse({"type": "error", "message": str(exc)[:300]})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"})
+
+
+@router.post("/item/{item_id}/chat/stream")
+def item_chat_stream(request: Request, item_id: str,
+                     payload: dict[str, Any] = Body(default={})) -> StreamingResponse:
+    """就着这一条内容对话：和总结用同一套 SSE 形状，前端一套读法就够。
+
+    上下文 = 素材 + 当前这篇总结 + 最近几轮，所以追问细节不用把素材再喂一遍。
+    """
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail={
+            "code": "empty_message", "message": "说一句再问",
+            "hint": "比如「这段到底在讲什么」"})
+    store = _store(request)
+    row = store.get_item(item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "item_not_found", "message": f"没有这条内容：{item_id}",
+            "hint": "从 /api/feed 的返回里取 id"})
+
+    level = _depth(payload.get("depth"))
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else None
+    history = payload.get("history") if isinstance(payload.get("history"), list) else None
+    host = _runner(request).host
+
+    def events() -> Any:
+        yield ": open\n\n"
+        try:
+            messages = summary_mod.chat_messages(store, host, row, summary, history,
+                                                 message, level)
+        except Exception as exc:  # noqa: BLE001 - 素材取不到就别起请求
+            yield _sse({"type": "error", "message": str(exc)[:300]})
+            return
+        thinking = False
+        provider_name = ""
+        try:
+            for kind, piece, provider in ai_mod.stream_complete(
+                    messages, max_tokens=900, temperature=0.4):
+                provider_name = str(provider.get("name") or provider_name)
+                if kind == "thinking":
+                    if not thinking:
+                        thinking = True
+                        yield _sse({"type": "status", "phase": "thinking"})
+                    continue
+                yield _sse({"type": "delta", "text": piece})
+            yield _sse({"type": "done", "provider": provider_name})
+        except Exception as exc:  # noqa: BLE001 - 中途断了也要说清断在哪
+            note = (str(exc) or exc.__class__.__name__)[:300]
+            if note == "没有配置模型 key":
+                note = "还没配模型 key，去设置页填一个再问。"
+            yield _sse({"type": "error", "message": note})
 
     return StreamingResponse(
         events(),

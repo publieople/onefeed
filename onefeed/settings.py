@@ -60,11 +60,15 @@ DEFAULTS: dict[str, Any] = {
     "ai_agent": True,
     # 011 起预算按 spec 的 max_tool_calls=10；010 时期是 6，真机上 6 次常在中途用满。
     "ai_agent_max_tools": 10,
+    # AI 总结默认粒度。详情页右上角可以逐条临时改，这里定的是「新打开一条用哪档」。
+    "summary_depth": "balanced",
 }
 
 ENV_KEYS = {"registry_url": "ONEFEED_REGISTRY", "plugins_dir": "ONEFEED_PLUGINS_DIR"}
 SECRET_KEYS = ("ai_api_key",)
 SORTS = ("freshness", "engagement")
+# 与 summary.DEPTHS 对齐。settings 被 summary import，反过来引会成环，所以这里单列一份。
+SUMMARY_DEPTHS = ("brief", "balanced", "detailed")
 MAX_PROVIDERS = 5
 
 
@@ -256,6 +260,12 @@ def validate(patch: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, bool):
             raise ValueError("ai_agent 必须是 true / false")
         out["ai_agent"] = value
+
+    if "summary_depth" in patch:
+        value = str(patch["summary_depth"] or "").strip()
+        if value not in SUMMARY_DEPTHS:
+            raise ValueError(f"summary_depth 只能是 {', '.join(SUMMARY_DEPTHS)}")
+        out["summary_depth"] = value
 
     if "ai_agent_max_tools" in patch:
         try:

@@ -19,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 
@@ -99,15 +99,21 @@ CREATE TABLE IF NOT EXISTS details (
 );
 """
 
-# v4 的 AI 总结缓存。总结比详情更贵（要跑模型），所以按 item_id 永久存，
+# v4 的 AI 总结缓存。总结比详情更贵（要跑模型），所以永久存，
 # 只有用户点「重算」才覆盖；basis 记素材来源，前端据此决定要不要写「依据」那一行。
+# v9 起按 (item_id, depth) 分开存：同一篇的「简洁」和「详细」是两份不同的东西，
+# 共用一行会让切档位时看到上一档的正文。
 SUMMARIES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS summaries (
-    item_id    TEXT PRIMARY KEY,
+    item_id    TEXT NOT NULL,
+    depth      TEXT NOT NULL DEFAULT 'balanced',
     payload    TEXT NOT NULL DEFAULT '{}',
-    fetched_at INTEGER NOT NULL DEFAULT 0
+    fetched_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (item_id, depth)
 );
 """
+
+DEFAULT_DEPTH = "balanced"
 
 # Item 字段 → items 列名（统计字段要换名）
 STAT_COLUMNS = {"like": "like_count", "comment": "comment_count",
@@ -330,6 +336,24 @@ class Store:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
                 if "demo" not in columns:
                     conn.execute("ALTER TABLE runs ADD COLUMN demo INTEGER NOT NULL DEFAULT 1")
+            if version < 9:
+                # 总结缓存改成 (item_id, depth) 复合主键。SQLite 改不了主键，只能重建表；
+                # 老数据没有档位，一律记成「平衡」——那是它们当时的生成口径。
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(summaries)")}
+                if "depth" not in columns:
+                    conn.executescript("""
+                        ALTER TABLE summaries RENAME TO summaries_v8;
+                        CREATE TABLE summaries (
+                            item_id    TEXT NOT NULL,
+                            depth      TEXT NOT NULL DEFAULT 'balanced',
+                            payload    TEXT NOT NULL DEFAULT '{}',
+                            fetched_at INTEGER NOT NULL DEFAULT 0,
+                            PRIMARY KEY (item_id, depth)
+                        );
+                        INSERT INTO summaries (item_id, depth, payload, fetched_at)
+                            SELECT item_id, 'balanced', payload, fetched_at FROM summaries_v8;
+                        DROP TABLE summaries_v8;
+                    """)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             conn.commit()
         self.recompute_engage()
@@ -882,11 +906,12 @@ class Store:
         return out
 
     # ------------------------------------------------------------ summaries
-    def get_summary(self, item_id: str) -> dict[str, Any] | None:
-        """取 AI 总结缓存。总结按条永久存，不看时间——要看新的就 refresh。"""
+    def get_summary(self, item_id: str, depth: str = DEFAULT_DEPTH) -> dict[str, Any] | None:
+        """取某一档的 AI 总结缓存。总结按条永久存，不看时间——要看新的就 refresh。"""
         row = self.conn.execute(
-            "SELECT item_id, payload, fetched_at FROM summaries WHERE item_id = ?",
-            (item_id,)).fetchone()
+            "SELECT item_id, depth, payload, fetched_at FROM summaries "
+            "WHERE item_id = ? AND depth = ?",
+            (item_id, depth or DEFAULT_DEPTH)).fetchone()
         if row is None:
             return None
         try:
@@ -895,7 +920,7 @@ class Store:
             return None
         if not isinstance(payload, dict) or not payload:
             return None
-        return {"item_id": row["item_id"], "payload": payload,
+        return {"item_id": row["item_id"], "depth": row["depth"], "payload": payload,
                 "fetched_at": int(row["fetched_at"] or 0)}
 
     def summarized_items(self, limit: int = 30) -> list[dict[str, Any]]:
@@ -904,9 +929,13 @@ class Store:
         总结表只存 payload，标题 / 平台 / 封面都在 items 里，所以这里 join 回来；
         排序按总结生成时间（用户刚看完的那条在最上面），不是按发布时间。
         """
+        # 一条可能有三档缓存：列表里只取生成时间最近的那一行，别让同一篇出现三次。
         rows = self.conn.execute(
-            "SELECT i.*, s.payload AS summary_payload, s.fetched_at AS summary_at "
+            "SELECT i.*, s.payload AS summary_payload, s.fetched_at AS summary_at, "
+            "s.depth AS summary_depth "
             "FROM summaries s JOIN items i ON i.id = s.item_id "
+            "WHERE s.rowid = (SELECT x.rowid FROM summaries x WHERE x.item_id = s.item_id "
+            "                 ORDER BY x.fetched_at DESC LIMIT 1) "
             "ORDER BY s.fetched_at DESC LIMIT ?",
             (max(1, min(int(limit), 100)),)).fetchall()
         out: list[dict[str, Any]] = []
@@ -914,6 +943,7 @@ class Store:
             row = dict(raw)
             payload_raw = row.pop("summary_payload", "{}")
             row["summary_at"] = int(row.pop("summary_at", 0) or 0)
+            row["summary_depth"] = str(row.pop("summary_depth", DEFAULT_DEPTH) or DEFAULT_DEPTH)
             try:
                 payload = json.loads(payload_raw or "{}")
             except json.JSONDecodeError:
@@ -926,18 +956,25 @@ class Store:
             out.append(row)
         return out
 
-    def save_summary(self, item_id: str, payload: dict[str, Any]) -> None:
+    def save_summary(self, item_id: str, payload: dict[str, Any],
+                     depth: str = DEFAULT_DEPTH) -> None:
         with self._write_lock:
             self.conn.execute(
-                "INSERT INTO summaries (item_id, payload, fetched_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(item_id) DO UPDATE SET payload=excluded.payload, "
+                "INSERT INTO summaries (item_id, depth, payload, fetched_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(item_id, depth) DO UPDATE SET payload=excluded.payload, "
                 "fetched_at=excluded.fetched_at",
-                (item_id, json.dumps(payload, ensure_ascii=False), int(time.time())))
+                (item_id, depth or DEFAULT_DEPTH,
+                 json.dumps(payload, ensure_ascii=False), int(time.time())))
             self.conn.commit()
 
-    def drop_summary(self, item_id: str) -> None:
+    def drop_summary(self, item_id: str, depth: str | None = None) -> None:
+        """不给 depth 就三档一起删（条目都换了，留着缓存没意义）。"""
         with self._write_lock:
-            self.conn.execute("DELETE FROM summaries WHERE item_id = ?", (item_id,))
+            if depth:
+                self.conn.execute("DELETE FROM summaries WHERE item_id = ? AND depth = ?",
+                                  (item_id, depth))
+            else:
+                self.conn.execute("DELETE FROM summaries WHERE item_id = ?", (item_id,))
             self.conn.commit()
 
     def update_clusters(self, mapping: dict[str, str]) -> int:

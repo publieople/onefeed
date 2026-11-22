@@ -453,16 +453,17 @@ def _summarize(ctx: Ctx, item_id: str, force: bool = False) -> tuple[dict[str, A
     row = ctx.store.get_item(item_id)
     if row is None:
         raise ActionError(f"库里没有这个 id：{item_id}")
+    level = summary_mod.configured_depth()
     if not force:
-        cached = ctx.store.get_summary(item_id)
+        cached = ctx.store.get_summary(item_id, level)
         payload = cached.get("payload") if isinstance(cached, dict) else None
         if isinstance(payload, dict) and payload.get("tldr") is not None:
             return row, payload, True
     try:
-        payload = summary_mod.build(ctx.store, _host(ctx), row)
+        payload = summary_mod.build(ctx.store, _host(ctx), row, level)
     except Exception as exc:  # noqa: BLE001 - 正文为空/模型全挂都归成一句话
         raise ActionError(str(exc)[:160] or "总结失败") from exc
-    ctx.store.save_summary(item_id, payload)
+    ctx.store.save_summary(item_id, payload, level)
     return row, payload, False
 
 

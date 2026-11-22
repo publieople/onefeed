@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import type { OutletCtx } from "../App";
 
 /**
  * 详情页按需加载。
@@ -29,7 +30,7 @@ export function itemPageLoaded(): boolean {
 }
 
 /** React.lazy 需要 { default: ComponentType }，这里把同一个 promise 复用掉。 */
-export async function loadItemPageComponent(): Promise<{ default: ComponentType }> {
-  const mod = (await loadItemPage()) as { default: ComponentType };
+export async function loadItemPageComponent(): Promise<{ default: ComponentType<{ ctx?: OutletCtx }> }> {
+  const mod = (await loadItemPage()) as { default: ComponentType<{ ctx?: OutletCtx }> };
   return { default: mod.default };
 }

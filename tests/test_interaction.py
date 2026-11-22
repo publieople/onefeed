@@ -315,6 +315,98 @@ def test_every_dialog_takes_over_the_hotkey_stack() -> None:
     assert "if (depth[target] > 0) return;" in HOTKEYS
 
 
+# ---------------------------------------------------------------- 总结粒度与条目对话
+CHAT = read("components", "ItemChat.tsx")
+API = read("api.ts")
+LOADER = read("pages", "itemPageLoader.ts")
+
+
+@case
+def test_depth_switch_keeps_the_old_summary() -> None:
+    """换档不能把面板清空：先把旧的一份留着，新版到了再换。
+
+    以前 setSummary(null) 直接走骨架，页面上半部分会塌一下再长回来——
+    正是他反复说的「不要整页位移」。
+    """
+    assert "DepthSwitch" in ITEM and 'aria-label="总结粒度"' in ITEM
+    assert "aria-pressed" in ITEM
+    assert 'layoutId="summary-depth-pill"' in ITEM, "选中态要滑动过去，不是硬切"
+    for depth in ('"brief"', '"balanced"', '"detailed"'):
+        assert depth in ITEM, "档位缺 " + depth
+    # keepOld 只在换档时为真；首次进页面仍然清空（不能把上一条的稿子留在新条目上）
+    assert "keepOld" in ITEM and "if (!keepOld) setSummary(null)" in ITEM
+    assert "loadSummary(id, false, next, true)" in ITEM
+    # 换档期间旧正文留着但压暗，要有进度条说明在重写
+    assert 'role="status"' in ITEM and "正在按" in ITEM
+    assert "opacity-55" in ITEM
+    # 换档失败退回上一份，而不是给空面板
+    assert "这里还是上一份" in ITEM
+
+
+@case
+def test_depth_switch_reuses_cache() -> None:
+    """切回看过的档位要秒回，不重新跑一遍模型（贵且慢）。"""
+    assert "depthCache" in ITEM and "SummaryPayload>" in ITEM
+    switch = ITEM.split("const switchDepth")[1].split("\n  };")[0]
+    assert "depthCache.current[" in switch and "cached" in switch
+    assert "from_cache: true" in switch, "命中的稿子按缓存态展示"
+    assert "setBusyDepth" in switch
+
+
+@case
+def test_depth_follows_settings_until_local_choice() -> None:
+    """初值跟设置走；本节内点过之后以本地选择为准。"""
+    assert "summary_depth" in API and "summary_depth" in SETTINGS
+    assert "ctx?.settings?.settings?.summary_depth" in ITEM
+    assert "summary?.summary?.depth" in ITEM
+    # ItemPage 以前不接 ctx，拿不到设置
+    assert "ctx?: OutletCtx" in ITEM
+    assert "<ItemPage ctx={ctx}" in APP
+    assert "OutletCtx" in LOADER, "懒加载组件的 props 类型要跟 App 一致"
+
+
+@case
+def test_settings_has_default_depth_picker() -> None:
+    assert "默认总结粒度" in SETTINGS
+    assert 'layoutId="settings-depth-pill"' in SETTINGS
+    assert "summary_depth: option.id" in SETTINGS
+    assert "DEPTH_OPTIONS" in SETTINGS
+    hint = SETTINGS.split("DEPTH_OPTIONS")[1].split("]")[0]
+    assert hint.count("hint:") == 3, "每档都要一句说明"
+
+
+@case
+def test_item_chat_is_a_real_stream() -> None:
+    """总结下方的对话：走流式、能停、有开场建议、不丢历史。"""
+    assert "streamItemChat" in API and "/chat/stream" in API
+    assert "streamItemChat(" in CHAT
+    assert "slice(-6)" in CHAT, "只带最近几轮，别把整段塞回去"
+    assert "onDelta" in CHAT and "setLive" in CHAT, "正文要边到边显示"
+    assert "const stop = () =>" in CHAT and "onClick={stop}" in CHAT, "生成中要能停"
+    assert "Square" in CHAT, "停止键是方块，不是又一个箭头"
+    # 停止后要留下半句并注明「是被你停的」，否则像回答失败
+    assert "按你点的停止收的尾" in CHAT and "stopped: true" in CHAT
+    assert "SUGGESTIONS" in CHAT and "Starters" in CHAT, "空态给三个能直接点的问题"
+    assert 'aria-live="polite"' in CHAT
+    assert "stopped" in CHAT
+
+
+@case
+def test_item_chat_keyboard_and_composition() -> None:
+    """Enter 发送、Shift+Enter 换行，输入法组字时不误发。"""
+    assert "isComposing" in CHAT, "中文输入法回车选词会误发"
+    assert "shiftKey" in CHAT
+    assert "max-h-" in CHAT and "rows=" in CHAT, "输入框要能自己长高"
+
+
+@case
+def test_chat_avoids_exit_animations() -> None:
+    """退出动画在动画帧被节流时永远不结束——这一条以前让面板关不掉。"""
+    assert "AnimatePresence" not in CHAT, "对话列表不要用 AnimatePresence"
+    assert "exit=" not in CHAT, "别给消息加 exit，卸载要即时"
+    assert "motion.li" in CHAT and "initial=" in CHAT, "进场动效保留"
+
+
 def main() -> int:
     failed = 0
     for name, fn in CASES:

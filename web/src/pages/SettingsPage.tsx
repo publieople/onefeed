@@ -120,6 +120,13 @@ const UNDO_TEXT: Record<string, string> = {
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
+/** 三档粒度。hint 会跟着选中项换，让人知道换档到底换到了什么。 */
+const DEPTH_OPTIONS = [
+  { id: "brief", label: "简洁", hint: "两三条要点，只留最关键的那句。适合先扫一眼。" },
+  { id: "balanced", label: "平衡", hint: "默认。覆盖全片，一条要点说一件事，2–6 条。" },
+  { id: "detailed", label: "详细", hint: "写全：6–10 条，关键数字、结论、争议点都展开。慢一点，token 也贵一点。" },
+] as const;
+
 export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   useEffect(() => {
     document.title = "设置 · OneFeed";
@@ -716,6 +723,46 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   onChange={(next) => setForm({ ...form, ai_providers: next })}
                   status={ai}
                 />
+                <div className="rounded-lg border border-line px-3.5 py-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-[13px] font-medium">默认总结粒度</span>
+                    <span className="text-[11px] text-fade">详情页里还能逐条临时改</span>
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="默认总结粒度"
+                    className="mt-2 inline-flex rounded-full border border-line p-0.5 text-[12px]"
+                  >
+                    {DEPTH_OPTIONS.map((option) => {
+                      const on = (form.summary_depth ?? "balanced") === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setForm({ ...form, summary_depth: option.id })}
+                          aria-pressed={on}
+                          className={
+                            "relative rounded-full px-3 py-1 transition-colors duration-150 " +
+                            (on ? "text-ink" : "text-muted hover:text-ink")
+                          }
+                        >
+                          {on ? (
+                            <motion.span
+                              layoutId="settings-depth-pill"
+                              className="absolute inset-0 rounded-full bg-wash ring-1 ring-inset ring-line"
+                              transition={{ duration: reduce ? 0 : 0.24, ease: EASE }}
+                            />
+                          ) : null}
+                          <span className="relative">{option.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-fade">
+                    {DEPTH_OPTIONS.find((o) => o.id === (form.summary_depth ?? "balanced"))?.hint}
+                  </p>
+                </div>
+
                 <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-line px-3.5 py-3">
                   <input
                     type="checkbox"

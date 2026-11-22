@@ -23,32 +23,73 @@ IMAGE_DETAIL = "low"
 # 推理型模型（deepseek-flash 之类）的思考也吃 max_tokens，1100 会被截成空正文。
 MAX_SUMMARY_TOKENS = 2200
 
-SYSTEM_PROMPT = """你在给用户总结一条他还没看的内容。只依据素材里出现过的信息，不补背景、不猜剧情、不编数字。
+# ---------------------------------------------------------------- 粒度（三档）
+# 一天里读东西的心态不一样：扫标题党只要一句话，准备做笔记要详细。
+# 默认「平衡」；设置页改默认值，详情页右上角还能逐条临时调。
+DEPTHS = ("brief", "balanced", "detailed")
+DEPTH_DEFAULT = "balanced"
+DEPTH_LABEL = {"brief": "简洁", "balanced": "平衡", "detailed": "详细"}
+DEPTH_SPEC: dict[str, dict[str, Any]] = {
+    "brief": {"points": (2, 3), "tldr": 24, "point": 28, "tokens": 1200,
+              "material": 6000, "images": 2,
+              "focus": "只留最关键的：这条在讲什么、最值得记住的一点；次要细节一律不写。"},
+    "balanced": {"points": (2, 6), "tldr": 30, "point": 45, "tokens": 2200,
+                 "material": 14000, "images": 3,
+                 "focus": "覆盖全片而不是只看开头，一条要点说一件事。"},
+    "detailed": {"points": (6, 10), "tldr": 60, "point": 80, "tokens": 3600,
+                 "material": 26000, "images": 3,
+                 "focus": ("尽量写全：这是什么、关键数字或结论、为什么值得看、有争议或没讲清的地方。"
+                           "可以补一点素材里已有的背景，但仍然不许编。")},
+}
+
+
+def depth_spec(depth: str) -> dict[str, Any]:
+    """不认识的值一律回落默认档：旧链接、手改的 URL 都不该让总结挂掉。"""
+    return DEPTH_SPEC.get(depth) or DEPTH_SPEC[DEPTH_DEFAULT]
+
+
+def configured_depth() -> str:
+    """设置页里定的默认档位。读不到 / 写坏了都回落平衡档。"""
+    try:
+        value = str(settings_mod.load().get("summary_depth") or "")
+    except Exception:  # noqa: BLE001 - 设置文件坏了也不该让总结 500
+        value = ""
+    return value if value in DEPTH_SPEC else DEPTH_DEFAULT
+
+def system_prompt(depth: str = DEPTH_DEFAULT) -> str:
+    """非流式提示词。三档只改三件事：条数区间、每句字数、覆盖要求。"""
+    spec = depth_spec(depth)
+    low, high = spec["points"]
+    return f"""你在给用户总结一条他还没看的内容。只依据素材里出现过的信息，不补背景、不猜剧情、不编数字。
 
 只输出 JSON，格式：
-{"tldr":"一句话结论，30 字内，具体","points":[{"t":秒数或null,"text":"一个要点，45 字内"}],"caveat":"一句提醒，可为空"}
+{{"tldr":"一句话结论，{spec['tldr']} 字内，具体","points":[{{"t":秒数或null,"text":"一个要点，{spec['point']} 字内"}}],"caveat":"一句提醒，可为空"}}
 
 规则：
-- points 2 到 6 条，按素材顺序，覆盖全片而不是只看开头。
+- points {low} 到 {high} 条，按素材顺序。{spec['focus']}
 - 素材里每行前面的 [mm:ss] 是时间点；某条要点对应哪一段，就把那一段的秒数填进 t，对应不上就填 null。
 - 不要复述标题，不要写「本期视频」「UP 主」「作者认为」这类套话，直接说内容。
-- 素材里没说的东西一律不写；素材太短就只给 1 到 2 条要点。
+- 素材里没说的东西一律不写；素材太短就只给 1 到 2 条要点，宁可短也不凑数。
 - caveat 只在素材明显不足时写一句，否则留空字符串。"""
 
+
 # 流式用行协议而不是 JSON：JSON 得等括号闭合才能解析，行协议每写完一行就能显示。
-STREAM_PROMPT = """你在给用户总结一条他还没看的内容。只依据素材里出现过的信息，不补背景、不猜剧情、不编数字。
+def stream_prompt(depth: str = DEPTH_DEFAULT) -> str:
+    spec = depth_spec(depth)
+    low, high = spec["points"]
+    return f"""你在给用户总结一条他还没看的内容。只依据素材里出现过的信息，不补背景、不猜剧情、不编数字。
 
 按下面的行格式输出纯文本，不要 JSON、不要解释、不要空行：
-TLDR: 一句话结论，30 字内，具体
-- [mm:ss] 一个要点，45 字内
+TLDR: 一句话结论，{spec['tldr']} 字内，具体
+- [mm:ss] 一个要点，{spec['point']} 字内
 - 一个要点，没有时间点就不写方括号
 注: 只在素材明显不足时写一句，否则不写这一行
 
 规则：
-- 要点 2 到 6 条，按素材顺序，覆盖全片而不是只看开头。
+- 要点 {low} 到 {high} 条，按素材顺序。{spec['focus']}
 - 素材里每行前面的 [mm:ss] 是时间点；某条要点对应哪一段，就把那一段的时间填进方括号，对应不上就不写方括号。
 - 不要复述标题，不要写「本期视频」「UP 主」「作者认为」这类套话，直接说内容。
-- 素材里没说的东西一律不写；素材太短就只给 1 到 2 条要点。"""
+- 素材里没说的东西一律不写；素材太短就只给 1 到 2 条要点，宁可短也不凑数。"""
 
 # 素材档位：前端照着 basis 决定要不要把「注意」那行显示出来。
 BASIS_TEXT = {
@@ -185,7 +226,8 @@ def _image_blocks(images: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return blocks
 
 
-def _material(src: dict[str, Any], basis: str, images: int = 0) -> str:
+def _material(src: dict[str, Any], basis: str, images: int = 0,
+              max_chars: int = MATERIAL_MAX) -> str:
     """拼给模型看的素材。字幕带 [mm:ss]，其余按「标题 / 简介 / 官方总结 / 热评」的顺序。"""
     parts: list[str] = []
     title = str(src.get("title") or "").strip()
@@ -200,7 +242,7 @@ def _material(src: dict[str, Any], basis: str, images: int = 0) -> str:
 
     lines = _timed_lines(src)
     if lines:
-        budget = max(2000, MATERIAL_MAX - sum(len(p) for p in parts))
+        budget = max(2000, max_chars - sum(len(p) for p in parts))
         body: list[str] = []
         used = 0
         for line in lines:
@@ -232,10 +274,10 @@ def _material(src: dict[str, Any], basis: str, images: int = 0) -> str:
                 rows.append(f"· {str(c['text'])[:100]}（{int(c.get('like') or 0)} 赞）")
         if rows:
             parts.append("热评（只用来判断这条在讲什么）：\n" + "\n".join(rows))
-    return "\n\n".join(parts)[:MATERIAL_MAX]
+    return "\n\n".join(parts)[:max_chars]
 
 
-def _parse(raw: str, duration: int) -> dict[str, Any] | None:
+def _parse(raw: str, duration: int, max_points: int = POINT_MAX) -> dict[str, Any] | None:
     match = re.search(r"\{.*\}", raw or "", re.S)
     if not match:
         return None
@@ -249,7 +291,7 @@ def _parse(raw: str, duration: int) -> dict[str, Any] | None:
     points: list[dict[str, Any]] = []
     raw_points = obj.get("points")
     if isinstance(raw_points, list):
-        for p in raw_points[:POINT_MAX]:
+        for p in raw_points[:max_points]:
             text, at = "", None
             if isinstance(p, dict):
                 text = str(p.get("text") or "").strip()
@@ -286,7 +328,8 @@ def _sentences(text: str, limit: int = 4) -> list[str]:
     return out
 
 
-def _rule_summary(src: dict[str, Any], basis: str, row: Any) -> dict[str, Any]:
+def _rule_summary(src: dict[str, Any], basis: str, row: Any,
+                  max_points: int = POINT_MAX) -> dict[str, Any]:
     """模型不可用时的退路：按素材顺序摘原句，不编东西。"""
     lines = _timed_lines(src)
     official = _strip_html(str(src.get("official") or ""))
@@ -296,18 +339,18 @@ def _rule_summary(src: dict[str, Any], basis: str, row: Any) -> dict[str, Any]:
 
     points: list[dict[str, Any]] = []
     if lines:
-        step = max(1, len(lines) // POINT_MAX)
+        step = max(1, len(lines) // max(1, max_points))
         for i in range(0, len(lines), step):
             point: dict[str, Any] = {"text": lines[i]["text"][:140]}
             if lines[i]["t"] is not None:
                 point["t"] = lines[i]["t"]
             points.append(point)
-            if len(points) >= POINT_MAX:
+            if len(points) >= max_points:
                 break
         tldr = official or lines[0]["text"][:100]
     else:
         base = official or desc or text
-        for piece in _sentences(base):
+        for piece in _sentences(base, limit=max(2, min(max_points, 4))):
             points.append({"text": piece})
         tldr = official[:100] if official else (title[:100] or (points[0]["text"] if points else ""))
     return {"tldr": tldr, "points": points,
@@ -326,7 +369,8 @@ def _detail_payload(store: Any, item_id: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _source(store: Any, host: Any, row: dict[str, Any]) -> tuple[
+def _source(store: Any, host: Any, row: dict[str, Any],
+            material_max: int = MATERIAL_MAX) -> tuple[
         dict[str, Any], str, int, str, str, list[dict[str, Any]]]:
     """取素材：插件交的优先，插件没认领就退回详情正文。
 
@@ -367,7 +411,7 @@ def _source(store: Any, host: Any, row: dict[str, Any]) -> tuple[
         if body_len < 60:
             basis = "visual"
 
-    material = _material(src, basis, len(images))
+    material = _material(src, basis, len(images), max_chars=material_max)
     if not material.strip() and not images:
         raise RuntimeError("这条内容没有能读的正文。")
     return src, basis, duration, material, plugin_note, images
@@ -386,7 +430,7 @@ def _messages(prompt: str, material: str, images: list[dict[str, Any]]) -> list[
 
 def _payload(parsed: dict[str, Any], src: dict[str, Any], basis: str, duration: int,
              material_chars: int, engine: str, provider_name: str, model: str,
-             started: float, images: int = 0) -> dict[str, Any]:
+             started: float, images: int = 0, depth: str = DEPTH_DEFAULT) -> dict[str, Any]:
     """流式和非流式共用的收尾：章节从素材里取，其余原样带出。"""
     chapters = []
     raw_chapters = src.get("chapters")
@@ -396,6 +440,7 @@ def _payload(parsed: dict[str, Any], src: dict[str, Any], basis: str, duration: 
                 chapters.append({"t": int(float(c.get("t") or 0)), "title": str(c["title"])[:60]})
     return {
         "tldr": parsed.get("tldr") or "",
+        "depth": depth,
         "points": parsed.get("points") or [],
         "chapters": chapters,
         "caveat": parsed.get("caveat") or "",
@@ -412,10 +457,15 @@ def _payload(parsed: dict[str, Any], src: dict[str, Any], basis: str, duration: 
     }
 
 
-def build(store: Any, host: Any, row: dict[str, Any]) -> dict[str, Any]:
+def build(store: Any, host: Any, row: dict[str, Any],
+          depth: str = DEPTH_DEFAULT) -> dict[str, Any]:
     """给一条内容出总结。永不抛「模型挂了」——模型不行就退回摘原句。"""
     started = time.time()
-    src, basis, duration, material, plugin_note, images = _source(store, host, row)
+    depth = depth if depth in DEPTH_SPEC else DEPTH_DEFAULT
+    spec = depth_spec(depth)
+    src, basis, duration, material, plugin_note, images = _source(
+        store, host, row, material_max=spec["material"])
+    images = images[:spec["images"]]
 
     parsed: dict[str, Any] | None = None
     engine, provider_name, model = "rules", "", ""
@@ -423,9 +473,9 @@ def build(store: Any, host: Any, row: dict[str, Any]) -> dict[str, Any]:
     attempts = [images, []] if images else [[]]
     for index, batch in enumerate(attempts):
         try:
-            raw, provider = ai_mod.complete(_messages(SYSTEM_PROMPT, material, batch),
-                                            max_tokens=MAX_SUMMARY_TOKENS, temperature=0.25)
-            parsed = _parse(raw, duration)
+            raw, provider = ai_mod.complete(_messages(system_prompt(depth), material, batch),
+                                            max_tokens=spec["tokens"], temperature=0.25)
+            parsed = _parse(raw, duration, spec["points"][1])
             if parsed is None:
                 raise ValueError("模型没给出可用 JSON")
             engine, provider_name, model = "llm", provider["name"], provider["model"]
@@ -435,7 +485,7 @@ def build(store: Any, host: Any, row: dict[str, Any]) -> dict[str, Any]:
             # 带图那次被拒（有的端点还不认 image_url）：摘掉图再试一次，别直接掉到摘原句
             if index + 1 < len(attempts):
                 continue
-            parsed = _rule_summary(src, basis, row)
+            parsed = _rule_summary(src, basis, row, max_points=spec["points"][1])
             images_used = 0
 
     if not parsed.get("caveat"):
@@ -444,7 +494,7 @@ def build(store: Any, host: Any, row: dict[str, Any]) -> dict[str, Any]:
         parsed["caveat"] = plugin_note
 
     return _payload(parsed, src, basis, duration, len(material),
-                    engine, provider_name, model, started, images_used)
+                    engine, provider_name, model, started, images_used, depth)
 
 
 TLDR_LINE = re.compile(r"^\s*(?:tl;?dr|总览|一句话)\s*[:：]\s*(.+)$", re.I)
@@ -452,7 +502,7 @@ CAVEAT_LINE = re.compile(r"^\s*(?:注|注意|caveat|备注)\s*[:：]\s*(.+)$", r
 BULLET_LINE = re.compile(r"^\s*[-*·•]\s*(?:\[(\d{1,2}):(\d{2})\]\s*)?(.+?)\s*$")
 
 
-def parse_lines(raw: str, duration: int) -> dict[str, Any] | None:
+def parse_lines(raw: str, duration: int, max_points: int = POINT_MAX) -> dict[str, Any] | None:
     """解析行协议。模型偶尔不听话（分段加空行、要点用圆点），所以按行宽容处理。"""
     tldr = ""
     caveat = ""
@@ -473,7 +523,7 @@ def parse_lines(raw: str, duration: int) -> dict[str, Any] | None:
             continue
         found = BULLET_LINE.match(line)
         if found:
-            if len(points) >= POINT_MAX:
+            if len(points) >= max_points:
                 continue
             point: dict[str, Any] = {"text": found.group(3)[:160]}
             if found.group(1) is not None:
@@ -494,15 +544,20 @@ def parse_lines(raw: str, duration: int) -> dict[str, Any] | None:
     return {"tldr": tldr, "points": points, "caveat": caveat}
 
 
-def stream_build(store: Any, host: Any, row: dict[str, Any]) -> Any:
+def stream_build(store: Any, host: Any, row: dict[str, Any],
+                 depth: str = DEPTH_DEFAULT) -> Any:
     """流式总结：依次 yield meta → delta* → done（或 error）。
 
     落库的仍是和非流式同形的 dict，所以缓存、详情页、助手读总结这几条路径都不用改。
     """
     started = time.time()
-    src, basis, duration, material, plugin_note, images = _source(store, host, row)
+    depth = depth if depth in DEPTH_SPEC else DEPTH_DEFAULT
+    spec = depth_spec(depth)
+    src, basis, duration, material, plugin_note, images = _source(
+        store, host, row, material_max=spec["material"])
+    images = images[:spec["images"]]
 
-    yield {"type": "meta", "basis": basis, "basis_text": BASIS_TEXT[basis],
+    yield {"type": "meta", "basis": basis, "basis_text": BASIS_TEXT[basis], "depth": depth,
            "duration": duration, "source_chars": len(material), "images": len(images), "ms": 0}
 
     buf: list[str] = []
@@ -510,16 +565,16 @@ def stream_build(store: Any, host: Any, row: dict[str, Any]) -> Any:
     images_used = len(images)
     # 三档机会：带图 → 带图但预算翻倍（推理模型把 token 全花在思维链上时）→ 摘掉图纯文本。
     # 端点不认 image_url 会直接报错，那种情况由下面 except 里的「没吐字就换下一档」接手。
-    plans: list[tuple[list[dict[str, Any]], int]] = [(images, MAX_SUMMARY_TOKENS)]
+    plans: list[tuple[list[dict[str, Any]], int]] = [(images, spec["tokens"])]
     if images:
-        plans.append((images, MAX_SUMMARY_TOKENS * 2))
-        plans.append(([], MAX_SUMMARY_TOKENS))
+        plans.append((images, spec["tokens"] * 2))
+        plans.append(([], spec["tokens"]))
     for index, (batch, budget) in enumerate(plans):
         buf = []
         thinking = False
         try:
             for kind, piece, provider in ai_mod.stream_complete(
-                    _messages(STREAM_PROMPT, material, batch),
+                    _messages(stream_prompt(depth), material, batch),
                     max_tokens=budget, temperature=0.25):
                 provider_name, model = provider["name"], provider["model"]
                 if kind == "thinking":
@@ -535,39 +590,108 @@ def stream_build(store: Any, host: Any, row: dict[str, Any]) -> Any:
             # 流结束了却一个字正文都没有：换下一档再试
             if index + 1 < len(plans):
                 continue
-            fallback = _rule_summary(src, basis, row)
+            fallback = _rule_summary(src, basis, row, max_points=spec["points"][1])
             yield {"type": "done", "fallback": True,
                    "summary": _payload(fallback, src, basis, duration, len(material),
-                                       "rules", "", "", started)}
+                                       "rules", "", "", started, depth=depth)}
             return
         except Exception as exc:  # noqa: BLE001 - 模型中途挂掉，别把半截话丢了
             if index + 1 < len(plans) and not buf:
                 continue
             note = (str(exc) or exc.__class__.__name__)[:160]
-            partial = parse_lines("".join(buf), duration) if buf else None
+            partial = parse_lines("".join(buf), duration, max_points=spec["points"][1]) if buf else None
             if partial is not None:
                 partial["caveat"] = partial.get("caveat") or f"这次生成中途断了（{note}），上面是已经拿到的部分。"
                 yield {"type": "done",
                        "summary": _payload(partial, src, basis, duration, len(material),
                                            "llm", provider_name, model, started,
-                                           images_used if buf else 0)}
+                                           images_used if buf else 0, depth)}
                 return
-            fallback = _rule_summary(src, basis, row)
+            fallback = _rule_summary(src, basis, row, max_points=spec["points"][1])
             yield {"type": "done", "fallback": True,
                    "summary": _payload(fallback, src, basis, duration, len(material),
-                                       "rules", "", "", started)}
+                                       "rules", "", "", started, depth=depth)}
             return
 
-    parsed = parse_lines("".join(buf), duration)
+    parsed = parse_lines("".join(buf), duration, max_points=spec["points"][1])
     if parsed is None:
         # 模型没按格式吐字：退回摘原句，别给用户一个空白面板
         engine = "rules"
-        parsed = _rule_summary(src, basis, row)
+        parsed = _rule_summary(src, basis, row, max_points=spec["points"][1])
     if not parsed.get("caveat"):
         parsed["caveat"] = CAVEAT.get(basis, "")
     if plugin_note and not parsed.get("caveat"):
         parsed["caveat"] = plugin_note
     yield {"type": "done",
            "summary": _payload(parsed, src, basis, duration, len(material),
-                               engine, provider_name, model, started, images_used)}
+                               engine, provider_name, model, started, images_used, depth)}
+
+# ---------------------------------------------------------------- 站在这一条上的对话
+CHAT_PROMPT = """你在陪用户读一条他刚看完的内容。他可能追问细节、要你解释某句、或者想听你的判断。
+
+规则：
+- 只依据下面给你的素材和总结回答。素材里没有的，直接说「素材里没提到」，不要用常识补成事实。
+- 问「值不值得看」「怎么看」这类判断，可以给结论，但要指出依据（哪一段、哪个数字）。
+- 回答短：一般 2 到 5 句，用户要展开再展开。不用 Markdown 标题，不写「首先/其次/综上」这种套话。
+- 引用原文时用引号，数字照抄，不改写不四舍五入。"""
+
+CHAT_HISTORY_MAX = 6
+# 对话每轮都带图会很贵：只带前两张，够回答「图里写了什么」这类问题。
+CHAT_IMAGES_MAX = 2
+
+
+def chat_messages(store: Any, host: Any, row: dict[str, Any],
+                  summary: dict[str, Any] | None = None,
+                  history: list[dict[str, Any]] | None = None,
+                  question: str = "",
+                  depth: str = DEPTH_DEFAULT) -> list[dict[str, Any]]:
+    """把「素材 + 当前这篇总结 + 最近几轮对话」拼成一次对话请求。
+
+    素材和总结都放进去：只给素材，模型会把总结重讲一遍；只给总结，又答不了细节。
+    """
+    spec = depth_spec(depth)
+    src, basis, duration, material, plugin_note, images = _source(
+        store, host, row, material_max=spec["material"])
+
+    blocks = [f"这条内容（依据：{BASIS_TEXT[basis]}）：\n\n{material}"]
+    if isinstance(summary, dict) and str(summary.get("tldr") or "").strip():
+        lines = ["一句话：" + str(summary["tldr"]).strip()]
+        for point in (summary.get("points") or [])[:10]:
+            if not isinstance(point, dict) or not str(point.get("text") or "").strip():
+                continue
+            at = point.get("t")
+            stamp = f"[{_mmss(at)}] " if isinstance(at, (int, float)) and at >= 0 else ""
+            lines.append("- " + stamp + str(point["text"]).strip())
+        blocks.append("已经给用户的总结：\n" + "\n".join(lines))
+    if plugin_note:
+        blocks.append("插件备注：" + plugin_note)
+
+    intro = "\n\n".join(blocks)
+    picked = images[:CHAT_IMAGES_MAX]
+    if picked:
+        intro += "\n\n（附了这个条目的图。问图里的内容时直接看图回答，别再说看不到。）"
+        first: dict[str, Any] = {
+            "role": "user",
+            "content": [{"type": "text", "text": intro}, *_image_blocks(picked)],
+        }
+    else:
+        first = {"role": "user", "content": intro}
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": CHAT_PROMPT},
+        first,
+        # 收个尾：把素材当成已经交代过的背景，后面才是真正的问题
+        {"role": "assistant", "content": "看完了，问我吧。"},
+    ]
+    for turn in (history or [])[-CHAT_HISTORY_MAX:]:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or "")
+        text = str(turn.get("content") or "").strip()
+        if role not in ("user", "assistant") or not text:
+            continue
+        messages.append({"role": role, "content": text[:2000]})
+    messages.append({"role": "user", "content": question.strip()[:2000]})
+    return messages
+
 

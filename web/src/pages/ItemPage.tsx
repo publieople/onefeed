@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
-import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, Heart, MessageCircle, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
+import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, Heart, Loader2, MessageCircle, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -10,6 +11,7 @@ import {
   peekItem,
   removeFavorite,
   streamSummary,
+  SUMMARY_DEPTH_LABEL,
   type ItemResponse,
   type CommentItem,
   type CommentsResponse,
@@ -17,15 +19,20 @@ import {
   type DetailPayload,
   type DetailResponse,
   type FeedItem,
+  type SummaryDepth,
   type SummaryPoint,
+  type SummaryPayload,
   type SummaryResponse,
 } from "../api";
+import type { OutletCtx } from "../App";
 import { parseStreamText } from "../streamText";
 import { CommentBody } from "../components/CommentBody";
+import ItemChat from "../components/ItemChat";
 import { confirmDialog } from "../components/ui/Confirm";
 import { useAgentActions } from "../agent/AgentProvider";
 import { useRailSlot } from "../layout/RailSlot";
 import { createGhost } from "../motion/ghost";
+import { DUR, EASE } from "../motion/tokens";
 import { runNav } from "../motion/nav";
 import { useModalScope } from "../motion/useModalScope";
 import { useScrollLock } from "../motion/useScrollLock";
@@ -400,6 +407,8 @@ interface SummaryPanelProps {
   onJump: (sec: number) => void;
   onRetry: () => void;
   url: string;
+  /** 正在按哪一档重写：旧内容先留在原地，顶部盖一条进度 */
+  busyDepth: SummaryDepth | "";
 }
 
 interface SummaryBodyProps {
@@ -464,12 +473,23 @@ function SummaryPanel({
   onJump,
   onRetry,
   url,
+  busyDepth,
 }: SummaryPanelProps) {
   const live = useMemo(() => parseStreamText(streamRaw), [streamRaw]);
   const s = data?.ok ? data.summary : undefined;
   const hasWords = Boolean(live.tldr || live.points.length);
+  /**
+   * 换档重写时旧的那份继续留在屏幕上：先清空再等八秒，版面会塌一下，比慢更难受。
+   * 新字一到就顶上去，所以这里先取流式，没有再退回上一份 payload。
+   */
+  const body = hasWords
+    ? { tldr: live.tldr, points: live.points, caveat: live.caveat }
+    : s
+      ? { tldr: s.tldr, points: s.points ?? [], caveat: s.caveat ?? "" }
+      : null;
+  const rewriting = Boolean(s) && streaming && !hasWords;
 
-  if (!s && streaming) {
+  if (!body && streaming) {
     return (
       <div className="fade-in mt-5 min-h-[164px] rounded-xl border border-line p-5">
         <div className="mb-3 flex items-center gap-2 text-[12px] text-muted">
@@ -500,7 +520,7 @@ function SummaryPanel({
     );
   }
 
-  if (!s) {
+  if (!body) {
     if (loading) {
       return (
         <div className="mt-5 rounded-xl border border-line p-5">
@@ -530,19 +550,48 @@ function SummaryPanel({
     );
   }
 
-  const basis = BASIS_LABEL[s.basis] || s.basis_text || "素材";
-  const meta = [s.provider, s.model, s.ms ? (s.ms / 1000).toFixed(1) + "s" : ""].filter(Boolean).join(" · ");
+  // body 可能来自流式半成品，这时还没有 payload：页脚一律按「有 payload 才渲染」来取值
+  const basis = s ? BASIS_LABEL[s.basis] || s.basis_text || "素材" : "";
+  const meta = s ? [s.provider, s.model, s.ms ? (s.ms / 1000).toFixed(1) + "s" : ""].filter(Boolean).join(" · ") : "";
 
   return (
     <div className="fade-in mt-5 rounded-xl border border-line p-5">
-      <SummaryBody
-        tldr={s.tldr}
-        points={s.points ?? []}
-        caveat={s.caveat ?? ""}
-        canSeek={canSeek}
-        onJump={onJump}
-      />
+      {rewriting ? (
+        <div
+          role="status"
+          className="mb-3 flex items-center gap-2 rounded-lg bg-wash px-2.5 py-1.5 text-[12px] text-muted"
+        >
+          <Loader2 size={12} className="animate-spin" />
+          <span>
+            正在按「{SUMMARY_DEPTH_LABEL[(busyDepth || (s?.depth as SummaryDepth)) as SummaryDepth] ?? "这档"}」重写
+            {phase === "thinking" ? "，先通读素材…" : "…"}
+          </span>
+          {seconds >= 1 ? <span className="tabular-nums text-fade">{seconds.toFixed(0)}s</span> : null}
+        </div>
+      ) : null}
 
+      {error && body ? (
+        <p className="mb-3 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] leading-relaxed text-danger">
+          换档没成功：{error}，这里还是上一份。
+          <button onClick={onRetry} className="ml-2 underline underline-offset-2">
+            再试一次
+          </button>
+        </p>
+      ) : null}
+
+      <div className={rewriting ? "opacity-55 transition-opacity duration-200" : "transition-opacity duration-200"}>
+        <SummaryBody
+          tldr={body.tldr}
+          points={body.points}
+          caveat={body.caveat}
+          canSeek={canSeek}
+          onJump={onJump}
+          live={hasWords && streaming}
+        />
+      </div>
+
+      {s ? (
+        <>
       {s.note ? <p className="mt-1.5 text-[12px] leading-relaxed text-fade">{s.note}</p> : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-[11px] text-fade">
@@ -559,6 +608,63 @@ function SummaryPanel({
           去原站
         </a>
       </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+const DEPTH_ORDER: SummaryDepth[] = ["brief", "balanced", "detailed"];
+
+function asDepth(value: unknown): SummaryDepth | "" {
+  return value === "brief" || value === "balanced" || value === "detailed" ? value : "";
+}
+
+/** 三档粒度。选中态是一块滑过去的底，切换本身就是反馈；正在重写的那档带转圈。 */
+function DepthSwitch({
+  value,
+  busy,
+  onChange,
+}: {
+  value: SummaryDepth;
+  busy: SummaryDepth | "";
+  onChange: (depth: SummaryDepth) => void;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <div
+      role="group"
+      aria-label="总结粒度"
+      className="inline-flex items-center rounded-full border border-line p-0.5 text-[12px]"
+    >
+      {DEPTH_ORDER.map((depth) => {
+        const on = value === depth;
+        return (
+          <button
+            key={depth}
+            type="button"
+            onClick={() => onChange(depth)}
+            aria-pressed={on}
+            title={depth === "brief" ? "只留骨架" : depth === "detailed" ? "写全，慢一点" : "默认"}
+            className={
+              "relative rounded-full px-2.5 py-1 transition-colors duration-150 " +
+              (on ? "text-ink" : "text-muted hover:text-ink")
+            }
+          >
+            {on ? (
+              <motion.span
+                layoutId="summary-depth-pill"
+                className="absolute inset-0 rounded-full bg-wash ring-1 ring-inset ring-line"
+                transition={reduce ? { duration: 0 } : { duration: DUR.base, ease: EASE }}
+              />
+            ) : null}
+            <span className="relative flex items-center gap-1">
+              {busy === depth ? <Loader2 size={10} className="animate-spin" /> : null}
+              {SUMMARY_DEPTH_LABEL[depth]}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -568,7 +674,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return <div className="min-h-[70vh] w-full">{children}</div>;
 }
 
-export default function ItemPage() {
+export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -615,6 +721,12 @@ export default function ItemPage() {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryError, setSummaryError] = useState("");
+  /** 用户在这条上手动选的档位；空 = 跟着设置页的默认走 */
+  const [depthChoice, setDepthChoice] = useState<SummaryDepth | "">("");
+  /** 正在按哪一档重写（换档到首字之间） */
+  const [busyDepth, setBusyDepth] = useState<SummaryDepth | "">("");
+  /** 这条上刚看过的各档结果：切回去直接拿出来，不用再等一遍模型 */
+  const depthCache = useRef<Partial<Record<SummaryDepth, SummaryPayload>>>({});
   /** 点了总结里的时间戳之后，播放器要从这里开始 */
   const [seek, setSeek] = useState<number | null>(null);
   /**
@@ -713,9 +825,11 @@ export default function ItemPage() {
     setStreaming(false);
   }, []);
 
-  const loadSummary = useCallback((targetId: string, refresh: boolean) => {
+  const loadSummary = useCallback(
+    (targetId: string, refresh: boolean, level: SummaryDepth | "" = "", keepOld = false) => {
     summaryStop.current?.();
-    setSummary(null);
+    // 换档重写时保留旧内容（keepOld），版面不塌；换条目必须清空，否则会短暂显示上一条的总结
+    if (!keepOld) setSummary(null);
     setSummaryError("");
     setSummaryLoading(true);
     setStreamRaw("");
@@ -741,6 +855,10 @@ export default function ItemPage() {
       onDone: (payload) => {
       // 右栏「AI 总结」按这个广播刷新；总结是新生成的还是缓存命中都算一次更新
       window.dispatchEvent(new CustomEvent("onefeed:summary", { detail: { id: targetId } }));
+        // 先记进缓存：切档来回时能立刻拿出来，不用再等模型
+        const used = asDepth(payload.depth) || level;
+        if (used) depthCache.current[used] = payload;
+        setBusyDepth("");
         if (!summaryAlive.current) return;
         pendingSummary.current = { ok: true, summary: payload };
         setSummaryLoading(false);
@@ -748,16 +866,23 @@ export default function ItemPage() {
         if (shownCount.current >= rawRef.current.length) promoteSummary();
       },
       onError: (message) => {
+        setBusyDepth("");
         if (!summaryAlive.current) return;
         setSummaryError(message);
         setSummaryLoading(false);
         setStreaming(false);
       },
-    });
-  }, []);
+    }, level);
+    },
+    [],
+  );
 
   useEffect(() => {
     summaryAlive.current = true;
+    // 换条目等于换一份东西：缓存、手选档位、重写状态都得归零
+    depthCache.current = {};
+    setDepthChoice("");
+    setBusyDepth("");
     if (id) loadSummary(id, false);
     return () => {
       summaryAlive.current = false;
@@ -769,8 +894,49 @@ export default function ItemPage() {
   const retrySummary = useCallback(() => {
     if (!id) return;
     summaryAlive.current = true;
-    loadSummary(id, true);
-  }, [id, loadSummary]);
+    loadSummary(id, true, depthChoice);
+  }, [id, loadSummary, depthChoice]);
+
+  /** 当前生效的档位：手选 > 后端实际用的 > 设置页默认 > 平衡 */
+  const effectiveDepth: SummaryDepth =
+    depthChoice ||
+    asDepth(summary?.summary?.depth) ||
+    asDepth(ctx?.settings?.settings?.summary_depth) ||
+    "balanced";
+
+  /**
+   * 换档。已经看过的档直接从本地拿（顺带一段淡入），没看过的才重新生成；
+   * 重新生成期间旧内容不撤，顶部盖一条进度，版面不会先塌一下再长回来。
+   */
+  const switchDepth = useCallback(
+    (next: SummaryDepth) => {
+      if (!id || next === effectiveDepth) return;
+      setDepthChoice(next);
+      const cached = depthCache.current[next];
+      if (cached) {
+        summaryStop.current?.();
+        summaryStop.current = null;
+        pendingSummary.current = null;
+        if (typeTimer.current !== null) {
+          window.clearInterval(typeTimer.current);
+          typeTimer.current = null;
+        }
+        rawRef.current = "";
+        shownCount.current = 0;
+        setStreamRaw("");
+        setShownRaw("");
+        setSummary({ ok: true, summary: cached, from_cache: true });
+        setSummaryLoading(false);
+        setStreaming(false);
+        setSummaryError("");
+        setBusyDepth("");
+        return;
+      }
+      setBusyDepth(next);
+      loadSummary(id, false, next, true);
+    },
+    [id, effectiveDepth, loadSummary],
+  );
 
   /* delta 一次到达就是几十上百字，直接渲染等于「等几秒然后整篇弹出」。
      按字数匀速铺开：至少 56 字/秒，积压超过 1.2 秒的量就自动提速追平，
@@ -1061,23 +1227,30 @@ export default function ItemPage() {
         </div>
       ) : null}
 
-      <div className="mt-5 inline-flex items-center rounded-full border border-line p-0.5 text-[12px]">
-        {([
-          ["summary", "AI 总结"],
-          ["source", "原文"],
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            aria-pressed={tab === key}
-            className={
-              "rounded-full px-3 py-1 transition-colors duration-150 " +
-              (tab === key ? "bg-solid text-solid-fg" : "text-muted hover:text-ink")
-            }
-          >
-            {label}
-          </button>
-        ))}
+      <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="inline-flex items-center rounded-full border border-line p-0.5 text-[12px]">
+          {([
+            ["summary", "AI 总结"],
+            ["source", "原文"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              aria-pressed={tab === key}
+              className={
+                "rounded-full px-3 py-1 transition-colors duration-150 " +
+                (tab === key ? "bg-solid text-solid-fg" : "text-muted hover:text-ink")
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* 粒度只影响 AI 总结，跟着 tab 一起摆在顺手的位置；换档就重写，不用回设置页 */}
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-[11px] text-fade">总结粒度</span>
+          <DepthSwitch value={effectiveDepth} busy={busyDepth} onChange={switchDepth} />
+        </div>
       </div>
 
       {tab === "summary" ? (
@@ -1097,7 +1270,10 @@ export default function ItemPage() {
           }}
           onRetry={retrySummary}
           url={item.url}
+          busyDepth={busyDepth}
         />
+        {/* 就这一条继续问：挂在总结下面，和顶部那个全库 Agent 分开 */}
+        <ItemChat itemId={id} depth={effectiveDepth} summary={summary?.ok ? (summary.summary ?? null) : null} />
         </div>
       ) : null}
 
