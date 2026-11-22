@@ -121,6 +121,8 @@ def test_platform_counts(snap: dict) -> None:
     total = sum(int(row.get("count") or 0) for row in rows)
     check(rows, "health.platforms 不能空")
     check(total == len(snap["feed"]["items"]), f"分平台计数之和 {total} 与条目数不符")
+    # 插件数要和有数据的平台对齐：CI 干净环境没有插件目录，不能写成导出机的插件数
+    check(snap["health"].get("plugins") == len(rows), f"health.plugins {snap['health'].get('plugins')} 应等于平台数 {len(rows)}")
 
 
 def main() -> int:

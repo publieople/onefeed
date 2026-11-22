@@ -148,7 +148,10 @@ def build(out: Path) -> dict[str, Any]:
         client = TestClient(create_app(store))
 
         feed_items, count = collect_feed(client)
+        platforms = sorted({str(i.get("platform") or "") for i in feed_items if i.get("platform")})
         health = client.get("/api/health").json()
+        # 插件数按快照里真正有数据的平台算：CI 是干净环境，导出机的插件目录不能带进来
+        health["plugins"] = len(platforms)
         summary = client.get("/api/summary").json()
         settings = client.get("/api/settings").json()
 
@@ -173,7 +176,7 @@ def build(out: Path) -> dict[str, Any]:
                 "items": len(feed_items),
                 "newest_published_at": newest,
                 "fixtures_saved_at": saved,
-                "platforms": sorted({str(i.get("platform") or "") for i in feed_items}),
+                "platforms": platforms,
             },
             "health": scrub(health),
             "summary": scrub(summary),
