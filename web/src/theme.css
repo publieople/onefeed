@@ -92,6 +92,112 @@ button:active:not(:disabled) {
   animation: rise 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* 刷新演出：清场 → 逐个登场（docs/refresh-ux-2026-11-22.md §5）。
+   只动 opacity/transform，不动高度：30 张卡同时收场也不触发布局。
+   收场用 transition（相位机加 data-out），登场用 keyframes（挂上就播，
+   掉帧也不会卡在半路）。全程不用 exit 动画：隐藏页里 rAF 被节流，
+   退出动画可能永远收不了尾，元素会卡在 DOM 里。 */
+.feed-card {
+  transition:
+    opacity 0.2s cubic-bezier(0.4, 0, 1, 1),
+    transform 0.2s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.feed-card[data-out="1"] {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
+  /* --i 是逆序延迟（排在后面的先走），由组件按 REVEAL.cap 算 */
+  transition-delay: calc(var(--i, 0) * 18ms);
+  pointer-events: none;
+  will-change: opacity, transform;
+}
+
+@keyframes card-pop {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 老卡整组淡入：不逐个、不计入阶梯 */
+@keyframes card-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.feed-card[data-in="new"] {
+  animation: card-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--j, 0) * 45ms);
+  will-change: opacity, transform;
+}
+
+.feed-card[data-in="carry"] {
+  animation: card-fade 0.16s ease-out both;
+}
+
+/* 新卡标记：左缘一条强调色竖线 + 右上角一枚「新」胶囊。
+   纯装饰（aria-hidden），2.4s 后一起淡出；不改变任何布局。 */
+.feed-card[data-new="1"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 2px;
+  background: rgb(var(--c-accent));
+  animation: fresh-out 0.24s ease 2.4s forwards;
+}
+
+.card-fresh {
+  position: absolute;
+  top: -9px;
+  right: 12px;
+  z-index: 2;
+  border-radius: 999px;
+  background: rgb(var(--c-accent));
+  color: rgb(var(--c-card));
+  padding: 2px 7px;
+  font-size: 10px;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  animation: fresh-out 0.24s ease 2.4s forwards;
+}
+
+@keyframes fresh-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* 减少动态效果：收场直接消失、登场直接出现，标记不闪 */
+@media (prefers-reduced-motion: reduce) {
+  .feed-card,
+  .feed-card[data-out="1"] {
+    transition: none;
+  }
+
+  .feed-card[data-in] {
+    animation: none;
+  }
+
+  .feed-card[data-new="1"]::before,
+  .card-fresh {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }

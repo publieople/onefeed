@@ -27,6 +27,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 VERBOSE = "--verbose" in sys.argv
+# 这个文件是「自带 main() 的独立脚本」（$ uv run python tests/test_demo_snapshot.py），
+# test_* 函数的 snap/text 由 main() 现算现传，没有 pytest fixture；留给 pytest 收集只会 4 个 error。
+__test__ = False
 CHECKS = 0
 
 _spec = importlib.util.spec_from_file_location("export_demo", ROOT / "scripts" / "export_demo.py")

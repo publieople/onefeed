@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { Bookmark, Loader2, Star } from "lucide-react";
+import { ArrowUp, Bookmark, Loader2, Star } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { prefetchDetail, useFeed, type FeedItem } from "../api";
 import Card from "../components/Card";
+import RefreshBar from "../components/RefreshBar";
 import Chips from "../components/Chips";
 import ColsPicker from "../components/ui/ColsPicker";
 import { useGridCols, type ColsChoice } from "../layout/useGridCols";
 import { itemPageLoaded, loadItemPage } from "../pages/itemPageLoader";
 import { runNav } from "../motion/nav";
-import { DUR, EASE } from "../motion/tokens";
+import { DUR, EASE, REVEAL, revealCollapseMs, revealPopMs } from "../motion/tokens";
 import { useHotkeys, pushScope, popScope } from "../motion/useHotkeys";
 
 interface Props {
@@ -171,6 +173,204 @@ export default function FeedPage({ ctx }: Props) {
     return () => window.clearTimeout(timer);
   }, [queryKey, feed.items.length]);
   const layoutOn = animateLayout && layoutSettled;
+
+  // ---------------------------------------------------------------- 刷新演出
+  /**
+   * 清场 → 逐个登场。相位只靠 setTimeout 推进，不挂 onAnimationComplete：
+   * 隐藏页 / 掉帧时动画完成事件不一定来，卡在半路就等于 aria-busy 永远为 true。
+   */
+  const [phase, setPhase] = useState<"idle" | "collapsing" | "waiting" | "revealing">("idle");
+  const [oldItems, setOldItems] = useState<FeedItem[] | null>(null);
+  const [freshIds, setFreshIds] = useState<Set<string> | null>(null);
+  const [lockHeight, setLockHeight] = useState<number | null>(null);
+  const [pill, setPill] = useState<number | null>(null);
+  // 这一轮已经演过了：状态条据此把「看新内容」换成「刚放进来的 N 条」。
+  // 不能用 inShow || freshIds 判断 —— 演出结束 2.6s 后它们都会归零，
+  // 结果就是按钮又变回「看新内容」，点一下把同一批再演一遍。
+  const [played, setPlayed] = useState(false);
+  const playedSeq = useRef(0);
+  const oldIds = useRef<Set<string>>(new Set());
+  const captured = useRef<FeedItem[] | null>(null);
+  const animatedIds = useRef<Set<string>>(new Set());
+  const feedRef = useRef(feed);
+  feedRef.current = feed;
+  const freshTimer = useRef<number | null>(null);
+  const lastQueryAt = useRef(0);
+  // 刷新序号一变就先记下「这一屏原来有哪些」，之后列表换成新数据时才有得比。
+  // 等到数据回来再记就晚了：那时新旧已经在同一个数组里，谁也分不出来。
+  const preRefreshIds = useRef<Set<string>>(new Set());
+  const preRefreshItems = useRef<FeedItem[]>([]);
+
+  // 「这一轮 query 没变」的判据：换筛选的那一刻记时间。演出一看它就知道用户
+  // 是不是刚换过条件 —— 换了就别演，否则收场会跟换筛选的 layout 补间抢同一批卡片。
+  useEffect(() => {
+    lastQueryAt.current = Date.now();
+  }, [queryKey]);
+
+  const settle = useCallback(() => {
+    setPhase("idle");
+    setOldItems(null);
+    setLockHeight(null);
+  }, []);
+
+  const reveal = useCallback(() => {
+    const list = feedRef.current.items;
+    const fresh = new Set(list.filter((item) => !oldIds.current.has(item.id)).map((item) => item.id));
+    list.forEach((item) => animatedIds.current.add(item.id));
+    setFreshIds(fresh);
+    setPhase("revealing");
+    setPlayed(true);
+    if (freshTimer.current) window.clearTimeout(freshTimer.current);
+    // 「新」标记由 CSS 在 2.4s 淡出，这里到点只把节点摘掉
+    freshTimer.current = window.setTimeout(() => setFreshIds(null), 2600);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (freshTimer.current) window.clearTimeout(freshTimer.current);
+    },
+    [],
+  );
+
+  const showNew = useCallback(() => {
+    if (feedRef.current.loading) return;
+    window.scrollTo({ top: 0, behavior: "auto" });
+    setPill(null);
+    reveal();
+  }, [reveal]);
+
+  // 序号一落地就冻结「旧的一屏」。此刻列表还是刷新前的那批（重新取数要等网络），
+  // 晚一步记就会把新旧混在一起。
+  useEffect(() => {
+    if (ctx.refreshSeq === playedSeq.current) return;
+    preRefreshIds.current = new Set(feedRef.current.items.map((item) => item.id));
+    preRefreshItems.current = feedRef.current.items.slice();
+  }, [ctx.refreshSeq]);
+
+  // 开演判定。ctx.refreshSeq 只有「刷新真的结束且本轮有新增」才变，
+  // reloadKey 还会被换筛选、收藏、bump 改动，拿它当信号会把换筛选也演一遍。
+  useEffect(() => {
+    if (ctx.refreshSeq === playedSeq.current) return;
+    if (feed.loading || feed.items.length === 0) return;
+    if (phase !== "idle") return;
+    // 列表必须确实是这一轮刷新取回来的：序号变了但数据还在路上时开演，
+    // 收起的是旧卡、登场时却找不到任何新条目，演出会变成「全收起来再全淡回来」。
+    if (feed.loadedKey !== ctx.reloadKey) return;
+    playedSeq.current = ctx.refreshSeq;
+    setPlayed(false);
+
+    const total = Number(ctx.progress?.new_total ?? 0);
+    if (total <= 0) return;
+    // 条件 5：关掉动效的人、以及窄屏（一列卡片收放更像卡了）
+    if (reduceMotion) return;
+    if (window.matchMedia("(max-width: 639px)").matches) return;
+    // 条件 6：后台标签页里播完，切回来只剩结果，用户什么都没看见
+    if (document.visibilityState !== "visible") return;
+    // 条件 3：刚换过筛选就不演
+    if (Date.now() - lastQueryAt.current < 1200) return;
+
+    oldIds.current = preRefreshIds.current;
+    const freshNow = feed.items.filter((item) => !oldIds.current.has(item.id));
+    // 本轮新增在首屏里一条都没露脸（比如都排到第二屏去了）：没有可登场的东西
+    if (freshNow.length === 0) return;
+    captured.current = feed.items;
+    feed.items.forEach((item) => animatedIds.current.add(item.id));
+
+    const top = grid.ref.current?.getBoundingClientRect().top ?? 0;
+    const box = grid.ref.current?.offsetHeight ?? 0;
+
+    if (freshNow.length < REVEAL.min) {
+      // 轻量档：1–2 条不值得清场，就地弹一下
+      setLockHeight(null);
+      setOldItems(null);
+      reveal();
+      return;
+    }
+    if (top < -window.innerHeight * 0.6) {
+      // 条件 2：人在列表深处。当着他的面拆掉整屏，回来会发现全变了 → 先给胶囊
+      setPill(total);
+      return;
+    }
+    // 锁高：收场时总高度会缩，页面下方被往上拽；缩到比视口还短时浏览器还会夹一次 scrollY
+    setLockHeight(box);
+    setPill(null);
+    // 收起的是「刷新前那一屏」：新卡这时候还没登场，不该跟着一起收
+    setOldItems(preRefreshItems.current.length ? preRefreshItems.current : feed.items);
+    setPhase("collapsing");
+    // 焦点别掉到 body：此刻焦点若在这批卡片里，先交给网格（section 带 tabIndex=-1）
+    if (grid.ref.current && grid.ref.current.contains(document.activeElement)) {
+      grid.ref.current.focus({ preventScroll: true });
+    }
+  }, [ctx.refreshSeq, ctx.progress?.new_total, ctx.reloadKey, feed.loading, feed.loadedKey, feed.items, phase, reduceMotion, grid.ref, reveal]);
+
+  useEffect(() => {
+    if (phase === "idle" || phase === "waiting") return;
+    const count = phase === "collapsing" ? oldItems?.length ?? 0 : feed.items.length;
+    const ms =
+      phase === "collapsing"
+        ? revealCollapseMs(count)
+        : phase === "revealing"
+          ? revealPopMs(count)
+          : REVEAL.base;
+    const step = window.setTimeout(() => {
+      if (phase === "collapsing") {
+        // 数据都到齐了（开演前就校验过 loadedKey），这里只剩「等到点」；
+        // 万一中途又触发了取数，等一拍再登场，别让旧卡先淡回来
+        if (feedRef.current.loading) setPhase("waiting");
+        else reveal();
+        return;
+      }
+      settle();
+    }, ms);
+    // 兜底：动画帧被节流、或者某个 keyframes 没跑，也不能永久 aria-busy
+    const guard = window.setTimeout(settle, ms + 400);
+    return () => {
+      window.clearTimeout(step);
+      window.clearTimeout(guard);
+    };
+  }, [phase, oldItems, feed.items, reveal, settle]);
+
+  // 收起完了数据还没回来：每 120ms 看一眼，最多等 1.8s 就按新数据直接落地
+  useEffect(() => {
+    if (phase !== "waiting") return;
+    const start = Date.now();
+    const timer = window.setInterval(() => {
+      const current = feedRef.current;
+      if (!current.loading && current.items !== captured.current) {
+        window.clearInterval(timer);
+        reveal();
+        return;
+      }
+      if (Date.now() - start > 1800) {
+        window.clearInterval(timer);
+        settle();
+      }
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [phase, reveal, settle]);
+
+  // 演出期间不加滚动锁：用户一动就算结算，别把人按在半空中
+  useEffect(() => {
+    if (phase === "idle") return;
+    window.addEventListener("wheel", settle, { passive: true });
+    window.addEventListener("touchmove", settle, { passive: true });
+    window.addEventListener("keydown", settle);
+    return () => {
+      window.removeEventListener("wheel", settle);
+      window.removeEventListener("touchmove", settle);
+      window.removeEventListener("keydown", settle);
+    };
+  }, [phase, settle]);
+
+  // 胶囊是保底入口，没人点就自己退场
+  useEffect(() => {
+    if (pill === null) return;
+    const timer = window.setTimeout(() => setPill(null), 12000);
+    return () => window.clearTimeout(timer);
+  }, [pill]);
+
+  const inShow = phase !== "idle";
+  const shownItems = phase === "collapsing" && oldItems ? oldItems : feed.items;
 
   // 列数一变，文档高度跟着变：浏览器只会把视口钉在原来的滚动偏移上，
   // 正在看的那张卡就被甩出屏幕了。换列前记下「第一张还在视野里的卡」在文档里的位置，
@@ -414,6 +614,30 @@ export default function FeedPage({ ctx }: Props) {
         />
       </section>
 
+      {/* 进度和结果都在这一行里说（进行中 → 结果，高度不变）。
+          以前只有顶栏按钮转圈 + 2px 进度条，信息流这边完全没反应。 */}
+      <RefreshBar
+        progress={ctx.progress}
+        played={played}
+        onRetry={ctx.refreshPlatforms}
+        onNew={showNew}
+      />
+
+      {/* 人在列表深处时不拆屏：先给一个能点的落点，点了回顶再演 */}
+      {pill !== null ? (
+        <div className="fixed left-1/2 top-[84px] z-30 -translate-x-1/2">
+          <button
+            type="button"
+            onClick={showNew}
+            disabled={feed.loading}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-ink px-3.5 text-[12px] text-paper shadow-card transition hover:opacity-90 disabled:opacity-60"
+          >
+            <ArrowUp size={12} />
+            {feed.loading ? "正在取新内容…" : "有 " + pill + " 条新内容"}
+          </button>
+        </div>
+      ) : null}
+
       {/* 换筛选后要立刻有动静：之前这一整屏到新数据回来之前一动不动，
           体感就是「点了没反应」，实测首帧要等 1 秒。 */}
       <p className="mt-4 min-h-[20px] text-[13px] leading-relaxed text-muted" aria-live="polite">
@@ -444,21 +668,36 @@ export default function FeedPage({ ctx }: Props) {
       <LayoutGroup id="feed">
       <section
         ref={grid.ref}
-        aria-busy={feed.loading}
-        style={{ gridTemplateColumns: "repeat(" + grid.cols + ", minmax(0, 1fr))" }}
+        aria-busy={feed.loading || inShow}
+        tabIndex={-1}
+        style={{
+          gridTemplateColumns: "repeat(" + grid.cols + ", minmax(0, 1fr))",
+          // 收场时总高度会缩：锁住外层高度，页面下方才不被往上拽
+          minHeight: lockHeight ? lockHeight + "px" : undefined,
+        }}
         className={
-          "mt-5 grid items-stretch gap-x-5 gap-y-5 transition-opacity duration-150 " +
-          (feed.loading && feed.items.length > 0 ? "opacity-55" : "opacity-100")
+          "mt-5 grid items-stretch gap-x-5 gap-y-5 transition-opacity duration-150 outline-none " +
+          (feed.loading && feed.items.length > 0 && !inShow ? "opacity-55" : "opacity-100")
         }
       >
-        {feed.items.map((item, index) => {
+        {shownItems.map((item, index) => {
           // T5：换筛选 / 排序时让留下来的卡片滑到新位置。项数一多，逐张滑会像在拖地，
           // 所以只在 12 张以内开（正好是一屏的量），超过就直接换 —— 连 motion 节点都不建，
           // 免得 30 张卡各自挂一套布局测量。
+          const isNew = Boolean(freshIds?.has(item.id));
+          // waiting 也要算「收起态」：这时把 data-out 摘掉，刚收下去的旧卡会当场淡回来
+          const out = phase === "collapsing" || phase === "waiting";
+          const showing = phase === "revealing";
+          // 逆序收：越靠后的卡越先走；cap 之后同一拍，别让 30 张排成 540ms 的长队
+          const iVar = Math.max(0, REVEAL.cap - 1 - Math.min(index, REVEAL.cap - 1));
+          const jVar = Math.min(index, REVEAL.cap);
+          // 登场过的卡不再挂 .rise：不然演出结束那一刻、或者触底加载时会再淡一次
+          const rise = !inShow && !isNew && !animatedIds.current.has(item.id) ? "rise" : "";
           const card = (
             <Card
               item={item}
               onOpen={openItem}
+              reveal={isNew ? "new" : null}
               vtNames={
                 item.id === backId && !backFromAgent ? { media: "of-media", title: "of-title" } : undefined
               }
@@ -467,17 +706,27 @@ export default function FeedPage({ ctx }: Props) {
           // 进场动画（.rise 用 animation-fill-mode: both，会永久压住 transform）
           // 必须挂在内层：挂在外层的话，FLIP 写进去的位移会被 CSS 动画覆盖成 0，
           // 换列时就只剩卡片瞬间换位、没有流动感。
-          const delay = { animationDelay: Math.min(index, 11) * 22 + "ms" };
+          const style = {
+            "--i": iVar,
+            "--j": jVar,
+            animationDelay: rise ? Math.min(index, 11) * 22 + "ms" : undefined,
+          } as CSSProperties;
           return (
             <motion.div
               key={item.id}
               data-vt-item={item.id}
-              layout={layoutOn ? "position" : false}
+              layout={layoutOn && !inShow ? "position" : false}
               layoutDependency={grid.cols}
               transition={{ duration: DUR.base, ease: EASE }}
               className="h-full"
             >
-              <div className="rise h-full" style={delay}>
+              <div
+                className={"feed-card relative h-full " + rise}
+                data-out={out ? "1" : undefined}
+                data-in={showing ? (isNew ? "new" : "carry") : undefined}
+                data-new={isNew ? "1" : undefined}
+                style={style}
+              >
                 {card}
               </div>
             </motion.div>

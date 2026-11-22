@@ -17,6 +17,22 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
   const total = progress?.total ?? 0;
   const pct = running && total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
   const count = health?.items ?? 0;
+  // 正在抓哪个平台、抓完了几个：只转圈看不出「它还在动」还是「卡住了」
+  const runningRow = Object.entries(progress?.plugins ?? {}).find(([, p]) => p.status === "running");
+  const runningLabel = runningRow ? runningRow[1].label || runningRow[0] : "";
+  const refreshTitle = running
+    ? (runningLabel ? "正在抓 " + runningLabel + "，" : "正在抓取，") + "已完成 " + done + "/" + total
+    : "刷新全部平台";
+
+  // 运行中不再把按钮禁用掉：点了没反应比转圈更糟。这时点它把人送到进度那一行
+  const clickRefresh = () => {
+    if (!running) {
+      onRefresh();
+      return;
+    }
+    const bar = document.querySelector("[data-refresh-bar]");
+    if (bar) bar.scrollIntoView({ block: "center", behavior: "smooth" });
+  };
   const [theme, setTheme] = useState<Theme>(() => currentTheme());
 
   const flipTheme = () => {
@@ -64,18 +80,18 @@ export default function TopBar({ health, progress, onRefresh }: Props) {
           <span
             aria-live="polite"
             className={
-              "hidden w-10 text-right text-[11px] tabular-nums text-fade transition-opacity duration-200 md:inline-block " +
+              // 窄屏也留着：手机上只有一个转圈图标，等于没说进度
+              "w-11 shrink-0 text-right text-[12px] tabular-nums text-fade transition-opacity duration-200 " +
               (running ? "opacity-100" : "opacity-0")
             }
           >
             {done}/{total}
           </span>
           <button
-            onClick={() => onRefresh()}
-            disabled={running}
-            title="刷新全部平台"
-            aria-label="刷新全部平台"
-            className="flex hit-44 h-9 w-9 items-center justify-center rounded-full text-muted transition hover:bg-wash disabled:opacity-40"
+            onClick={clickRefresh}
+            title={refreshTitle}
+            aria-label={refreshTitle}
+            className="flex hit-44 h-9 w-9 items-center justify-center rounded-full text-muted transition hover:bg-wash"
           >
             <RefreshCw size={17} className={running ? "animate-spin" : ""} />
           </button>

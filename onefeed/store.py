@@ -398,6 +398,24 @@ class Store:
         self.recompute_engage()
         return cur.rowcount if cur.rowcount >= 0 else len(rows)
 
+    def item_ids(self, ids: Iterable[str]) -> set[str]:
+        """这批 id 里哪些已经入库。
+
+        upsert 的 rowcount 分不出「新插入」和「只是更新了统计数」，而结果文案要说
+        「这一轮新增 N 条」；所以入库前先问一次。分块查，避开 SQLite 的变量上限。
+        """
+        vals = [str(i) for i in ids if i]
+        if not vals:
+            return set()
+        found: set[str] = set()
+        for start in range(0, len(vals), 400):
+            chunk = vals[start:start + 400]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = self.conn.execute(
+                f"SELECT id FROM items WHERE id IN ({placeholders})", chunk).fetchall()
+            found.update(str(row[0]) for row in rows)
+        return found
+
     @staticmethod
     def _row_of(item: Any) -> dict[str, Any]:
         data = item.to_dict() if hasattr(item, "to_dict") else dict(item)

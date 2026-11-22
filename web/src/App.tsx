@@ -20,10 +20,10 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 import { AgentProvider } from "./agent/AgentProvider";
 import AgentSurface from "./agent/AgentSurface";
 import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, type Summary } from "./api";
+import { DEMO } from "./demo";
 import ScrollTop from "./components/ScrollTop";
 import { DUR, EASE, pageVariants } from "./motion";
 import { useSmoothWheelScroll } from "./motion/useSmoothWheelScroll";
-import { DEMO } from "./demo";
 
 /** 一条浮出来的提示；带 action 时右侧多一个按钮（撤销这类） */
 interface ToastMsg {
@@ -34,7 +34,12 @@ interface ToastMsg {
 export interface OutletCtx {
   progress: RunState | null;
   reloadKey: number;
+  /** 只有「刷新真的结束且本轮有新增」才 +1；换筛选、收藏、bump 都不会动它。
+      信息流的清场登场只认这个序号，不能拿 reloadKey 当信号。 */
+  refreshSeq: number;
   refresh: () => void;
+  /** 只重试指定平台（保留冷却语义，不整轮重跑） */
+  refreshPlatforms: (platforms: string[]) => void;
   summary: Summary | null;
   settings: SettingsResponse | null;
   reloadSettings: () => Promise<void>;
@@ -69,6 +74,7 @@ export default function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [refreshSeq, setRefreshSeq] = useState(0);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   // 所有 toast 共用一个定时器：之前「全局提示」和「开始刷新」各挂各的 setTimeout，
@@ -161,31 +167,38 @@ export default function App() {
         if (wasRunning.current && !data.state.running && data.state.done > 0) {
           setReloadKey((k) => k + 1);
           void loadSummary();
-          // 一轮结束后据实说清楚：加了几条、谁失败、谁在冷却。
-          // 之前只闪一句「开始刷新」，内容没变时用户没法判断是没抓到还是坏了。
           const rows = Object.entries(data.state.plugins ?? {});
-          const added = rows.reduce(
-            (n, [, p]) => n + (p.status === "ok" ? Number(p.count || 0) : 0),
-            0,
+          // 「新增」必须用后端算出来的数字：upsert 的 rowcount 里混着「只是更新了
+          // 统计数」的老条目，直接累加会把「抓到 200 条」说成「新增 200 条」。
+          const fresh = Number(
+            data.state.new_total ??
+              rows.reduce((n, [, p]) => n + Number((p as { new_count?: number }).new_count ?? 0), 0),
           );
-          const failed = rows.filter(([, p]) => p.status === "failed");
-          const cooling = rows.filter(([, p]) => p.status === "skipped");
-          if (demoRef.current) {
-            showToast({ text: "演示模式：内容来自本地样例，这一轮只是重放，不会有新内容" });
-          } else if (!added && !failed.length && cooling.length) {
-            const now = Math.floor(Date.now() / 1000);
-            const wait = Math.min(
-              ...cooling.map(([, p]) => Math.max(1, Number(p.next_at || 0) - now)),
-            );
-            showToast({
-              text: "平台都在冷却中，最早 " + wait + " 秒后才能再抓",
-              action: { label: "仍要抓", run: () => refreshRef.current(true) },
-            });
-          } else {
-            const bits = ["刷新完成：新增 " + added + " 条"];
-            if (failed.length) bits.push(failed.length + " 个平台失败");
-            if (cooling.length) bits.push(cooling.length + " 个平台冷却中");
-            showToast({ text: bits.join(" · ") });
+          // 只有这里代表「这一轮刷新结束了」，而且有真新增才通知信息流开演。
+          // reloadKey 也会被换筛选、收藏、bump 改动，拿它当信号会把换筛选也演一遍。
+          if (fresh > 0) setRefreshSeq((k) => k + 1);
+          // 信息流页由内联状态条说结果（一条通道说同一件事）；
+          // 在设置页/市场点刷新时才用 toast，否则用户什么都看不到。
+          if (location.pathname !== "/") {
+            const failed = rows.filter(([, p]) => p.status === "failed");
+            const cooling = rows.filter(([, p]) => p.status === "skipped");
+            if (demoRef.current) {
+              showToast({ text: "演示模式：内容来自本地样例，这一轮只是重放，不会有新内容" });
+            } else if (!fresh && !failed.length && cooling.length) {
+              const now = Math.floor(Date.now() / 1000);
+              const wait = Math.min(
+                ...cooling.map(([, p]) => Math.max(1, Number(p.next_at || 0) - now)),
+              );
+              showToast({
+                text: "平台都在冷却中，最早 " + wait + " 秒后才能再抓",
+                action: { label: "仍要抓", run: () => refreshRef.current(true) },
+              });
+            } else {
+              const bits = ["刷新完成：新增 " + fresh + " 条"];
+              if (failed.length) bits.push(failed.length + " 个平台失败");
+              if (cooling.length) bits.push(cooling.length + " 个平台冷却中");
+              showToast({ text: bits.join(" · ") });
+            }
           }
         }
         wasRunning.current = data.state.running;
@@ -199,7 +212,7 @@ export default function App() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [loadSummary, showToast]);
+  }, [loadSummary, showToast, location.pathname]);
 
   const refresh = useCallback(async (force: boolean = false) => {
     // 按钮把 React 事件当第一个参数传进来时 force 会是个对象；只认严格 true，
@@ -228,13 +241,38 @@ export default function App() {
         wasRunning.current = false;
         return;
       }
-      showToast({ text: bypass ? "开始抓取（已跳过平台冷却）" : "开始刷新" });
+      // 信息流页由状态条接住「开始了」，别再用 toast 说第二遍（它会盖住 AI 输入条）
+      if (location.pathname !== "/") {
+        showToast({ text: bypass ? "开始抓取（已跳过平台冷却）" : "开始刷新" });
+      }
       wasRunning.current = true;
       setProgress(state ?? { ...IDLE, running: true });
     } catch (err) {
-      showToast({ text: (err as Error).message });
+      // 已经在跑不是错误：状态条会显示当前进度，这里静默
+      if ((err as { code?: string }).code !== "refresh_running") {
+        showToast({ text: (err as Error).message });
+      }
     }
-  }, [showToast]);
+  }, [showToast, location.pathname]);
+
+  /** 只重试失败的那几个平台：整轮重跑会让冷却中的平台再被跳过一次 */
+  const refreshPlatforms = useCallback(
+    async (platforms: string[]) => {
+      if (!platforms.length) return;
+      try {
+        const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", {
+          platforms,
+          force: true,
+        });
+        wasRunning.current = true;
+        if (res?.state) setProgress(res.state);
+      } catch (err) {
+        if ((err as { code?: string }).code === "refresh_running") return;
+        showToast({ text: (err as Error).message });
+      }
+    },
+    [showToast],
+  );
 
   useEffect(() => {
     refreshRef.current = refresh;
@@ -259,7 +297,10 @@ export default function App() {
     r: () => void refresh(),
   });
 
-  const ctx: OutletCtx = { progress, reloadKey, refresh, summary, settings, reloadSettings, bump };
+  const ctx: OutletCtx = {
+    progress, reloadKey, refreshSeq, refresh, refreshPlatforms,
+    summary, settings, reloadSettings, bump,
+  };
 
   return (
     // Agent 的会话挂在路由之上：换页面（包括 Agent 自己打开的那一条）都不重建

@@ -167,6 +167,39 @@ def _raise_fixture_missing():
     raise FixtureMissing("演示模式没有 zhihu.json 的样例（在线跑一次 --warmup 就能补上）")
 
 
+def test_new_count_counts_items_that_appear_for_the_first_time():
+    """插件交回来的是 Item 对象，不是 dict：按 dict 过滤会让新增数永远是 0。
+
+    真机翻过车：一轮抓了 78 条、库从 1155 长到 1220，状态条却说「+0 条」——
+    因为 isinstance(it, dict) 把所有条目都筛掉了，known 空、fresh 也就恒为 0。
+    """
+    from plugin_runtime.host import to_item
+
+    store = make_store()
+    runner = RefreshRunner(store)
+    batch = [
+        to_item("v2ex", {"native_id": f"topic:{i}", "title": t,
+                         "url": f"https://v2ex.com/t/{i}", "kind": "text"},
+                fetched_at=int(time.time()))
+        for i, t in enumerate(["一", "二", "三"])
+    ]
+    runner._load = lambda pid: list(batch)
+
+    started, _ = runner.trigger(platforms=["v2ex"], force=True)
+    assert started is True
+    wait_idle(runner)
+    first = runner.snapshot()
+    assert first["plugins"]["v2ex"]["new_count"] == 3, "第一次见到这三条，就是 3 条新增"
+    assert first["new_total"] == 3
+
+    runner._load = lambda pid: list(batch)
+    runner.trigger(platforms=["v2ex"], force=True)
+    wait_idle(runner)
+    again = runner.snapshot()
+    assert again["plugins"]["v2ex"]["new_count"] == 0, "同样的三条再来一轮不该算新增"
+    assert again["new_total"] == 0
+
+
 def test_frontend_says_when_nothing_can_change():
     shell = read("web/src/layout/Shell.tsx")
     assert "离线演示模式" in shell and "health?.demo" in shell, "演示模式要摆在脸上"
@@ -175,7 +208,8 @@ def test_frontend_says_when_nothing_can_change():
     assert "仍要抓" in app and "force" in app, "冷却拦住时要给一条明确的出路"
     assert "新增" in app and "平台冷却中" in app
     topbar = read("web/src/components/TopBar.tsx")
-    assert "onClick={() => onRefresh()}" in topbar, "别把点击事件当 force 传下去"
+    assert "onClick={clickRefresh}" in topbar, "别把点击事件当 force 传下去"
+    assert "data-refresh-bar" in topbar, "运行中点刷新要把人送到进度那一行，而不是没反应"
     assert "force === true" in app, "只认严格 true，SyntheticEvent 不能被 stringify"
     page = read("web/src/pages/SettingsPage.tsx")
     assert "平台抓取间隔" in page and "PLATFORMS.map" in page

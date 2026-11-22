@@ -69,9 +69,23 @@ export interface RunState {
   done: number;
   total: number;
   error: string;
+  /** idle / fetching / settling / done / partial / empty —— 整理中与全冷却要分开说 */
+  phase?: "idle" | "fetching" | "settling" | "done" | "partial" | "empty" | string;
+  /** 这一轮真正新入库的条数（不是「抓到了几条」） */
+  new_total?: number;
+  market?: { checked: number; updated: string[]; failed: { id: string; error: string }[] };
   plugins: Record<
     string,
-    { status: string; count: number; error: string; ms: number; note?: string; next_at?: number }
+    {
+      status: string;
+      count: number;
+      new_count?: number;
+      label?: string;
+      error: string;
+      ms: number;
+      note?: string;
+      next_at?: number;
+    }
   >;
 }
 
@@ -932,7 +946,9 @@ export async function postJSON<T>(path: string, body: unknown = {}): Promise<T> 
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new ApiError(data?.detail?.message ?? `请求失败（${resp.status}）`);
+    // 带上 code：调用方要区分「已经在跑了」(refresh_running) 和真失败
+    throw new ApiError(data?.detail?.message ?? `请求失败（${resp.status}）`,
+      data?.detail?.code ?? "http_error");
   }
   return data as T;
 }
@@ -998,6 +1014,11 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
   const abortRef = useRef<AbortController | null>(null);
   // 单飞：滚动传感器可能在一次请求飞在路上时又触发一次，重复请求会把同一页追两遍
   const flight = useRef(false);
+  // 这一屏数据到底是哪个 reloadKey 取回来的：刷新演出必须等它，否则会拿着
+  // 上一批条目算「新增」，要么演出没东西可演，要么把老条目当新条目弹一遍。
+  const keyRef = useRef(reloadKey);
+  keyRef.current = reloadKey;
+  const [loadedKey, setLoadedKey] = useState<number | null>(seed ? reloadKey : null);
 
   const build = useCallback(
     (cursor: string | null) => {
@@ -1056,6 +1077,7 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
         if ((err as Error).name !== "AbortError") setError((err as Error).message);
       } finally {
         flight.current = false;
+        if (!append) setLoadedKey(keyRef.current);
         setMoreLoading(false);
         setLoading(false);
       }
@@ -1073,6 +1095,7 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
     count,
     parsed,
     loading,
+    loadedKey,
     moreLoading,
     error,
     more: () => (next ? load(next, true) : Promise.resolve()),

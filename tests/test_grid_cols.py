@@ -72,8 +72,11 @@ def test_reflow_animation_survives_the_entry_animation():
     assert "<LayoutGroup" in feed
     assert "layoutDependency={grid.cols}" in feed
     assert "animateLayout = feed.items.length > 0 && feed.items.length <= 48" in feed
-    # 进场动画挂在内层 .rise：挂外层会压住 FLIP 写的 transform（fill-mode: both）
-    assert 'className="rise h-full"' in feed
+    # 进场动画挂在内层 .rise：挂外层会压住 FLIP 写的 transform（fill-mode: both）。
+    # 现在内层还要承载「收场 / 登场」两个相位（feed-card + data-out/data-in），
+    # 而 .rise 只在非演出态、且这张卡还没登场过时挂上。
+    assert 'className={"feed-card relative h-full " + rise}' in feed
+    assert "animatedIds.current.has(item.id)" in feed, "登场过的卡不能再淡一次"
     card = read("web/src/components/Card.tsx")
     assert "max-h-[420px]" in card, "单列时封面要封顶，不然一张图吃掉一屏"
 

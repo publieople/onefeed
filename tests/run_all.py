@@ -53,6 +53,7 @@ ORDER = [
     "test_infinite_and_rail.py",
     "test_side_rails.py",
     "test_motion_coverage.py",
+    "test_refresh_playout.py",
 ]
 
 

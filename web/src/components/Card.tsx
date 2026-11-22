@@ -29,6 +29,8 @@ interface Props {
   onOpen: (id: string, el: HTMLElement, item?: FeedItem) => void;
   /** 从详情页返回时，给目标卡片的媒体框和标题挂上 of-media / of-title，让详情页缩回它的位置 */
   vtNames?: { media?: string | null; title?: string | null };
+  /** 刷新演出的新卡标记：只有刚放上来的那几张带，2.4s 后自己淡出 */
+  reveal?: "new" | "carry" | null;
 }
 
 function hexAlpha(hex: string, alpha: number): string {
@@ -233,7 +235,7 @@ function MetaLine({ item, body }: { item: FeedItem; body: string }) {
 
 /** memo：信息流一次渲染 30 张卡，父组件因为筛选、进度、轮询重渲染时
     卡片本体不该跟着重算（每张卡里都有一坨时间格式化与平台查表）。 */
-function Card({ item, onOpen, vtNames }: Props) {
+function Card({ item, onOpen, vtNames, reveal }: Props) {
   const p = platform(item.platform);
   const body = excerpt(item);
   const kindLabel = KIND_LABEL[item.kind] ?? item.kind;
@@ -439,6 +441,11 @@ function Card({ item, onOpen, vtNames }: Props) {
         </span>
       </footer>
       </div>
+      {/* 新卡标记：纯装饰，差异靠状态条播报的数字，不靠这枚胶囊。
+          绝对定位、不占位，淡出也不改变布局。 */}
+      {reveal === "new" ? (
+        <span aria-hidden="true" className="card-fresh">新</span>
+      ) : null}
       {menuOpen && moreRef.current ? (
         <CardMenu anchor={moreRef.current} items={menuItems} onClose={() => setMenuOpen(false)} />
       ) : null}

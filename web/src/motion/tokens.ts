@@ -44,6 +44,40 @@ export const listItem = (index: number) => ({
   transition: { duration: DUR.list, ease: EASE, delay: Math.min(index, 11) * 0.022 },
 });
 
+/**
+ * 刷新演出（清场 → 逐个登场）。
+ *
+ * 数字与 docs/refresh-ux-2026-11-22.md §5.3 的时间轴一一对应，改这里就是改演出；
+ * 组件里不要再写 200 / 18 / 45 这类魔法数，否则调一次要翻四个文件。
+ * cap 是阶梯上限：第 13 张起不再加延迟，否则 30 张要飘 2.5s。
+ */
+export const REVEAL = {
+  /** 单张旧卡收场时长 */
+  collapse: 200,
+  /** 逆序收场的间隔 */
+  gap: 18,
+  /** 收完到立新之间的留白；没有这 60ms，收→立会像闪屏 */
+  hold: 60,
+  /** 老卡整组淡入（不逐个、不计入阶梯） */
+  base: 160,
+  /** 单张新卡弹出时长 */
+  pop: 300,
+  /** 新卡逐个登场的间隔 */
+  step: 45,
+  /** 阶梯上限 */
+  cap: 12,
+  /** 少于此数走轻量档：只为 1–2 张把整屏收掉是失衡的 */
+  min: 3,
+} as const;
+
+/** 收场相位要等多久（含留白），与 CSS 里的 collapse/gap 对齐 */
+export const revealCollapseMs = (count: number) =>
+  REVEAL.collapse + REVEAL.hold + Math.min(REVEAL.cap, Math.max(0, count)) * REVEAL.gap;
+
+/** 登场相位要等多久 */
+export const revealPopMs = (count: number) =>
+  REVEAL.pop + Math.min(REVEAL.cap, Math.max(0, count)) * REVEAL.step;
+
 /** 切页：进来的一页从行进方向偏一点再归位，退出的反向淡出。 */
 export const pageVariants = (dir: 1 | -1) => ({
   initial: { opacity: 0, y: 14 * dir, scale: 0.995 },

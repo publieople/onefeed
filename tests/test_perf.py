@@ -45,7 +45,8 @@ def test_feed_cards_are_memoized_and_layout_animation_is_switchable():
     feed = read("web/src/pages/FeedPage.tsx")
     # 包装层只留一种写法：按项数在 div / motion.div 之间切换会让跨过阈值时整批重挂，
     # 现在统一是 motion.div，靠 layout={layoutOn ? "position" : false} 开关。
-    assert 'layout={layoutOn ? "position" : false}' in feed
+    # 刷新演出期间要关掉 FLIP：同一批卡在收 / 立 / 登场，布局补间会跟收场抢动画
+    assert 'layout={layoutOn && !inShow ? "position" : false}' in feed
     assert "animateLayout ? (" not in feed, "别再按项数切包装元素"
     assert "const [layoutSettled, setLayoutSettled] = useState(false)" in feed, "换条件时先关布局动画再开，否则重排被 FLIP 拖着走"
     assert "const openItem = useCallback(" in feed, "openItem 不稳，memo 过的卡片每帧都会收到新 props"

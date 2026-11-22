@@ -25,6 +25,16 @@ def demo_mode() -> bool:
     return os.environ.get("ONEFEED_DEMO") == "1"
 
 
+def _item_id(it: Any) -> str:
+    """插件交回来的是 Item 对象，演示模式读的是 dict，两种都要能取 id。
+
+    之前这里只认 dict，导致 fresh 恒为 0、状态条永远说「+0 条」——库其实在长。
+    """
+    if isinstance(it, dict):
+        return str(it.get("id") or "")
+    return str(getattr(it, "id", "") or "")
+
+
 class FixtureMissing(RuntimeError):
     """DEMO 模式下这个平台没有本地样例。算「跳过」，不算抓取失败。"""
 
@@ -69,6 +79,9 @@ class RefreshRunner:
         self._state: dict[str, Any] = {
             "running": False, "started_at": 0, "finished_at": 0,
             "done": 0, "total": 0, "plugins": {}, "error": "",
+            # 前端只看 running 会把「抓完了但还在 prune/cluster」误判成已完成，
+            # 于是列表在整理落地前就被重取一遍。phase 把这一小段说清楚。
+            "phase": "idle", "new_total": 0,
         }
 
     # ------------------------------------------------------------ 对外
@@ -103,9 +116,13 @@ class RefreshRunner:
         with self._lock:
             if self._state["running"]:
                 return False, json.loads(json.dumps(self._state))
-            ids = [p for p in (platforms or self.plugin_ids()) if p]
+            # 平台展示名跟着清单走：前端不必再维护一份 id→中文名 的映射
+            # （原来散在 TabRail 与状态条两处，加一个平台要改两个文件）。
+            labels = {m.id: (m.name or m.id) for m in self.host.discover()}
+            ids = [p for p in (platforms or list(labels)) if p]
             if not ids:
-                self._state.update({"error": "没有可用的插件", "finished_at": int(time.time())})
+                self._state.update({"error": "没有可用的插件", "finished_at": int(time.time()),
+                                    "phase": "idle"})
                 return False, json.loads(json.dumps(self._state))
             now = int(time.time())
             # 演示模式不联网，冷却没有意义；warmup 是显式补样例，也不该被拦
@@ -117,18 +134,22 @@ class RefreshRunner:
                 wait = int(cooling.get(pid, 0))
                 if wait > 0:
                     plugins[pid] = {
-                        "status": "skipped", "count": 0, "error": "", "ms": 0,
+                        "status": "skipped", "count": 0, "new_count": 0, "error": "", "ms": 0,
+                        "label": labels.get(pid, pid),
                         "next_at": now + wait,
                         "note": f"平台冷却中，还要等 {wait} 秒",
                     }
                 else:
-                    plugins[pid] = {"status": "queued", "count": 0, "error": "", "ms": 0}
+                    plugins[pid] = {"status": "queued", "count": 0, "new_count": 0,
+                                    "error": "", "ms": 0, "label": labels.get(pid, pid)}
             active = [pid for pid in ids if plugins[pid]["status"] == "queued"]
             self._state = {
                 "running": bool(active), "started_at": now,
                 "finished_at": 0 if active else now,
                 "done": len(ids) - len(active), "total": len(ids),
                 "error": "" if active else "都在平台冷却中，这一轮没有实际抓取",
+                "phase": "fetching" if active else "empty",
+                "new_total": 0,
                 "warmup": warmup,
                 "market": {"checked": 0, "updated": [], "failed": []},
                 "plugins": plugins,
@@ -151,6 +172,8 @@ class RefreshRunner:
 
     def _run(self, ids: list[str], warmup: bool) -> None:
         try:
+            with self._lock:
+                self._state["phase"] = "fetching"
             if self.auto_update and not demo_mode():
                 # 采集前先问一次 registry（走 1h 缓存，不会每轮都打网络）。
                 # 装了新版要重新发现插件，否则这一轮还是旧 manifest。
@@ -175,12 +198,18 @@ class RefreshRunner:
                 run_id = self.store.start_run(pid, demo=demo_mode())
                 try:
                     items = self._load(pid)
+                    # upsert 的 rowcount 只是「受影响行数」，分不出新插入与只更新了统计。
+                    # 结果文案要说「这一轮新增 N 条」，所以入库前先拿一次已有 id。
+                    known = self.store.item_ids(_item_id(it) for it in items)
+                    fresh = sum(1 for it in items if _item_id(it) not in known)
                     count = self.store.upsert_items(items)
                     if warmup:
                         self._dump(pid, items)
                     self.store.finish_run(run_id, True, count)
-                    self._set(pid, status="ok", count=count,
+                    self._set(pid, status="ok", count=count, new_count=fresh,
                               ms=int((time.time() - started) * 1000))
+                    with self._lock:
+                        self._state["new_total"] = int(self._state.get("new_total") or 0) + fresh
                 except FixtureMissing as exc:  # 演示模式没导出这个平台：跳过就好，不必报警
                     self.store.finish_run(run_id, False, 0, str(exc))
                     self._set(pid, status="skipped", note=str(exc), count=0,
@@ -192,6 +221,10 @@ class RefreshRunner:
                     self.store.finish_run(run_id, False, 0, reason)
                     self._set(pid, status="failed", error=reason,
                               ms=int((time.time() - started) * 1000))
+            # 平台都跑完了，但整理还没落地：这一小段必须有自己的 phase，
+            # 否则前端一看到 running=false 就重取列表，排序会在整理完成前闪一下。
+            with self._lock:
+                self._state["phase"] = "settling"
             try:
                 self.store.prune(keep_days=self.prune_days)
                 smart.cluster(self.store)
@@ -199,6 +232,11 @@ class RefreshRunner:
                 pass
         finally:
             with self._lock:
+                plugins = self._state.get("plugins") or {}
+                failed = any(p.get("status") == "failed" for p in plugins.values())
+                ok = any(p.get("status") == "ok" for p in plugins.values())
+                # 有失败就是 partial：结果仍可用，只是缺一两个平台
+                self._state["phase"] = "partial" if failed else ("done" if ok else "empty")
                 self._state["running"] = False
                 self._state["finished_at"] = int(time.time())
 
