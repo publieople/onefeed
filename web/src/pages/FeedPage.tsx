@@ -65,7 +65,20 @@ export default function FeedPage({ ctx }: Props) {
   const restoreAnchor = (): (() => void) | undefined => {
     if (!backId || backFromAgent) return;
     const find = () => document.querySelector<HTMLElement>('[data-vt-item="' + CSS.escape(backId) + '"]');
-    const seek = () => find()?.scrollIntoView({ block: "center", behavior: "auto" });
+    // 焦点也要跟着回来：详情页那个 h1 已随路由卸载，不还的话键盘用户落在 body 上。
+    // 只做一次（图片撑高会反复触发下面的重锚，反复抢焦点会打架）。
+    let focused = false;
+    const focusCard = () => {
+      if (focused) return;
+      const link = find()?.querySelector<HTMLElement>('a[href^="/item/"]');
+      if (!link) return;
+      link.focus({ preventScroll: true });
+      focused = true;
+    };
+    const seek = () => {
+      find()?.scrollIntoView({ block: "center", behavior: "auto" });
+      focusCard();
+    };
     seek();
     // 缓存没命中、或者图片后来把卡片撑高，落点都会偏；数据到位和尺寸变化时各补一次
     const raf = requestAnimationFrame(seek);

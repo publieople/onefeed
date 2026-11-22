@@ -715,6 +715,8 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
   const [commentExpanded, setCommentExpanded] = useState(false);
   const [commentLoadingMore, setCommentLoadingMore] = useState(false);
   const commentSentinel = useRef<HTMLDivElement | null>(null);
+  /** 转场结束后把焦点交给正文标题（卡片那个 <a> 已经随路由卸载） */
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [tab, setTab] = useState<"summary" | "source">("summary");
@@ -752,6 +754,16 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
       alive = false;
     };
   }, [id]);
+
+  // 换页之后焦点必须跟着走：卡片是个 <a>，路由一换它就卸载，焦点会掉回 body，
+  // 键盘和读屏用户下一次 Tab 得从页头重新开始（View Transition 指南的强制项）。
+  // 延后一拍，别和共享元素转场抢同一帧。
+  useEffect(() => {
+    const key = data?.item.id;
+    if (!key) return;
+    const timer = window.setTimeout(() => headingRef.current?.focus({ preventScroll: true }), 80);
+    return () => window.clearTimeout(timer);
+  }, [data?.item.id]);
 
   useEffect(() => {
     if (!id) return;
@@ -1172,10 +1184,14 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
       </div>
 
       {/* 标题是第二块共享元素：从卡片里那两行小标题长成正文标题 */}
+      {/* 焦点落点：tabindex=-1 让它可编程聚焦但不进 Tab 序列；outline-none 是不给程序
+          聚焦画框（键盘用户打开页面后仍按 Tab 继续走，位置由转场本身交代） */}
       <h1
+        ref={headingRef}
+        tabIndex={-1}
         data-vt="title"
         style={{ viewTransitionName: "of-title" }}
-        className="mt-3 font-display text-[26px] font-semibold leading-[1.35] tracking-tight"
+        className="mt-3 font-display text-[26px] font-semibold leading-[1.35] tracking-tight outline-none"
       >
         {item.title}
       </h1>

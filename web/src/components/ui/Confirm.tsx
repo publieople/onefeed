@@ -185,10 +185,12 @@ export function ConfirmHost() {
                   value={typed}
                   onChange={(e) => setTyped(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && canConfirm) {
-                      e.preventDefault();
-                      close(true);
-                    }
+                    if (e.key !== "Enter") return;
+                    // 单行输入框没有换行语义，先吃掉默认提交；
+                    // 输入法还在选词时这个 Enter 不属于我们（Safari 旧版会报 229）。
+                    e.preventDefault();
+                    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+                    if (canConfirm) close(true);
                   }}
                   spellCheck={false}
                   autoComplete="off"

@@ -264,10 +264,12 @@ function AskRow({
                 value={free}
                 onChange={(e) => setFree(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    send(chosen, free.trim());
-                  }
+                  if (e.key !== "Enter") return;
+                  // 中文/日文输入法里 Enter 是「确认候选词」：先吃掉默认行为，
+                  // 再看组合态——不然选词那一下就把半句话发出去了。
+                  e.preventDefault();
+                  if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+                  send(chosen, free.trim());
                 }}
                 aria-label="直接回一句"
                 placeholder={options.length ? "或者直接说" : "回一句"}

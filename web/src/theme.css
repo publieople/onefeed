@@ -198,18 +198,33 @@ button:active:not(:disabled) {
   overflow: hidden;
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+/* 滚动条：先写标准属性（Firefox 认这两条），WebKit 前缀只作老浏览器补充。
+   拇指用 --c-fade 而不是 --c-line：纸色底上 line 只有 1.2:1，滚动条算 UI 边界，要 ≥3:1。
+   WebKit 写法必须包进 @supports not (scrollbar-color: auto)，并在里面把 scrollbar-width
+   重置回 auto —— 否则支持标准属性的浏览器会同时吃到两套规则。 */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-fade)) transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgb(var(--c-line));
-  border-radius: 6px;
-}
+@supports not (scrollbar-color: auto) {
+  html {
+    scrollbar-width: auto;
+  }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--c-fade));
+    border-radius: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 /* 设置页左侧导航的当前项：一条贴着实色的短竖线，不抢视线 */
