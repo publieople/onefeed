@@ -39,6 +39,7 @@ ORDER = [
     "test_favorites.py",
     "test_refresh.py",
     "test_ui_lint.py",
+    "test_demo_snapshot.py",
     "test_theme_reveal.py",
     "test_nav_motion.py",
     "test_feed_filters.py",

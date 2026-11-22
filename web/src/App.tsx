@@ -23,6 +23,7 @@ import { getJSON, postJSON, type Health, type RunState, type SettingsResponse, t
 import ScrollTop from "./components/ScrollTop";
 import { DUR, EASE, pageVariants } from "./motion";
 import { useSmoothWheelScroll } from "./motion/useSmoothWheelScroll";
+import { DEMO } from "./demo";
 
 /** 一条浮出来的提示；带 action 时右侧多一个按钮（撤销这类） */
 interface ToastMsg {
@@ -204,6 +205,11 @@ export default function App() {
     // 按钮把 React 事件当第一个参数传进来时 force 会是个对象；只认严格 true，
     // 否则 JSON.stringify 整个 SyntheticEvent 会当场报 circular structure。
     const bypass = force === true;
+    // 静态演示站没有采集器：直接说清楚，别让按钮转一圈什么都没发生
+    if (DEMO) {
+      showToast({ text: "静态演示不抓取新内容：这里是一份抓取快照。" });
+      return;
+    }
     try {
       const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", { force: bypass });
       const state = res?.state;

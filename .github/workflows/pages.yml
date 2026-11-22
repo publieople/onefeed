@@ -1,0 +1,77 @@
+name: pages
+
+# 静态演示站：把 fixtures 导出成一份只读快照，再构建前端发到 GitHub Pages。
+# 部署只发生在 main 上；PR 只走 ci.yml，不占 Pages 环境。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "onefeed/**"
+      - "fixtures/**"
+      - "scripts/export_demo.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: 装后端依赖
+        run: uv sync --frozen
+
+      - name: 从 fixtures 导出快照
+        run: uv run python scripts/export_demo.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 装前端依赖
+        run: npm ci
+        working-directory: web
+
+      - name: 构建（演示模式 + 仓库子路径）
+        run: npm run build
+        working-directory: web
+        env:
+          VITE_DEMO: "1"
+          VITE_BASE: "/${{ github.event.repository.name }}/"
+
+      # 项目页的深链靠 404.html 兜底：Pages 找不到路径时返回它，前端路由接手
+      - name: 复制 404 兜底
+        run: cp dist/index.html dist/404.html
+        working-directory: web
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

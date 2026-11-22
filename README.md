@@ -102,6 +102,29 @@ uv run python tests/run_all.py --offline  # 跳过联网用例
 抖音插件用系统 Chrome 跑 headless 回放，首次会建持久档案；
 状态目录默认 `~/.onefeed`，不可写时自动退回仓库内 `.onefeed/`（已 gitignore），也可用 `ONEFEED_HOME` 指定。
 
+## 在线演示（GitHub Pages）
+
+只读演示站：<https://publieople.github.io/onefeed/>。打开就是真实前端 + 一份抓取快照（当前 65 条 / 6 个平台），不联网、不登录、不写任何东西。
+
+只做只读是有意的：平台登录态是本机浏览器档案里的 HttpOnly cookie，静态页取不到、也不该转存到 localStorage；插件是 Python + QuickJS / Playwright，浏览器里根本没有运行时。演示站负责「长什么样、怎么用」，真采集在本机。
+
+| 演示站能做 | 做不到（会明确提示原因） |
+|---|---|
+| 信息流、按平台 / 关键词筛、今天、热度排序 | 刷新抓新内容 |
+| 打开详情抽屉（标题 / 作者 / 摘要 / 互动数 / 跳原站） | 正文全文、评论区、AI 总结与对话 |
+| 设置页、插件市场列表、登录页状态 | 登录、装插件、保存设置、Agent |
+
+部署由 [`.github/workflows/pages.yml`](.github/workflows/pages.yml) 完成：push `main`（改到 `web/` / `onefeed/` / `fixtures/` / 导出脚本时）或手动触发行；python 步骤导出快照，node 步骤用 `VITE_DEMO=1` 加仓库子路径构建，`404.html` 兜底深链。首次上线需要在仓库 **Settings → Pages → Source** 选一次 **GitHub Actions**。
+
+本地按同样方式预览：
+
+```bash
+uv run python scripts/export_demo.py                                  # 生成 web/public/demo/api.json
+cd web && VITE_DEMO=1 VITE_BASE=/onefeed/ npm run build && cd ..       # 产物挂到 /onefeed/ 子路径
+```
+
+规格见 [`specs/012-demo-site/spec.md`](specs/012-demo-site/spec.md)。
+
 ## 现场怎么演（比赛 / 演示机）
 
 演示前先跑一次自检，别等到评委坐下才发现少东西：
@@ -184,6 +207,7 @@ onefeed/
 ├── docs/                  调研记录（抖音 feed 机制、平台开放度普查、STATUS-2026-11-15 现状盘点）
 ├── design/                视觉稿与实机截图
 ├── web/                   前端（Vite + React + TS，dist 已入库）
+├── scripts/export_demo.py 静态演示站快照导出（fixtures → web/public/demo/api.json）
 ├── tests/                 验收脚本，入口 run_all.py
 ├── probes/                一次性探针脚本，历史留档
 ├── pull_all.py            多平台试跑入口
@@ -208,6 +232,7 @@ spec 变更 → 评审通过 → 同步 tasks.md → 写代码 → PR 关联 tas
 - [`specs/002-plugin-arch/spec.md`](specs/002-plugin-arch/spec.md) — 插件架构（运行时选型 / manifest / 呈现规范）
 - [`docs/PLATFORM_NOTES.md`](docs/PLATFORM_NOTES.md) — 还能接哪些平台（实测）
 - [`docs/DY_FEED_FINDINGS.md`](docs/DY_FEED_FINDINGS.md) — 抖音 feed 机制与签名坑
+- [`specs/012-demo-site/spec.md`](specs/012-demo-site/spec.md) — 静态演示站（Pages 快照 / 只读边界 / 部署）
 
 ## 许可
 

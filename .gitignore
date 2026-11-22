@@ -12,6 +12,10 @@ dist/
 !web/dist/**
 *.tsbuildinfo
 
+# 演示站快照（Pages 构建时由 scripts/export_demo.py 现导出）
+web/public/demo/api.json
+web/dist/demo/
+
 # 运行时产物 / 凭证（绝不入库）
 fixtures/raw/
 *.cookie

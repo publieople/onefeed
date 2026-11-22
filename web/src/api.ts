@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { seedSaved } from "./agent/savedStore";
+import { DEMO } from "./demo";
 
 export interface FeedItem {
   id: string;
@@ -361,6 +362,9 @@ export async function agentStart(
   message: string,
   extra: Record<string, unknown> = {},
 ): Promise<AgentStart> {
+  if (DEMO) {
+    throw new ApiError("静态演示站没有 Agent：它需要模型和本机检索。", "agent_unavailable");
+  }
   const resp = await fetch("/api/agent/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -779,6 +783,11 @@ export function streamSummary(
   h: SummaryStreamHandlers,
   depth?: SummaryDepth | "",
 ): () => void {
+  // 静态演示站没有后端：别让用户等一个永远不会开始的流
+  if (DEMO) {
+    h.onError("静态演示站没有模型：总结要连 AI，本机运行才有。");
+    return () => {};
+  }
   const ctrl = new AbortController();
   const qs = new URLSearchParams();
   if (refresh) qs.set("refresh", "1");
@@ -838,6 +847,10 @@ export function streamItemChat(
   body: { message: string; depth?: string; summary?: SummaryPayload | null; history?: ItemChatTurn[] },
   h: ItemChatHandlers,
 ): () => void {
+  if (DEMO) {
+    h.onError("静态演示站没有模型：问答要连 AI，本机运行才有。");
+    return () => {};
+  }
   const ctrl = new AbortController();
   void (async () => {
     let resp: Response;

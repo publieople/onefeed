@@ -10,6 +10,7 @@ import { DUR, EASE } from "../motion/tokens";
 import { popScope, pushScope, useHotkeys } from "../motion/useHotkeys";
 import { usePresence } from "../motion/usePresence";
 import { useShell } from "./useShell";
+import { DEMO } from "../demo";
 
 /** 左栏两档宽度：展开 240、图标轨 64。写常量是因为宽度要拿去过渡，不能再靠 class 切换。 */
 const LEFT_W_FULL = 240;
@@ -152,10 +153,21 @@ export default function Shell({
         >
           <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-1.5">
             <Info size={13} className="shrink-0" />
-            <span>离线演示模式：内容来自本地样例，刷新只会重放同一批。</span>
-            <span className="text-fade">
-              要抓实时内容，用不带 <code className="rounded bg-paper px-1 font-mono">--demo</code> 的方式启动。
-            </span>
+            {DEMO ? (
+              <>
+                <span>静态演示站：内容是一份抓取快照，不会抓取新内容。</span>
+                <span className="text-fade">
+                  刷新、登录、AI 总结都要在本机跑 <code className="rounded bg-paper px-1 font-mono">uv run python -m onefeed</code>。
+                </span>
+              </>
+            ) : (
+              <>
+                <span>离线演示模式：内容来自本地样例，刷新只会重放同一批。</span>
+                <span className="text-fade">
+                  要抓实时内容，用不带 <code className="rounded bg-paper px-1 font-mono">--demo</code> 的方式启动。
+                </span>
+              </>
+            )}
           </div>
         </div>
       ) : null}
