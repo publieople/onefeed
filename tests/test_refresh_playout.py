@@ -85,15 +85,24 @@ def test_feed_locks_height_and_swaps_the_list_by_phase():
     assert "AnimatePresence" not in feed, "收场不能靠 exit 动画"
 
 
-def test_status_bar_keeps_one_height_and_one_voice():
-    bar = read("web/src/components/RefreshBar.tsx")
+def test_progress_pops_out_of_the_button_and_takes_no_room():
+    bar = read("web/src/components/RefreshProgress.tsx")
     assert 'data-refresh-bar="1"' in bar
-    assert "h-10" in bar and "h-10" in bar and 'aria-hidden="true"' in bar, "没有运行时也占住 40px"
-    assert "aria-busy={running || settling}" in bar
+    # 没有运行时宽度归零：以前那 40px 空行正是这次要拆掉的东西
+    assert "width: show ? width : 0" in bar, "没东西可显示时宽度必须归零"
+    assert "absolute right-full" in bar, "从刷新按钮左侧长出来，不动别的件"
+    # 宽度要量出来再补间：绝对定位里 0fr/1fr 会把 1fr 算成 min-content，内容被裁掉
+    assert "ResizeObserver" in bar and "offsetWidth" in bar
+    assert "grid-cols-[0fr]" not in bar
+    assert "h-10" not in bar, "不许再留固定高度的占位"
+    assert 'aria-hidden="true"' in bar
+    assert "aria-busy={live}" in bar
     assert "onefeed:refresh-dismissed" in bar, "「收起」只隐藏本轮"
     assert "new_total" in bar and "重试失败" in bar
     # 失败详情不能展开在行内：行高一变，正文就会跟着跳
     assert "onefeed:toast" in bar
+    # 信息流里不再有那一条占整行的进度带
+    assert "RefreshBar" not in read("web/src/pages/FeedPage.tsx")
 
 
 def test_app_sends_a_separate_refresh_signal():
@@ -115,6 +124,8 @@ def test_topbar_progress_is_not_a_dead_button():
     topbar = read("web/src/components/TopBar.tsx")
     assert "refreshTitle" in topbar and "正在抓 " in topbar
     assert "disabled={running}" not in topbar, "运行中禁用等于「点了没反应」"
-    assert "scrollIntoView" in topbar, "点它要把人送到进度那一行"
+    # 进度就在按钮左边，不用再把人滚到别处去
+    assert "scrollIntoView" not in topbar
+    assert "hint" in topbar and "RefreshProgress" in topbar, "点了要有回应：让进度件重新亮出来"
     # 进度数字不再只在 md 以上出现
     assert "hidden w-10 text-right text-[11px]" not in topbar

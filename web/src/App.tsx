@@ -306,7 +306,13 @@ export default function App() {
     // Agent 的会话挂在路由之上：换页面（包括 Agent 自己打开的那一条）都不重建
     <AgentProvider>
       <RailSlotProvider>
-      <Shell health={health} progress={progress} onRefresh={refresh} onHelp={() => setHelp(true)}>
+      <Shell
+        health={health}
+        progress={progress}
+        onRefresh={refresh}
+        onRetry={refreshPlatforms}
+        onHelp={() => setHelp(true)}
+      >
         {/* 走 View Transition 时新页已经以最终样子进了快照，这里不能再播进场动画 */}
         <motion.div
           key={location.pathname}

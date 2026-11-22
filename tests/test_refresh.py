@@ -209,7 +209,10 @@ def test_frontend_says_when_nothing_can_change():
     assert "新增" in app and "平台冷却中" in app
     topbar = read("web/src/components/TopBar.tsx")
     assert "onClick={clickRefresh}" in topbar, "别把点击事件当 force 传下去"
-    assert "data-refresh-bar" in topbar, "运行中点刷新要把人送到进度那一行，而不是没反应"
+    # 进度件就贴在刷新按钮左边：运行中点它不必把人送到别处，重新亮一下就够
+    assert "RefreshProgress" in topbar, "运行中点刷新要有落点"
+    assert "setHint((n) => n + 1);" in topbar, "再点一下要把进度件重新亮出来"
+    assert 'data-refresh-bar="1"' in read("web/src/components/RefreshProgress.tsx"), "落点得是那件真进度"
     assert "force === true" in app, "只认严格 true，SyntheticEvent 不能被 stringify"
     page = read("web/src/pages/SettingsPage.tsx")
     assert "平台抓取间隔" in page and "PLATFORMS.map" in page

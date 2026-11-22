@@ -37,12 +37,14 @@ export default function Shell({
   health,
   progress,
   onRefresh,
+  onRetry,
   onHelp,
   children,
 }: {
   health: Health | null;
   progress: RunState | null;
   onRefresh: () => void;
+  onRetry: (platforms: string[]) => void;
   onHelp: () => void;
   children: ReactNode;
 }) {
@@ -142,7 +144,7 @@ export default function Shell({
       >
         跳到内容
       </a>
-      <TopBar health={health} progress={progress} onRefresh={onRefresh} />
+      <TopBar health={health} progress={progress} onRefresh={onRefresh} onRetry={onRetry} />
 
       {/* 演示模式不是「坏掉」，但必须说清楚：它读的是本地样例，刷新只是重放同一批。
           不说就会被当成「刷新不生效」——2026-11-21 用户就是这么问的。 */}

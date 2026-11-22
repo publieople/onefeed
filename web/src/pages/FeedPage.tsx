@@ -6,7 +6,6 @@ import { ArrowUp, Bookmark, Loader2, Star } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { prefetchDetail, useFeed, type FeedItem } from "../api";
 import Card from "../components/Card";
-import RefreshBar from "../components/RefreshBar";
 import Chips from "../components/Chips";
 import ColsPicker from "../components/ui/ColsPicker";
 import { useGridCols, type ColsChoice } from "../layout/useGridCols";
@@ -184,10 +183,7 @@ export default function FeedPage({ ctx }: Props) {
   const [freshIds, setFreshIds] = useState<Set<string> | null>(null);
   const [lockHeight, setLockHeight] = useState<number | null>(null);
   const [pill, setPill] = useState<number | null>(null);
-  // 这一轮已经演过了：状态条据此把「看新内容」换成「刚放进来的 N 条」。
-  // 不能用 inShow || freshIds 判断 —— 演出结束 2.6s 后它们都会归零，
-  // 结果就是按钮又变回「看新内容」，点一下把同一批再演一遍。
-  const [played, setPlayed] = useState(false);
+  // 演到哪一轮了：refreshSeq 只在「刷新结束且本轮有新增」时变，不能拿 reloadKey 顶替
   const playedSeq = useRef(0);
   const oldIds = useRef<Set<string>>(new Set());
   const captured = useRef<FeedItem[] | null>(null);
@@ -219,7 +215,6 @@ export default function FeedPage({ ctx }: Props) {
     list.forEach((item) => animatedIds.current.add(item.id));
     setFreshIds(fresh);
     setPhase("revealing");
-    setPlayed(true);
     if (freshTimer.current) window.clearTimeout(freshTimer.current);
     // 「新」标记由 CSS 在 2.4s 淡出，这里到点只把节点摘掉
     freshTimer.current = window.setTimeout(() => setFreshIds(null), 2600);
@@ -257,7 +252,6 @@ export default function FeedPage({ ctx }: Props) {
     // 收起的是旧卡、登场时却找不到任何新条目，演出会变成「全收起来再全淡回来」。
     if (feed.loadedKey !== ctx.reloadKey) return;
     playedSeq.current = ctx.refreshSeq;
-    setPlayed(false);
 
     const total = Number(ctx.progress?.new_total ?? 0);
     if (total <= 0) return;
@@ -614,14 +608,8 @@ export default function FeedPage({ ctx }: Props) {
         />
       </section>
 
-      {/* 进度和结果都在这一行里说（进行中 → 结果，高度不变）。
-          以前只有顶栏按钮转圈 + 2px 进度条，信息流这边完全没反应。 */}
-      <RefreshBar
-        progress={ctx.progress}
-        played={played}
-        onRetry={ctx.refreshPlatforms}
-        onNew={showNew}
-      />
+      {/* 进度不在这行里说了：顶栏刷新按钮左侧长出来的那件负责进度和结果，
+          这里不再占一行高度，也不留空位。 */}
 
       {/* 人在列表深处时不拆屏：先给一个能点的落点，点了回顶再演 */}
       {pill !== null ? (
