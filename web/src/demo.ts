@@ -49,7 +49,8 @@ let cached: Promise<Snapshot> | null = null;
 
 export function snapshot(): Promise<Snapshot> {
   if (!cached) {
-    cached = fetch(BASE + "demo/api.json", { headers: { Accept: "application/json" } })
+    // no-cache：Pages 的 CDN 会给 /demo/api.json 缓存十分钟，刚部署完会读到上一版快照
+    cached = fetch(BASE + "demo/api.json", { cache: "no-cache", headers: { Accept: "application/json" } })
       .then(async (resp) => {
         if (!resp.ok) throw new Error(`演示数据没找到（HTTP ${resp.status}）：${BASE}demo/api.json`);
         return (await resp.json()) as Snapshot;
