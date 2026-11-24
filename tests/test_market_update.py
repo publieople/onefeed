@@ -70,6 +70,12 @@ def expect_raise(fn, label: str) -> None:
     raise AssertionError(label + "（应当报错但没有）")
 
 
+def write_plugin(root: Path, plugin_id: str, version: str) -> None:
+    for name, blob in plugin_files(plugin_id, version).items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(blob)
+
+
 def plugin_files(plugin_id: str, version: str) -> dict[str, bytes]:
     return {
         "plugin.json": json.dumps({
@@ -247,6 +253,160 @@ def main() -> int:
         store.close()
         restore_market(saved)
         sb.cleanup()
+
+    # ---------------------------------------------------------------- 原子安装：失败回滚
+    # 真实事故：旧安装器先 rmtree(target) 再 rename，rename 被占用就只剩空目录。
+    # 下面把每一步单独打坏，确认旧插件和旧库记录都还在。
+    sb_atomic = Sandbox()
+    saved_atomic = patch_market(sb_atomic)
+    store_atomic = Store(Path(_TMP_STATE) / "market-atomic.db")
+    try:
+        sb_atomic.add_remote("delta", "1.0.0")
+        market.install(store_atomic, "delta")
+        old_manifest = (sb_atomic.plugin_root / "delta" / "plugin.json").read_text(encoding="utf-8")
+        check(json.loads(old_manifest)["version"] == "1.0.0", "原子安装：旧版本先装好")
+        check(list(sb_atomic.root.glob(".of-*")) == [], "原子安装：成功后台临时目录已清理")
+
+        # 1) 换入那一次 rename 失败：旧目录必须回来
+        sb_atomic.add_remote("delta", "1.1.0")
+        original_move = market._move_path
+        calls = {"n": 0}
+
+        def flaky_move(src, dst):
+            if Path(dst) == sb_atomic.plugin_root / "delta" and calls["n"] == 0:
+                calls["n"] += 1
+                raise OSError("模拟目录被占用")
+            return original_move(src, dst)
+
+        market._move_path = flaky_move
+        try:
+            expect_raise(lambda: market.update(store_atomic, "delta"),
+                         "rename 失败时更新应当报错")
+        finally:
+            market._move_path = original_move
+        check((sb_atomic.plugin_root / "delta" / "plugin.json").read_text(encoding="utf-8") == old_manifest,
+              "原子安装：rename 失败后旧目录原样回来")
+        row = next(p for p in store_atomic.list_plugins() if p["id"] == "delta")
+        check(row["version"] == "1.0.0", "原子安装：rename 失败后库记录不动")
+        check(list(sb_atomic.root.glob(".of-*")) == [], "原子安装：回滚成功后临时目录已清理")
+
+        # 2) 换入成功但写库失败：目录与库都要回到旧版本
+        sb_atomic.add_remote("delta", "1.1.0")
+        original_upsert = store_atomic.upsert_plugin
+
+        def broken_upsert(*args, **kwargs):
+            raise RuntimeError("模拟数据库写入失败")
+
+        store_atomic.upsert_plugin = broken_upsert
+        try:
+            expect_raise(lambda: market.install(store_atomic, "delta"),
+                         "写库失败时安装应当报错")
+        finally:
+            store_atomic.upsert_plugin = original_upsert
+        check((sb_atomic.plugin_root / "delta" / "plugin.json").read_text(encoding="utf-8") == old_manifest,
+              "原子安装：写库失败后旧目录原样回来")
+        row = next(p for p in store_atomic.list_plugins() if p["id"] == "delta")
+        check(row["version"] == "1.0.0", "原子安装：写库失败后库记录还是旧的")
+        check(list(sb_atomic.root.glob(".of-*")) == [], "原子安装：写库失败回滚后临时目录已清理")
+
+        # 3) 缓存复制失败不该拖垮安装：新版本照常落盘、写库，只带警告
+        sb_atomic.add_remote("delta", "1.2.0")
+        original_cache = market._refresh_cache
+
+        def broken_cache(*args, **kwargs):
+            raise OSError("模拟缓存目录只读")
+
+        market._refresh_cache = broken_cache
+        try:
+            result = market.install(store_atomic, "delta")
+        finally:
+            market._refresh_cache = original_cache
+        check(result["version"] == "1.2.0", "缓存失败：插件仍然装成新版本")
+        check(bool(result.get("cache_warning")), "缓存失败：结果里带警告而不是静默")
+        row = next(p for p in store_atomic.list_plugins() if p["id"] == "delta")
+        check(row["version"] == "1.2.0", "缓存失败：库记录也升到新版本")
+        on_disk = json.loads((sb_atomic.plugin_root / "delta" / "plugin.json").read_text(encoding="utf-8"))
+        check(on_disk["version"] == "1.2.0", "缓存失败：磁盘上是新版本")
+
+        # 4) 卸载时删库失败：目录要移回去，不能出现「目录没了、库还在」
+        original_delete = store_atomic.delete_plugin
+
+        def broken_delete(_plugin_id):
+            raise RuntimeError("模拟删库失败")
+
+        store_atomic.delete_plugin = broken_delete
+        try:
+            expect_raise(lambda: market.uninstall(store_atomic, "delta"),
+                         "删库失败时卸载应当报错")
+        finally:
+            store_atomic.delete_plugin = original_delete
+        check((sb_atomic.plugin_root / "delta" / "plugin.json").exists(),
+              "原子卸载：删库失败后目录移回来了")
+        check(any(p["id"] == "delta" for p in store_atomic.list_plugins()),
+              "原子卸载：删库失败后库记录还在")
+    finally:
+        store_atomic.close()
+        restore_market(saved_atomic)
+        sb_atomic.cleanup()
+
+    # ---------------------------------------------------------------- 进程崩溃后的恢复
+    # 换目录时进程被强杀，旧目录在隐藏工作目录的 previous 里；启动时不能当没发生。
+    sb_recover = Sandbox()
+    saved_recover = patch_market(sb_recover)
+    store_recover = Store(Path(_TMP_STATE) / "market-recover.db")
+    try:
+        # 1) 旧目录已移走、新目录还没换入：备份移回去，库补登记
+        target = sb_recover.plugin_root / "eta"
+        work = sb_recover.root / ".of-eta-crash"
+        backup = work / "previous"
+        backup.mkdir(parents=True)
+        write_plugin(backup, "eta", "1.0.0")
+        (work / "meta.json").write_text(json.dumps({
+            "plugin_id": "eta", "target": str(target), "action": "install",
+        }), encoding="utf-8")
+        check(not target.exists(), "崩溃恢复：换入前 target 确实不在")
+        recovered = market.recover_installs(store_recover, sb_recover.plugin_root)
+        check(recovered == 1, "崩溃恢复：恢复了一个备份")
+        check((target / "plugin.json").exists(), "崩溃恢复：旧目录移回 target")
+        on_disk = json.loads((target / "plugin.json").read_text(encoding="utf-8"))
+        check(on_disk["version"] == "1.0.0", "崩溃恢复：恢复的是旧版本")
+        check(not work.exists(), "崩溃恢复：恢复后工作目录清理掉")
+        row = next(p for p in store_recover.list_plugins() if p["id"] == "eta")
+        check(row["version"] == "1.0.0", "崩溃恢复：库也补登记了")
+
+        # 2) 新目录已换入、库还停在旧版本：按磁盘 manifest 补库
+        target2 = sb_recover.plugin_root / "theta"
+        write_plugin(target2, "theta", "1.1.0")
+        work2 = sb_recover.root / ".of-theta-crash"
+        backup2 = work2 / "previous"
+        backup2.mkdir(parents=True)
+        write_plugin(backup2, "theta", "1.0.0")
+        (work2 / "meta.json").write_text(json.dumps({
+            "plugin_id": "theta", "target": str(target2), "action": "install",
+        }), encoding="utf-8")
+        store_recover.upsert_plugin("theta", "1.0.0", "old-sha", source="registry", enabled=0)
+        market.recover_installs(store_recover, sb_recover.plugin_root)
+        row2 = next(p for p in store_recover.list_plugins() if p["id"] == "theta")
+        check(row2["version"] == "1.1.0", "崩溃恢复：新目录已换入时库补齐到新版本")
+        check(bool(row2["enabled"]) is False, "崩溃恢复：补齐版本不擅自打开已停用插件")
+        check(not work2.exists(), "崩溃恢复：补库后工作目录清理掉")
+
+        # 3) 卸载后、删备份前崩溃：库记录已删，备份可以直接清
+        target3 = sb_recover.plugin_root / "iota"
+        work3 = sb_recover.root / ".of-iota-crash"
+        backup3 = work3 / "previous"
+        backup3.mkdir(parents=True)
+        write_plugin(backup3, "iota", "1.0.0")
+        (work3 / "meta.json").write_text(json.dumps({
+            "plugin_id": "iota", "target": str(target3), "action": "uninstall",
+        }), encoding="utf-8")
+        market.recover_installs(store_recover, sb_recover.plugin_root)
+        check(not target3.exists(), "崩溃恢复：卸载已写库时不再把目录恢复回来")
+        check(not work3.exists(), "崩溃恢复：卸载完成后的备份被清掉")
+    finally:
+        store_recover.close()
+        restore_market(saved_recover)
+        sb_recover.cleanup()
 
     # ---------------------------------------------------------------- 接口层
     from fastapi.testclient import TestClient

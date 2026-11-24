@@ -15,7 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from plugin_runtime.host import PluginHost
 
-from . import __version__, settings as settings_mod
+from . import __version__, market, settings as settings_mod
 from .api import router
 from .service import RefreshRunner, sync_installed
 from .store import Store
@@ -31,6 +31,8 @@ def create_app(store: Store | None = None, plugins_dir: Path | None = None) -> F
     app.state.settings = conf
     plugins_dir = Path(plugins_dir) if plugins_dir is not None \
         else settings_mod.resolve_plugins_dir(conf.get("plugins_dir", ""))
+    # 上次进程如果在换插件目录的中途被强杀，先把隐藏备份恢复/收尾，再登记插件。
+    market.recover_installs(app.state.store, plugins_dir)
     sync_installed(app.state.store, plugins_dir)
     app.state.refresher = RefreshRunner(
         app.state.store,

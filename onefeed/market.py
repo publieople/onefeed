@@ -178,11 +178,155 @@ def plugins_root() -> Path:
         return Path(default_plugins_dir())
 
 
+class InstallRollbackError(RuntimeError):
+    """换入失败、回滚也失败时抛出：旧目录仍在备份位置，人工还能救回来。"""
+
+
+def _path_exists(path: Path) -> bool:
+    # Path.exists() 对断掉的符号链接返回 False；插件目录出过事，这里不省这一步。
+    return path.is_symlink() or path.exists()
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        path.unlink()
+    else:
+        shutil.rmtree(path)
+
+
+def _move_path(src: Path, dst: Path) -> None:
+    """单独包一层，测试可以只让某一次改名失败，不用真的锁住目录。"""
+    src.rename(dst)
+
+
+def _work_dir(target_root: Path, plugin_id: str) -> Path:
+    # 和插件目录同级，不在插件根里面：sync_installed / host.discover 不会把
+    # 半成品或备份当成插件扫进去。同一卷内改名才是原子的。
+    return Path(tempfile.mkdtemp(prefix=f".of-{plugin_id}-", dir=str(target_root.parent)))
+
+
+def _write_meta(work: Path, payload: dict[str, Any]) -> None:
+    """给崩溃恢复留一张小纸条：这是哪个插件、目标在哪、做到哪一步。"""
+    (work / "meta.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _keep_work(work: Path, plugin_id: str, target: Path, action: str) -> None:
+    """回滚都失败时，把现场标成 preserve，启动恢复不要误删备份。"""
+    try:
+        _write_meta(work, {"plugin_id": plugin_id, "target": str(target),
+                           "action": action, "preserve": True})
+    except OSError:
+        pass
+
+
+def recover_installs(store, root: Path | None = None) -> int:
+    """启动时处理上次进程被强杀留下的工作目录。
+
+    - 旧目录已经移走、新目录还没换入：把备份移回去（卸载时如果库记录
+      已经删掉，说明卸载其实完成了，直接清掉备份）。
+    - 新目录已经换入、库还没写：按磁盘上的 manifest 把库补成新版本。
+    - 回滚失败的 preserve 现场原地保留，等人来看，不自动删。
+    """
+    root = Path(root or default_plugins_dir())
+    if not root.parent.is_dir():
+        return 0
+    recovered = 0
+    for work in sorted(root.parent.glob(".of-*")):
+        if not work.is_dir():
+            continue
+        try:
+            meta = json.loads((work / "meta.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue  # 不是我们的工作目录，不动
+        if meta.get("preserve"):
+            continue
+        plugin_id = str(meta.get("plugin_id") or "")
+        try:
+            target = Path(str(meta.get("target") or ""))
+        except (TypeError, ValueError):
+            continue
+        if not plugin_id or target.parent.resolve() != root.resolve():
+            continue
+        action = str(meta.get("action") or "install")
+        backup = work / "previous"
+        row = next((p for p in store.list_plugins() if p["id"] == plugin_id), None)
+        if not _path_exists(target) and _path_exists(backup):
+            if action == "uninstall" and row is None:
+                pass  # 卸载已经写库成功，备份可以清
+            else:
+                try:
+                    _move_path(backup, target)
+                    recovered += 1
+                except OSError:
+                    continue  # 还是被占用：留着，下次启动再试
+        if _path_exists(target) and action != "uninstall":
+            try:
+                manifest = json.loads((target / "plugin.json").read_text(encoding="utf-8"))
+                actual = dir_hash(target)
+                store.upsert_plugin(
+                    plugin_id, str(manifest.get("version", "")), actual,
+                    source="registry", enabled=bool((row or {}).get("enabled", 1)))
+            except (OSError, json.JSONDecodeError):
+                pass
+        shutil.rmtree(work, ignore_errors=True)
+    return recovered
+
+
+def _rollback(target: Path, backup: Path, had_previous: bool) -> None:
+    problems: list[str] = []
+    if _path_exists(target):
+        try:
+            _remove_path(target)
+        except OSError as exc:
+            problems.append(f"清不掉半截新目录：{type(exc).__name__}: {exc}")
+    if had_previous:
+        if not _path_exists(backup):
+            problems.append(f"备份不在了：{backup}")
+        else:
+            try:
+                _move_path(backup, target)
+            except OSError as exc:
+                problems.append(f"备份移不回去：{type(exc).__name__}: {exc}")
+    if problems:
+        raise InstallRollbackError("；".join(problems))
+
+
+def _refresh_cache(plugin_id: str, target: Path, cached: Path, cache_root: Path) -> None:
+    """把刚装好的目录复制进下载缓存，供下次离线安装。
+
+    缓存只是加速，不是事实来源：复制失败不回滚已经装好的插件，只把警告
+    带回去。先复制到临时目录再换名，避免下次命中一个只写了一半的缓存。
+    """
+    cache_root.mkdir(parents=True, exist_ok=True)
+    tmp = cache_root / f".{cached.name}.tmp-{os.getpid()}-{time.time_ns()}"
+    try:
+        shutil.copytree(target, tmp)
+        if _path_exists(cached):
+            _remove_path(cached)
+        _move_path(tmp, cached)
+    finally:
+        if _path_exists(tmp):
+            _remove_path(tmp)
+    for old in cache_root.glob(f"{plugin_id}-*"):  # 旧版本的缓存没用了
+        if old != cached:
+            try:
+                _remove_path(old)
+            except OSError:
+                pass
+
+
 def install(store, plugin_id: str) -> dict[str, Any]:
+    """安装或替换插件：先 staging 校验，再备份旧目录、原子换入，最后写库。
+
+    顺序和 DSH 的安装器一致：可恢复状态先留好，失败按备份回滚，不把旧目录
+    先删掉。之前正是 shutil.rmtree(target) 之后任何一步失败（目录被占用、
+    rename 失败、缓存复制失败）都会留下空目录或半截包，库里却还是旧记录。
+    """
     entry = next((e for e in merged(store)["entries"] if e.get("id") == plugin_id), None)
     if entry is None:
         raise RuntimeError(f"registry 里没有 {plugin_id}")
     target_root = plugins_root()
+    target_root.mkdir(parents=True, exist_ok=True)
     target = target_root / plugin_id
     expected = str(entry.get("sha256") or "")
     # 更新不能把用户关掉的插件又打开：先记住现有 enabled，写库时带回去
@@ -194,37 +338,66 @@ def install(store, plugin_id: str) -> dict[str, Any]:
     cache_root = _cache_dir() / "plugins"
     cache_key = f"{plugin_id}-{(expected or 'nohash')[:12]}"
     cached = cache_root / cache_key
-    tmp = Path(tempfile.mkdtemp(prefix=f"of-{plugin_id}-", dir=str(target_root.parent)))
+    work = _work_dir(target_root, plugin_id)
+    staging = work / "new"
+    backup = work / "previous"
+    had_previous = _path_exists(target)
+    moved_old = False
+    swapped = False
+    keep_work = False
     try:
+        _write_meta(work, {"plugin_id": plugin_id, "target": str(target),
+                           "action": "install"})
         if (cached / "plugin.json").exists():
-            shutil.copytree(cached, tmp / "pkg")
+            shutil.copytree(cached, staging)
         else:
             files = _remote_files(plugin_id)
             for name, url in files:
-                (tmp / "pkg" / name).parent.mkdir(parents=True, exist_ok=True)
-                (tmp / "pkg" / name).write_bytes(_http_bytes(url))
-        pkg = tmp / "pkg"
-        if not (pkg / "plugin.json").exists():
+                (staging / name).parent.mkdir(parents=True, exist_ok=True)
+                (staging / name).write_bytes(_http_bytes(url))
+        if not (staging / "plugin.json").exists():
             raise RuntimeError("下载到的内容里没有 plugin.json")
-        actual = dir_hash(pkg)
+        actual = dir_hash(staging)
         if expected and actual != expected:
             raise RuntimeError(f"sha256 不符（期望 {expected[:12]}…，实际 {actual[:12]}…），已拒绝安装")
-        if target.exists():
-            shutil.rmtree(target)
-        pkg.rename(target)
-        cache_root.mkdir(parents=True, exist_ok=True)
-        for old in cache_root.glob(f"{plugin_id}-*"):  # 旧版本的缓存没用了
-            if old != cached:
-                shutil.rmtree(old, ignore_errors=True)
-        if cached.exists():
-            shutil.rmtree(cached)
-        shutil.copytree(target, cached)
+
+        if had_previous:
+            _move_path(target, backup)
+            moved_old = True
+        _move_path(staging, target)
+        swapped = True
+
+        # 换入后再校验一遍，防止跨卷/占用导致只搬了一半（DSH 的 post-install check）。
         manifest = json.loads((target / "plugin.json").read_text(encoding="utf-8"))
+        actual = dir_hash(target)
+        if expected and actual != expected:
+            raise RuntimeError(f"落盘后 sha256 不符（期望 {expected[:12]}…，实际 {actual[:12]}…）")
+        # 数据库最后写：前面任何一步失败，旧记录和旧目录都还在。
         store.upsert_plugin(plugin_id, str(manifest.get("version", entry.get("version", ""))),
                             actual, source="registry", enabled=keep_enabled)
-        return {"ok": True, "id": plugin_id, "version": manifest.get("version"), "sha256": actual}
+    except Exception as exc:
+        if moved_old or swapped:
+            try:
+                _rollback(target, backup, moved_old)
+            except Exception as rb:
+                keep_work = True
+                _keep_work(work, plugin_id, target, "install")
+                raise InstallRollbackError(
+                    f"{exc}；回滚失败：{rb}。旧目录备份在 {backup}") from exc
+        if not keep_work:
+            shutil.rmtree(work, ignore_errors=True)
+        raise
+    warning = ""
+    try:
+        _refresh_cache(plugin_id, target, cached, cache_root)
+    except Exception as exc:  # 缓存失败只降级，不影响已经装好的插件
+        warning = f"缓存没更新成功：{type(exc).__name__}: {exc}"[:200]
+    try:
+        return {"ok": True, "id": plugin_id, "version": manifest.get("version"),
+                "sha256": actual, "cache_warning": warning}
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        if not keep_work:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 # ---------------------------------------------------------------- 版本与更新
@@ -291,14 +464,35 @@ def uninstall(store, plugin_id: str) -> dict[str, Any]:
 
     目录已经不在时也把库里那行清掉，而不是报「没有安装」。之前正是这一步
     让「目录被手工删掉 → 卸载被拒 → 市场页永远显示已安装」成了死锁。
+
+    目录还在时也不直接 rmtree：先改名为备份，库删成功后再删备份。库删失败
+    就把目录移回去，避免出现「目录没了、库里还显示已安装」的半截状态。
     """
-    target = plugins_root() / plugin_id
-    removed = False
-    if target.exists():
-        if target.is_symlink() or not target.is_dir():
-            target.unlink()
-        else:
-            shutil.rmtree(target)
-        removed = True
-    store.delete_plugin(plugin_id)
-    return {"ok": True, "id": plugin_id, "removed": removed}
+    target_root = plugins_root()
+    target = target_root / plugin_id
+    if not _path_exists(target):
+        store.delete_plugin(plugin_id)
+        return {"ok": True, "id": plugin_id, "removed": False}
+    target_root.mkdir(parents=True, exist_ok=True)
+    work = _work_dir(target_root, plugin_id)
+    backup = work / "previous"
+    keep_work = False
+    try:
+        _write_meta(work, {"plugin_id": plugin_id, "target": str(target),
+                           "action": "uninstall"})
+        _move_path(target, backup)
+        try:
+            store.delete_plugin(plugin_id)
+        except Exception as exc:
+            try:
+                _move_path(backup, target)
+            except Exception as rb:
+                keep_work = True
+                _keep_work(work, plugin_id, target, "uninstall")
+                raise InstallRollbackError(
+                    f"{exc}；卸载回滚失败：{rb}。插件目录备份在 {backup}") from exc
+            raise
+        return {"ok": True, "id": plugin_id, "removed": True}
+    finally:
+        if not keep_work:
+            shutil.rmtree(work, ignore_errors=True)

@@ -13,13 +13,31 @@
 
 结果：市场页认为已安装 → 不显示安装；卸载又被目录不存在挡住 → 记录清不掉。
 
-## 改动
+## 改动一：幽灵记录清理
 
 - `onefeed/service.py`：`sync_installed(store, root, prune=False)`。`prune=True` 时，库里有、目录已经不存在的插件记录会被删掉；目录还在但这次没读动的保留，交给插件页继续报错。
 - `onefeed/api.py`：`GET /api/plugins?refresh_market=true`（市场页「刷新目录」）会先调 `sync_installed(..., prune=True)`，再返回市场数据；卸载错误提示同步更新。
 - `onefeed/market.py`：`uninstall` 改成幂等。目录不存在也删库记录，返回值带 `removed` 说明有没有真的删目录；文件 / 符号链接也能处理。
 - `onefeed/app.py`：`create_app(store, plugins_dir=None)` 支持测试注入插件目录，避免测试碰真实插件。
-- `tests/test_market_update.py`：新增「幽灵记录 → 刷新目录 → 重新安装 → 再删目录 → 幂等卸载」场景，市场测试 53 项。
+- `tests/test_market_update.py`：新增「幽灵记录 → 刷新目录 → 重新安装 → 再删目录 → 幂等卸载」场景。
+
+## 改动二：安装改成原子替换 + 回滚
+
+参考 DSH 插件管理器的做法，不追求「目录 rename 本身绝对原子」，而是把可恢复状态先落盘：
+
+1. **先 staging，后换入**。下载或复制到与插件根同级的隐藏目录 `.of-<plugin>-xxxx` 里，校验 `plugin.json` 和 `dir_hash` 之后才动正式目录。
+2. **旧目录改名成 `previous` 备份**，新目录再 rename 到 target。任一步失败都能把备份移回来。
+3. **换入后复核**。重新读 target 的 manifest、重算 `dir_hash`，确认换进来的就是期望版本。
+4. **数据库最后写**。`upsert_plugin` 放在目录换好、复核通过之后；写库失败同样回滚目录，不会出现「目录是新的、库是旧的」。
+5. **缓存失败不回滚**。安装已经成功时，复制市场缓存失败只返回 `cache_warning`，不影响插件可用。
+6. **崩溃可恢复**。工作目录里的 `meta.json` 记录 plugin_id、target、action、preserve。服务启动时 `recover_installs()` 扫 `.of-*`：
+   - target 不在：把 `previous` 移回去，库补登记；
+   - target 已经是新版本、库还停在旧版本：按磁盘 manifest 补库，保留原来的启用状态；
+   - 卸载已写库：直接清备份，不把插件目录恢复回来；
+   - 回滚失败写过 `preserve`：启动时跳过，留给人处理。
+7. **卸载也走同一套**：先把目录改名成 `previous`，库删成功后再清备份；删库失败就把目录移回，不再出现「目录没了、库里还显示已安装」。
+
+对应实现：`onefeed/market.py` 的 `_work_dir`、`_write_meta`、`_keep_work`、`_rollback`、`_refresh_cache`、`recover_installs`；`onefeed/app.py` 在 `sync_installed` 之前调 `recover_installs`。
 
 ## 本次恢复操作
 
@@ -33,10 +51,13 @@
 
 ## 验证
 
-- `uv run python tests/test_market_update.py`：53 项通过。
+- `uv run python tests/test_market_update.py`：81 项通过。
+- 原子安装覆盖：staging→target rename 失败回滚、`upsert_plugin` 失败回滚、缓存复制失败仍登记、卸载删库失败移回目录。
+- 崩溃恢复覆盖：换入前崩溃、换入后未写库、卸载已写库三种工作目录。
 - `uv run python tests/run_all.py`：31 项全过。
 
 ## 边界
 
 - 目录**存在但 ACL 坏掉**时，`prune` 会保守地保留记录；`uninstall` 仍可能因 `rmtree` 没有权限而失败。这种状态需要重启清句柄，或用管理员 `takeown` / `icacls` 处理，代码层不能绕过 Windows ACL。
-- `market.install` 仍是「删旧目录 → rename 新目录 → 复制缓存 → 写库」的顺序，不是原子替换；这次只修了死锁，没有改安装器。后续若要彻底避免 11/23 那种半截目录，应把旧目录先改名成 `.bak-时间戳`，新目录换上去，成功后再删备份，失败回滚，并把 `upsert_plugin` 提到缓存复制之前。
+- 原子替换只覆盖 onefeed 自己管理的插件目录。若进程在换入前被强杀，旧目录在隐藏的 `.of-*` 里；启动时恢复。若回滚本身失败，会写 `preserve: true` 并保留工作目录，不会自动删掉证据，需要人工处理。
+- Windows 上目录 rename 仍可能被占用句柄挡住；这种失败会走回滚，不会留下半截 target。
