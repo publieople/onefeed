@@ -398,26 +398,49 @@ def act_mark_read(ctx: Ctx, ids=None, state: str = "read") -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- L3 外部副作用
-@action("refresh_feed", L3, "触发一次采集刷新，并等它跑完（可能几十秒）。",
-        {"platforms": _p("list", "只刷这些平台，空=全部")})
-def act_refresh_feed(ctx: Ctx, platforms=None) -> dict[str, Any]:
+def pull_feed(ctx: Ctx, platforms=None, timeout: float | None = None,
+              announce: bool = True,
+              should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
+    """抓一轮并同步等到跑完；用户点刷新与 Agent 自动兜底共用这一条路。
+
+    L3 确认在 call() 里，不在这个函数里：Agent 自动兜底绕开的是「等用户点允许」，
+    不是平台冷却。抓太密会被平台返回空列表，看起来像「今天没内容」，比抓不到更糟。
+    """
     runner = ctx.runner
     if runner is None:
         return {"ok": False, "error": "刷新组件不在，无法采集"}
     pids = norm_platforms(platforms) or None
     before = ctx.store.count()
     started, snapshot = runner.trigger(platforms=pids)
-    if not started:
-        return {"ok": False, "error": "已经有一轮刷新在跑", "progress": snapshot}
-    deadline = time.time() + float(ctx.refresh_timeout)
+    snapshot = snapshot or {}
+    if not started and not snapshot.get("running"):
+        # 没起新的一轮、也没有正在跑的：冷却挡完了 / 没有插件。原样把原因交回去。
+        return {"ok": False,
+                "error": str(snapshot.get("error") or "已经有一轮刷新在跑"),
+                "progress": snapshot}
+    budget = float(ctx.refresh_timeout if timeout is None else timeout)
+    deadline = time.time() + max(5.0, budget)
     while time.time() < deadline:
+        if should_stop is not None and should_stop():
+            return {"ok": False, "error": "已停止", "stopped": True,
+                    "progress": runner.snapshot() if hasattr(runner, "snapshot") else {}}
+        # 已经在跑（自己起的，或用户手点的那一轮）都跟着等，不另起
         if not runner.running():
             break
         time.sleep(0.5)
     snap = runner.snapshot() if hasattr(runner, "snapshot") else {}
     added = ctx.store.count() - before
-    ctx.send("step", "refresh_feed", {"title": f"刷新完成，新增 {added} 条", "detail": snap})
-    return {"ok": True, "added": added, "progress": snap}
+    if announce:
+        ctx.send("step", "refresh_feed",
+                 {"title": f"刷新完成，新增 {added} 条", "detail": snap})
+    return {"ok": True, "added": added, "progress": snap,
+            "timed_out": bool(snap.get("running"))}
+
+
+@action("refresh_feed", L3, "触发一次采集刷新，并等它跑完（可能几十秒）。",
+        {"platforms": _p("list", "只刷这些平台，空=全部")})
+def act_refresh_feed(ctx: Ctx, platforms=None) -> dict[str, Any]:
+    return pull_feed(ctx, platforms)
 
 
 # ---------------------------------------------------------------- L2 长任务

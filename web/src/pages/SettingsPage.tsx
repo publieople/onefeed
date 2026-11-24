@@ -665,6 +665,21 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   </span>
                 </label>
 
+                <label className="flex items-start gap-2.5 rounded-lg border border-line px-3.5 py-3">
+                  <input
+                    type="checkbox"
+                    checked={form.agent_auto_pull}
+                    onChange={(e) => setForm({ ...form, agent_auto_pull: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 accent-black"
+                  />
+                  <span>
+                    <span className="text-[13px] font-medium">Agent 搜不到时自动抓一轮</span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-fade">
+                      库里 0 条时先去平台抓一轮再查；每轮最多一次，仍受上面的抓取间隔限制。
+                    </span>
+                  </span>
+                </label>
+
                 <div className="flex items-center gap-2 pt-1">
                   <button
                     onClick={() => void saveSettings()}

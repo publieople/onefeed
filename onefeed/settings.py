@@ -60,6 +60,9 @@ DEFAULTS: dict[str, Any] = {
     "ai_agent": True,
     # 011 起预算按 spec 的 max_tool_calls=10；010 时期是 6，真机上 6 次常在中途用满。
     "ai_agent_max_tools": 10,
+    # 搜不到时自动抓一轮：库里 0 条 → 去平台采集 → 用同一条件重查，每轮最多一次。
+    # 不是绕过限流：仍受上面的平台抓取间隔约束，只是省掉「等用户点允许」那一下。
+    "agent_auto_pull": True,
     # AI 总结默认粒度。详情页右上角可以逐条临时改，这里定的是「新打开一条用哪档」。
     "summary_depth": "balanced",
 }
@@ -232,6 +235,12 @@ def validate(patch: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, bool):
             raise ValueError("vision_summary 必须是 true / false")
         out["vision_summary"] = value
+
+    if "agent_auto_pull" in patch:
+        value = patch["agent_auto_pull"]
+        if not isinstance(value, bool):
+            raise ValueError("agent_auto_pull 必须是 true / false")
+        out["agent_auto_pull"] = value
 
     if "default_sort" in patch:
         value = str(patch["default_sort"] or "")

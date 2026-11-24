@@ -51,12 +51,16 @@ def sync_installed(store, root: Path | None = None) -> int:
     known = {p["id"] for p in store.list_plugins()}
     added = 0
     for child in sorted(root.iterdir()):
-        manifest_path = child / "plugin.json"
-        if not child.is_dir() or not manifest_path.exists():
-            continue
         try:
+            if not child.is_dir():
+                continue
+            manifest_path = child / "plugin.json"
+            if not manifest_path.exists():
+                continue
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            # 单个插件目录读不动（权限坏了、正在被卸载、半截文件）不该拖垮启动：
+            # 跳过它，其余插件照常登记，缺的那一个由插件页单独报错。
             continue
         plugin_id = str(manifest.get("id") or child.name)
         if plugin_id in known:

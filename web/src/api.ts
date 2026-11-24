@@ -182,6 +182,8 @@ export interface SettingsValues {
   /** {平台: 秒}，0 = 该平台不限制；空表表示全用内置默认 */
   platform_intervals: Record<string, number>;
   auto_update: boolean;
+  /** 库里 0 条时让 Agent 自动去平台抓一轮再查（每轮一次，仍受平台间隔限制） */
+  agent_auto_pull: boolean;
   /** 总结时是否把图片交给多模态模型（关掉只读文字，省钱） */
   vision_summary: boolean;
   /** 新打开一条时用哪档总结粒度：brief / balanced / detailed */

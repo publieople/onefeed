@@ -98,12 +98,16 @@ class PluginHost:
             raise ManifestError(f"插件目录不存在: {self.plugins_dir}")
         found: list[Manifest] = []
         for child in sorted(self.plugins_dir.iterdir()):
-            if not child.is_dir() or not (child / "plugin.json").is_file():
-                continue
             try:
+                if not child.is_dir() or not (child / "plugin.json").is_file():
+                    continue
                 m = load_manifest(child, host_version=self.host_version)
             except ManifestError as exc:
                 self.errors.append(str(exc))
+                continue
+            except OSError as exc:
+                # 单个插件目录读不动（权限、删到一半、杀软占着）不该拖垮整轮发现
+                self.errors.append(f"插件目录读不动：{child}（{exc}）")
                 continue
             if m.id in self._manifests:
                 self.errors.append(f"插件 id 重复：{m.id}（{child}）")

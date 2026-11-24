@@ -19,6 +19,7 @@ from typing import Any, Iterator
 from pydantic_ai import Agent, RunContext
 
 from . import actions as act_mod
+from . import settings as settings_mod
 from . import smart
 from .agent import Answer, Pick, _messages, _models, _previous, _with_timeout
 
@@ -38,13 +39,16 @@ INSTRUCTIONS = """你是 OneFeed 的助手，能操作这个应用，不只是�
 3. 只能挑检索结果里出现过的 id，原样抄，不许编。宁可少给，不许凑数。
 4. 用户提到平台/时间/时长/点赞，要么真的生效，要么在 reply 里说清没做到哪条。
 5. 结果少（≤2 条）就说明为什么少：是库里没有、条件太窄，还是时间太新。
+   第一次搜出 0 条时，运行器会自动去平台抓一轮再查（见第 9 条），那一步不用你动手。
 6. reply 是给人看的一句话（≤60 字），不要复述步骤；picks 按相关度排，最多 8 条。
 7. 用户让你「存起来 / 收藏」就直接调 save_item；让你「切到某平台看」就调 ui_filter。
 8. 用户要「简报 / 总结成 md / 导出」是两步活：summarize_item（1 条）或 summarize_batch（多条）
    → 紧接着 export_markdown。中间不要再搜一遍、不要再刷新采集；回报里给出文件路径即可，
    别把正文念一遍。总结失败或某条没正文时，说清是哪条没成，不要编内容。
-9. 用户没明说「刷新 / 更新 / 再抓一次」，就不要调 refresh_feed：它会等确认、耽误几十秒。
-   检索结果不够时，先换词、放宽条件，或在 reply 里说明。
+9. 库里第一次搜出 0 条时，运行器会自动去平台抓一轮、再用同样的条件查一次
+   （每轮最多一次，可能几十秒，仍受平台冷却限制）；这会显示成一条步骤，你不用自己调
+   refresh_feed。只有用户明确说「刷新 / 更新 / 再抓一次」才调它：它是 L3，会先问用户。
+   自动那一轮抓完仍然 0 条，就直说「抓过了，这几个平台确实没有」，不要拿别的条目凑数。
 10. 动手前先调 set_plan 把步骤摊开（3-5 条短句，用「动词 + 对象」，例：「翻今天 AI 相关」
    「各写一句总结」），再一条条做。这轮要调两次以上工具（检索 + 总结、多条总结 + 导出、问一句 +
    检索）就先 plan；一次工具就能完事的单句检索不必 plan，直接做完回一句。
@@ -134,6 +138,8 @@ class Deps:
     deadline: float = 0.0  # 本轮整段的硬截止（time.time() 基准），确认等待不能吃穿它
     searches: int = 0  # 检索类动作已用次数；上限固定，避免模型把预算全花在反复搜
     search_hit: bool = False
+    auto_pulled: bool = False  # 本轮是否已经「搜不到 → 自动抓一轮」
+    auto_pull_enabled: bool = True  # 设置里可关；关掉后 0 条就只换词，不再打外网
 
     def remember(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
@@ -271,6 +277,11 @@ def _run_action(deps: Deps, writer: EventWriter, name: str,
                                    "args": preview, "result": str(exc)[:300]})
         return {"ok": False, "error": str(exc)}
     ms = int((time.time() - started) * 1000)
+    # 第一次搜出 0 条：别急着告诉用户「没有」，先自动抓一轮再查（每轮一次）
+    if (name == "search_items" and isinstance(result, dict)
+            and int(result.get("count") or 0) == 0):
+        result = _auto_pull(deps, writer, args, result)
+        ms = int((time.time() - started) * 1000)
     rows = result.get("items") if isinstance(result, dict) else None
     if isinstance(rows, list):
         deps.remember(rows)
@@ -333,6 +344,83 @@ def _take_plan(writer: EventWriter, args: dict[str, Any]) -> dict[str, Any]:
     writer.emit("plan", "plan", {"steps": steps})
     return {"ok": True, "steps": steps,
             "note": "计划已展示给用户；照着做，做完在 reply 里对一下"}
+
+
+AUTO_PULL_MIN_SECONDS = 30.0  # 剩得比这少就别开抓：抓一半被拆掉，用户等到的是空结果
+AUTO_PULL_MAX_WAIT = 50.0  # 自动那一轮最多等这么久，剩下的时间留给模型写结论
+
+
+def _auto_pull_setting() -> bool:
+    try:
+        return bool(settings_mod.load().get("agent_auto_pull", True))
+    except Exception:
+        return True
+
+
+def _auto_pull(deps: Deps, writer: EventWriter, args: dict[str, Any],
+               first: dict[str, Any]) -> dict[str, Any]:
+    """第一次搜出 0 条时的兜底：去平台抓一轮，再用同一条件查一次。
+
+    为什么放在运行器里，而不是只靠提示词：模型只看得到「库里 0 条」，
+    看不到「平台上有、只是还没采」。让它自己决定去抓，多半会直接收尾说「没有」。
+    这里做成确定性的一条路：每轮最多一次，仍受平台冷却与整轮剩余时间约束——
+    绕过的是「等用户点允许」，不是限流。
+    """
+    if deps.auto_pulled or not deps.auto_pull_enabled or deps.ctx.runner is None:
+        return first
+    remaining = (deps.deadline - time.time()) if deps.deadline else MAX_SECONDS
+    if remaining < AUTO_PULL_MIN_SECONDS:
+        writer.emit("step", "auto_pull", {"title": "库里没有，但这轮没时间抓了",
+                                          "kind": "note"})
+        return first
+    deps.auto_pulled = True
+    query = first.get("query") or {}
+    pids = [str(p) for p in (query.get("platforms") or [])]
+    names = "、".join(smart_platform_name(p) for p in pids) or "各平台"
+    writer.emit("step", "auto_pull", {"title": f"库里没有，先去{names}抓一轮",
+                                      "kind": "note"})
+    # 留 20 秒给重查与收尾：抓取和写结论共用同一个 120 秒预算
+    budget = max(10.0, min(AUTO_PULL_MAX_WAIT, remaining - 20.0))
+    try:
+        pulled = act_mod.pull_feed(deps.ctx, pids, timeout=budget, announce=False,
+                                   should_stop=lambda: writer.state.cancel)
+    except Exception as exc:  # 抓取失败不该带崩这一轮：按原来的空结果继续
+        writer.emit("step", "auto_pull", {"title": "抓取没成，先用现有结果",
+                                          "kind": "note", "detail": str(exc)[:120]})
+        return first
+    if writer.state.cancel:
+        raise Cancelled("cancelled")
+    added = int(pulled.get("added") or 0)
+    progress = pulled.get("progress") or {}
+    skipped = [str(v.get("note") or "") for v in (progress.get("plugins") or {}).values()
+               if isinstance(v, dict) and v.get("status") == "skipped"]
+    if pulled.get("ok"):
+        if progress.get("running"):
+            note = "还在抓，先给你已经入库的部分"
+        elif added:
+            note = f"抓完一轮，新增 {added} 条"
+        elif skipped:
+            note = (skipped[0] or "这几个平台都在冷却，没能抓")[:80]
+        elif progress.get("error"):
+            note = str(progress["error"])[:80]
+        else:
+            note = "抓完一轮，没有新增"
+    else:
+        note = str(pulled.get("error") or "抓取没成")[:80]
+    writer.emit("step", "auto_pull", {"title": note, "kind": "note"})
+    try:
+        again = act_mod.call(deps.ctx, "search_items", args)
+    except Exception:
+        first["auto_pull"] = {"ok": bool(pulled.get("ok")), "added": added, "note": note}
+        return first
+    if not isinstance(again, dict):
+        return first
+    again["auto_pull"] = {"ok": bool(pulled.get("ok")), "added": added, "note": note}
+    if int(again.get("count") or 0) == 0:
+        again["note"] = note + "；还是没搜到，换个说法或放宽条件。"
+    else:
+        again["note"] = note + "；下面是抓完之后重新检索的结果。"
+    return again
 
 
 def _await_answer(deps: Deps, writer: EventWriter, args: dict[str, Any],
@@ -604,6 +692,7 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
                                 exports_dir=Path(store.path).parent / act_mod.EXPORT_DIR_NAME),
                 store=store, limit=max(1, int(limit)), exclude=tuple(exclude or ()))
     deps.max_tool_calls = max(1, min(int(max_tools), 20))
+    deps.auto_pull_enabled = _auto_pull_setting()
     deps.ctx.emit = writer.emit
     deps.deadline = started + float(timeout)
     answer: Answer | None = None

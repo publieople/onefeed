@@ -203,6 +203,84 @@ def main() -> int:
     check(got["ok"] is True and got["added"] == 1, "确认后刷新同步等到跑完并报增量")
     check(fake.triggered == ["bilibili"], "刷新平台也被归一化")
 
+    # ------------------------------------------- 2b) 搜不到时自动抓一轮（#Agent主动拉取）
+    class AutoRunner:
+        """只做一件事：被触发时往库里塞一条「量子计算」的条目。"""
+
+        def __init__(self, store):
+            self.store = store
+            self.calls = 0
+
+        def trigger(self, platforms=None, warmup=False):
+            self.calls += 1
+            self.store.upsert_items([{
+                "id": "zhihu:quantum", "platform": "zhihu", "kind": "article",
+                "title": "量子计算新进展", "text": "量子计算 纠错 新进展",
+                "author": "作者", "cover": "", "url": "https://example.com/zhihu:quantum",
+                "published_at": NOW, "duration": 0, "like": 0, "comment": 0,
+                "share": 0, "view": 0, "tags": [], "extra": {},
+                "cluster_id": "", "fetched_at": NOW}])
+            return True, {"running": True}
+
+        def running(self):
+            return False
+
+        def snapshot(self):
+            return {"running": False, "phase": "done", "new_total": 1, "plugins": {}}
+
+    def scripted_auto_pull(messages, info):
+        returned = [p for m in messages for p in getattr(m, "parts", [])
+                    if isinstance(p, ToolReturnPart)]
+        if not returned:
+            return ModelResponse(parts=[ToolCallPart("search_items", {"terms": ["量子计算"]})])
+        rows = []
+        for part in returned:
+            content = part.content
+            if isinstance(content, dict) and isinstance(content.get("items"), list):
+                rows = content["items"]
+        return ModelResponse(parts=[answer_part(info, "刚抓进来的。", [
+            {"id": r["id"], "why": "自动抓取后命中"} for r in rows[:2]])])
+
+    auto = AutoRunner(store)
+    res_auto = rt.run(store, "库里没有量子计算的内容吗", chain=CHAIN,
+                      model=FunctionModel(scripted_auto_pull), timeout=60, runner=auto)
+    check(auto.calls == 1, "搜出 0 条时自动触发了一轮采集")
+    auto_events = [e for e in store.get_agent_run(res_auto["run_id"])["events"]
+                   if e["kind"] == "step" and e["name"] == "auto_pull"]
+    check(len(auto_events) >= 2, "自动抓取在轨迹里可见（开抓一条、结果一条）")
+    check(res_auto["count"] >= 1 and res_auto["items"][0]["id"] == "zhihu:quantum",
+          "抓完用同一条件重查，拿到新条目")
+
+    def scripted_two_misses(messages, info):
+        returned = [p for m in messages for p in getattr(m, "parts", [])
+                    if isinstance(p, ToolReturnPart)]
+        if not returned:
+            return ModelResponse(parts=[ToolCallPart("search_items", {"terms": ["量子计算"]})])
+        if len(returned) == 1:
+            return ModelResponse(parts=[ToolCallPart("search_items", {"terms": ["超导磁悬浮"]})])
+        return ModelResponse(parts=[answer_part(info, "两轮都没有。", [])])
+
+    auto2 = AutoRunner(store)
+    rt.run(store, "量子计算和超导磁悬浮都看看", chain=CHAIN,
+           model=FunctionModel(scripted_two_misses), timeout=60, runner=auto2)
+    check(auto2.calls == 1, "同一轮里两次 0 结果也只抓一次")
+
+    settings_mod.save({"agent_auto_pull": False})
+    try:
+        def scripted_miss(messages, info):
+            returned = [p for m in messages for p in getattr(m, "parts", [])
+                        if isinstance(p, ToolReturnPart)]
+            if not returned:
+                return ModelResponse(parts=[ToolCallPart("search_items", {"terms": ["冷聚变"]})])
+            return ModelResponse(parts=[answer_part(info, "没有。", [])])
+
+        off = AutoRunner(store)
+        rt.run(store, "冷聚变有吗", chain=CHAIN,
+               model=FunctionModel(scripted_miss), timeout=20, runner=off)
+        check(off.calls == 0, "设置里关掉后不再自动抓")
+    finally:
+        settings_mod.save({"agent_auto_pull": True})
+
     # ---------------------------------------------------------------- 3) 运行器
     res = rt.run(store, "找点 B 站的 AI 内容", chain=CHAIN,
                  model=FunctionModel(scripted_two_steps), timeout=20)
