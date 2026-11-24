@@ -39,16 +39,21 @@ class FixtureMissing(RuntimeError):
     """DEMO 模式下这个平台没有本地样例。算「跳过」，不算抓取失败。"""
 
 
-def sync_installed(store, root: Path | None = None) -> int:
+def sync_installed(store, root: Path | None = None, prune: bool = False) -> int:
     """把插件目录里真实存在的插件登记进库：目录是事实，库只是索引。
 
-    库里没有的补一条 source=local；库里多出来的（目录已被手工删掉）不主动删，
-    交给卸载接口处理，免得误删历史记录。
+    库里没有的补一条 source=local。prune=True 时还会反过来清掉「目录已经不在了」
+    的幽灵记录；目录还在但读不动的（权限坏了、正在被卸载）保留记录，让插件页
+    继续报错，而不是把它当成已卸载。
+
+    之前这里只增不删，结果用户手工删掉插件目录后，库里那行永远还在：市场页
+    继续显示「已安装」，卸载接口又因为目录不存在而拒绝，形成死锁。
     """
     root = Path(root or default_plugins_dir())
     if not root.is_dir():
         return 0
     known = {p["id"] for p in store.list_plugins()}
+    seen: set[str] = set()
     added = 0
     for child in sorted(root.iterdir()):
         try:
@@ -63,10 +68,19 @@ def sync_installed(store, root: Path | None = None) -> int:
             # 跳过它，其余插件照常登记，缺的那一个由插件页单独报错。
             continue
         plugin_id = str(manifest.get("id") or child.name)
+        seen.add(plugin_id)
         if plugin_id in known:
             continue
         store.upsert_plugin(plugin_id, str(manifest.get("version", "")), source="local")
         added += 1
+    if prune:
+        for row in store.list_plugins():
+            plugin_id = str(row["id"])
+            if plugin_id in seen:
+                continue
+            if (root / plugin_id).exists():
+                continue  # 目录在，只是这次没读动：保留记录，交给插件页报错
+            store.delete_plugin(plugin_id)
     return added
 
 

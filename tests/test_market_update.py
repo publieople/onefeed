@@ -258,7 +258,7 @@ def main() -> int:
     try:
         sb2.add_remote("gamma", "0.3.0")
         store2.upsert_plugin("gamma", "0.2.0", "sha-g", source="registry", enabled=1)
-        app = create_app(store=store2)
+        app = create_app(store=store2, plugins_dir=sb2.plugin_root)
         client = TestClient(app)
 
         updates = client.get("/api/market/updates")
@@ -286,6 +286,33 @@ def main() -> int:
         gamma = next(e for e in plugins["market"]["entries"] if e["id"] == "gamma")
         check(gamma["update_available"] is False, "更新后不再提示可更新")
         check(gamma["installed_version"] == "0.3.0", "市场页读到的新版本")
+
+        # ------------------------------------------------ 目录被手工删掉：刷新目录要清幽灵记录
+        # 真实事故：bilibili 目录被删，库里的行还在，市场页继续显示「已安装」，
+        # 卸载接口又因为目录不存在而拒绝，结果既卸不掉也装不回来。
+        sb2.add_remote("ghost", "1.0.0")
+        store2.upsert_plugin("ghost", "1.0.0", "ghost-sha", source="registry", enabled=1)
+        check(not (sb2.plugin_root / "ghost").exists(), "ghost 目录一开始就不在")
+        refreshed = client.get("/api/plugins?refresh_market=true").json()
+        check(not any(p["id"] == "ghost" for p in refreshed["installed"]),
+              "刷新目录后幽灵记录被清掉")
+        ghost_market = next(e for e in refreshed["market"]["entries"] if e["id"] == "ghost")
+        check(ghost_market["installed"] is False, "市场页重新出现「安装」")
+
+        installed = client.post("/api/plugins/ghost/install")
+        check(installed.status_code == 200, "幽灵记录清掉后可以重新安装")
+        check((sb2.plugin_root / "ghost" / "plugin.json").exists(), "重装后目录回来了")
+        after = client.get("/api/plugins").json()
+        check(any(p["id"] == "ghost" for p in after["installed"]), "重装后库里也登记了")
+
+        # 目录再被删掉：卸载不能报「没有安装」，要幂等地清掉库记录
+        shutil.rmtree(sb2.plugin_root / "ghost")
+        removed = client.delete("/api/plugins/ghost")
+        check(removed.status_code == 200, "目录不在时卸载仍返回 200")
+        check(removed.json()["result"]["removed"] is False, "卸载结果标明没有实际删目录")
+        final = client.get("/api/plugins").json()
+        check(not any(p["id"] == "ghost" for p in final["installed"]),
+              "目录不在时卸载也清掉了库记录")
     finally:
         store2.close()
         restore_market(saved2)

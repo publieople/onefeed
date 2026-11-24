@@ -23,13 +23,14 @@ from .store import Store
 WEB_DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
 
 
-def create_app(store: Store | None = None) -> FastAPI:
+def create_app(store: Store | None = None, plugins_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="OneFeed", version=__version__, docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
     app.state.store = store or Store()
     conf = settings_mod.load()
     app.state.settings = conf
-    plugins_dir = settings_mod.resolve_plugins_dir(conf.get("plugins_dir", ""))
+    plugins_dir = Path(plugins_dir) if plugins_dir is not None \
+        else settings_mod.resolve_plugins_dir(conf.get("plugins_dir", ""))
     sync_installed(app.state.store, plugins_dir)
     app.state.refresher = RefreshRunner(
         app.state.store,

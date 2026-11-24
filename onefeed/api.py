@@ -1018,6 +1018,13 @@ def summary(request: Request) -> dict:
 def plugins(request: Request, refresh_market: bool = Query(False)) -> dict:
     store = _store(request)
     host = _runner(request).host
+    if refresh_market:
+        # 「刷新目录」不只是刷新 registry：目录是事实，库只是索引。
+        # prune=True 会把「目录已经被手工删掉」的幽灵记录清掉，市场页才会重新出现「安装」。
+        try:
+            sync_installed(store, Path(str(host.plugins_dir)), prune=True)
+        except OSError:
+            pass
     try:
         manifests = {m.id: m for m in host.discover()}
     except Exception:
@@ -1101,7 +1108,7 @@ def uninstall_plugin(request: Request, plugin_id: str) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=400, detail={
             "code": "uninstall_failed", "message": f"{type(exc).__name__}: {exc}"[:300],
-            "hint": "确认插件目录存在并且进程有删除权限"})
+            "hint": "目录可能被占用或没有删除权限；目录已不存在时现在也会清理库记录"})
     return {"ok": True, "result": result}
 
 

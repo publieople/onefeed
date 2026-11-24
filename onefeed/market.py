@@ -287,9 +287,18 @@ def pending_updates(store) -> list[dict[str, Any]]:
 
 
 def uninstall(store, plugin_id: str) -> dict[str, Any]:
+    """卸载插件：目录是主，库只是索引。
+
+    目录已经不在时也把库里那行清掉，而不是报「没有安装」。之前正是这一步
+    让「目录被手工删掉 → 卸载被拒 → 市场页永远显示已安装」成了死锁。
+    """
     target = plugins_root() / plugin_id
-    if not target.exists():
-        raise RuntimeError(f"{plugin_id} 没有安装")
-    shutil.rmtree(target)
+    removed = False
+    if target.exists():
+        if target.is_symlink() or not target.is_dir():
+            target.unlink()
+        else:
+            shutil.rmtree(target)
+        removed = True
     store.delete_plugin(plugin_id)
-    return {"ok": True, "id": plugin_id}
+    return {"ok": True, "id": plugin_id, "removed": removed}
