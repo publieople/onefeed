@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Copy, ExternalLink, LogIn, LogOut, RefreshCw, RotateCcw, Save } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import type { OutletCtx } from "../App";
 import {
   agentRuns,
@@ -22,7 +23,7 @@ import { timeAgo } from "../format";
 import { PLATFORMS, platform } from "../platform";
 import SettingSection from "../components/SettingSection";
 import AiProviders from "../components/AiProviders";
-import { confirmDialog } from "../components/ui/Confirm";
+import { choiceDialog, confirmDialog } from "../components/ui/Confirm";
 
 /**
  * 数字输入框。直接 `Number(e.target.value)` 的问题是：清空输入框会静默变成 0，
@@ -144,6 +145,13 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const [runs, setRuns] = useState<AgentRunRow[]>([]);
   const reduce = useReducedMotion();
   const copyTimer = useRef(0);
+  const navigate = useNavigate();
+  // 没保存就站内离开时的三道拦截：链接点击、浏览器返回、关标签页（beforeunload 在下面）
+  const dirtyRef = useRef(false);
+  const leavingRef = useRef(false);
+  const leaveBusyRef = useRef(false);
+  const guardDepthRef = useRef(0);
+  const guardRef = useRef<(to: string) => void>(() => {});
 
   const load = useCallback(async () => {
     try {
@@ -264,6 +272,10 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
 
   const dirty = Boolean(form && baseline && JSON.stringify(form) !== baseline);
 
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
   // 关标签页 / 刷新时别把没保存的改动悄悄丢掉
   useEffect(() => {
     if (!dirty) return;
@@ -275,8 +287,8 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
-  const saveSettings = async () => {
-    if (!form) return;
+  const saveSettings = async (): Promise<boolean> => {
+    if (!form) return false;
     setSaving(true);
     try {
       // 空 key 表示「不改」，不要把已存的 key 冲掉；要清有单独的按钮。
@@ -291,12 +303,88 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
       await ctx.reloadSettings();
       flash(resp.applied?.length ? "已保存：" + resp.applied.join("；") : "已保存");
       void load();
+      return true;
     } catch (err) {
       flash((err as Error).message);
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  // 三选：保存 / 不保存 / 取消。选「保存」等它真的落盘成功才走，失败就留在原地。
+  const askLeave = async (to: string) => {
+    if (leaveBusyRef.current) return;
+    if (!dirtyRef.current) {
+      if (to) navigate(to);
+      return;
+    }
+    leaveBusyRef.current = true;
+    try {
+      const choice = await choiceDialog({
+        title: "这些设置还没保存",
+        body: "离开前保存吗？不保存的话，这次改的内容会恢复成上次保存的值。",
+        confirmText: "保存并离开",
+        secondaryText: "不保存",
+        cancelText: "取消",
+      });
+      if (choice === "cancel") return;
+      if (choice === "confirm") {
+        const ok = await saveSettings();
+        if (!ok) return;
+      }
+      dirtyRef.current = false;
+      leavingRef.current = true;
+      if (to) {
+        navigate(to);
+        return;
+      }
+      // 浏览器返回：脏的时候压过 guardDepthRef 条哨兵，一次退回到进设置页之前
+      window.history.go(-(guardDepthRef.current + 1));
+      window.setTimeout(() => {
+        if (window.location.pathname === "/settings") {
+          leavingRef.current = false;
+          navigate("/");
+        }
+      }, 700);
+    } finally {
+      leaveBusyRef.current = false;
+    }
+  };
+  guardRef.current = (to) => void askLeave(to);
+
+  // 拦站内链接：React Router 的 Link/NavLink 最终也是 <a href>，在 document 捕获阶段先接管
+  useEffect(() => {
+    if (!dirty) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+      e.preventDefault();
+      e.stopPropagation();
+      guardRef.current(url.pathname + url.search + url.hash);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [dirty]);
+
+  // 浏览器返回：脏的时候往历史里压一条同页哨兵，让「返回」先回到这条哨兵上再问
+  useEffect(() => {
+    if (!dirty) return;
+    guardDepthRef.current += 1;
+    const mask = { ...(window.history.state ?? {}), __ofSettingsGuard: true };
+    window.history.pushState(mask, "", window.location.href);
+    const onPop = () => {
+      if (leavingRef.current) return;
+      window.history.pushState(mask, "", window.location.href);
+      guardRef.current("");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [dirty]);
 
   const clearKeys = async () => {
     const ok = await confirmDialog({

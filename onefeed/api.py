@@ -118,14 +118,108 @@ def _percentiles(store: Store, rows: list[dict[str, Any]]) -> dict[str, dict[str
     return out
 
 
+STALE_SECONDS = 24 * 3600  # 超过一天没有新内容才算「长期没更新」，别把正常闲置当故障
+
+
+def _platform_health(runner: RefreshRunner, store: Store) -> dict[str, Any]:
+    """顶栏采集胶囊要能说清「哪个平台坏了 / 多久没动静」，这里算好一次给它。
+
+    只看 items 表是不够的：一个平台连续失败时 items 还在，用户看到的只是「没新增」。
+    所以把最近一次采集的成败、最后一次成功时间、插件是否还在都摊开。
+    """
+    now = int(time.time())
+    try:
+        manifests = runner.host.discover()
+        errors = list(runner.host.errors)
+    except Exception as exc:  # 插件目录整个读不动时，至少要能把原因带出去
+        manifests = []
+        errors = [f"{type(exc).__name__}: {exc}"[:300]]
+    labels = {m.id: (m.name or m.id) for m in manifests}
+    intervals = settings_mod.platform_intervals()
+    rows = {str(p["platform"]): dict(p) for p in store.platforms()}
+    recent = store.recent_runs(240)
+    last_run: dict[str, dict[str, Any]] = {}
+    last_ok: dict[str, int] = {}
+    for run in recent:
+        pid = str(run.get("plugin") or "")
+        if not pid:
+            continue
+        if pid not in last_run:
+            last_run[pid] = run
+        if run.get("ok") == 1 and pid not in last_ok:
+            last_ok[pid] = int(run.get("finished_at") or run.get("started_at") or 0)
+    live = (runner.snapshot().get("plugins") or {})
+
+    def row_of(pid: str, label: str, available: bool) -> dict[str, Any] | None:
+        base = rows.get(pid) or {"platform": pid, "count": 0, "last_fetched_at": 0}
+        run = last_run.get(pid) or {}
+        current = live.get(pid) or {}
+        # 装了但从来没抓过、库里也没内容的插件不进顶栏：顶栏说的是「我有什么」，
+        # 不是「我装了什么」。设置页有完整的插件列表。
+        if not (base.get("count") or run or current):
+            return None
+        last_ok_at = int(last_ok.get(pid) or 0)
+        last_run_at = int(run.get("finished_at") or run.get("started_at") or 0)
+        status = run.get("ok")
+        last_attempt_ok = None if status is None else bool(status)
+        failed = bool(last_run_at and status == 0 and last_run_at > last_ok_at)
+        interrupted = bool(last_run_at and status is None and now - last_run_at > 600)
+        interval = int(intervals.get(pid, 0) or 0)
+        last_success = max(last_ok_at, int(base.get("last_fetched_at") or 0))
+        stale_after = max(STALE_SECONDS, interval * 6) if interval else STALE_SECONDS
+        stale = bool(last_success and now - last_success > stale_after)
+        if not available:
+            state = "unavailable"
+        elif failed:
+            state = "failed"
+        elif stale:
+            state = "stale"
+        else:
+            state = "ok"
+        return {
+            "platform": pid,
+            "label": label,
+            "count": int(base.get("count") or 0),
+            "last_fetched_at": int(base.get("last_fetched_at") or 0),
+            "last_run_at": last_run_at,
+            "last_ok_at": last_ok_at,
+            "last_ok": last_attempt_ok,
+            "failed": failed,
+            "interrupted": interrupted,
+            "stale": stale,
+            "available": available,
+            "interval": interval,
+            "state": state,
+            "running": current.get("status") == "running",
+            "error": str(run.get("error") or "")[:300],
+            "note": str(current.get("note") or "")[:160],
+        }
+
+    out = [r for m in manifests if (r := row_of(m.id, labels.get(m.id, m.id), True))]
+    seen = {m.id for m in manifests}
+    # 库里有内容、插件却不在发现结果里：正是「B 站插件目录读不动」那种情况。
+    # 不能因为插件缺失就让它从列表里消失，否则用户只会觉得「B 站没更新」。
+    for pid in sorted(rows):
+        if pid not in seen:
+            row = row_of(pid, pid, False)
+            if row:
+                out.append(row)
+    attention = sum(1 for p in out if p["state"] in ("failed", "stale", "unavailable"))
+    return {"platforms": out, "plugin_errors": errors, "needs_attention": attention}
+
+
 @router.get("/health")
 def health(request: Request) -> dict:
     store = _store(request)
+    runner = _runner(request)
+    health_rows = _platform_health(runner, store)
     return {
         "ok": True, "version": __version__, "items": store.count(),
         "db": str(store.path), "plugins": len(store.list_plugins()),
-        "platforms": store.platforms(), "demo": demo_mode(),
-        "refreshing": _runner(request).running(),
+        "platforms": health_rows["platforms"], "demo": demo_mode(),
+        "refreshing": runner.running(),
+        "plugin_errors": health_rows["plugin_errors"],
+        "needs_attention": health_rows["needs_attention"],
     }
 
 

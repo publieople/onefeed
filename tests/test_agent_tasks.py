@@ -180,7 +180,7 @@ def main() -> int:
     summary_mod.build = orig_build
 
     # ---------------------------------------------------------------- 4) 批量
-    def batch_build(_store, _host, row):
+    def batch_build(_store, _host, row, _level="balanced"):
         if row["id"] == "bilibili:blank":
             raise RuntimeError("这条内容没有能读的正文。")
         return {"tldr": "批量：" + row["title"], "points": [{"t": None, "text": "要点"}], "caveat": ""}

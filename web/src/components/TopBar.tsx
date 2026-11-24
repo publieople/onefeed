@@ -90,7 +90,7 @@ export default function TopBar({ health, progress, onRefresh, onRetry }: Props) 
               <RefreshCw size={17} className={running ? "animate-spin" : ""} />
             </button>
           </div>
-          <CollectPill health={health} />
+          <CollectPill health={health} onRetry={onRetry} />
           <button
             onClick={flipTheme}
             title={theme === "dark" ? "切换到亮色" : "切换到暗色"}

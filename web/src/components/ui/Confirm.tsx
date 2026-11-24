@@ -23,30 +23,39 @@ export interface ConfirmOptions {
   tone?: "normal" | "danger";
   /** 必须一字不差输入这个词才能确认（清空所有 key 这类不可逆操作用） */
   requireTyping?: string;
+  /** 第三个键（例如「不保存」）。给了它就用 choiceDialog 取结果，confirmDialog 仍只认主按钮 */
+  secondaryText?: string;
 }
+
+/** 三选对话框的结果：confirm=主按钮，secondary=中间那个，cancel=取消/Esc/点外面 */
+export type ConfirmChoice = "confirm" | "secondary" | "cancel";
 
 interface Pending {
   opts: ConfirmOptions;
-  resolve: (ok: boolean) => void;
+  resolve: (choice: ConfirmChoice) => void;
 }
 
 /** 同一时刻只有一个确认框；重复请求时关掉上一个（当作取消） */
 let pending: Pending | null = null;
 let setHost: ((p: Pending | null) => void) | null = null;
 
-export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
+export function choiceDialog(opts: ConfirmOptions): Promise<ConfirmChoice> {
   return new Promise((resolve) => {
     const req = { opts, resolve };
     // 页面还没挂 ConfirmHost（或组件单独渲染时）退回原生 confirm，保证不会静默丢点击
     if (!setHost) {
       const ok = window.confirm([opts.title, opts.body].filter(Boolean).join("\n\n"));
-      resolve(ok);
+      resolve(ok ? "confirm" : "cancel");
       return;
     }
-    if (pending) pending.resolve(false);
+    if (pending) pending.resolve("cancel");
     pending = req;
     setHost(req);
   });
+}
+
+export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
+  return choiceDialog(opts).then((choice) => choice === "confirm");
 }
 
 /** 组件里这样用：const confirm = useConfirm(); if (!(await confirm({...}))) return; */
@@ -77,18 +86,18 @@ export function ConfirmHost() {
     return () => {
       setHost = null;
       if (pending) {
-        pending.resolve(false);
+        pending.resolve("cancel");
         pending = null;
       }
     };
   }, []);
 
-  const close = useCallback((ok: boolean) => {
+  const close = useCallback((choice: ConfirmChoice) => {
     const cur = pending;
     pending = null;
     setReq(null);
     setTyped("");
-    cur?.resolve(ok);
+    cur?.resolve(choice);
     // 焦点还给触发者：删完一行之后焦点落在 body 上，键盘用户会直接迷路
     const back = restoreRef.current as HTMLElement | null;
     restoreRef.current = null;
@@ -113,7 +122,7 @@ export function ConfirmHost() {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      close(false);
+      close("cancel");
       return;
     }
     if (e.key !== "Tab") return;
@@ -151,7 +160,7 @@ export function ConfirmHost() {
         >
           <div
             className="absolute inset-0 bg-solid/25 backdrop-blur-[2px]"
-            onClick={() => close(false)}
+            onClick={() => close("cancel")}
             aria-hidden="true"
           />
           <motion.div
@@ -190,7 +199,7 @@ export function ConfirmHost() {
                     // 输入法还在选词时这个 Enter 不属于我们（Safari 旧版会报 229）。
                     e.preventDefault();
                     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
-                    if (canConfirm) close(true);
+                    if (canConfirm) close("confirm");
                   }}
                   spellCheck={false}
                   autoComplete="off"
@@ -203,15 +212,24 @@ export function ConfirmHost() {
               <button
                 ref={cancelRef}
                 type="button"
-                onClick={() => close(false)}
+                onClick={() => close("cancel")}
                 className="h-9 rounded-full border border-line px-4 text-[13px] text-ink hover:bg-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/25"
               >
                 {opts.cancelText ?? "取消"}
               </button>
+              {opts.secondaryText ? (
+                <button
+                  type="button"
+                  onClick={() => close("secondary")}
+                  className="h-9 rounded-full border border-line px-4 text-[13px] text-ink hover:bg-wash focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/25"
+                >
+                  {opts.secondaryText}
+                </button>
+              ) : null}
               <button
                 type="button"
                 disabled={!canConfirm}
-                onClick={() => close(true)}
+                onClick={() => close("confirm")}
                 className={`h-9 rounded-full px-4 text-[13px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 ${
                   opts.tone === "danger"
                     ? "bg-danger text-danger-fg focus-visible:ring-danger/40"

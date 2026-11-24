@@ -69,10 +69,15 @@ export interface RunState {
   done: number;
   total: number;
   error: string;
-  /** idle / fetching / settling / done / partial / empty —— 整理中与全冷却要分开说 */
-  phase?: "idle" | "fetching" | "settling" | "done" | "partial" | "empty" | string;
+  /** idle / fetching / settling / done / partial / empty / cancelled —— 整理中、全冷却、被叫停要分开说 */
+  phase?: "idle" | "fetching" | "settling" | "done" | "partial" | "empty" | "cancelled" | string;
   /** 这一轮真正新入库的条数（不是「抓到了几条」） */
   new_total?: number;
+  /** user = 顶栏按钮；agent = Agent 自己判断要抓。主信息流只认 user */
+  source?: "user" | "agent" | string;
+  owner?: string;
+  cancel_requested?: boolean;
+  cancelled?: number;
   market?: { checked: number; updated: string[]; failed: { id: string; error: string }[] };
   plugins: Record<
     string,
@@ -777,16 +782,6 @@ async function pumpStream(
   }
 }
 
-/** 流里的错误体不一定是 JSON（503 可能是代理页），拿不到就退回状态码文案 */
-async function failureText(resp: Response, fallback: string): Promise<string> {
-  try {
-    const body = await resp.json();
-    return body?.detail?.message ?? body?.error?.message ?? body?.detail ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 /**
  * 流式总结。用 fetch 读 ReadableStream 而不是 EventSource：EventSource 收不到 404 的错误体，
  * 也没法 abort；猜错路径时用户只会看到「连接失败」，这里能给出具体原因。
@@ -840,71 +835,26 @@ export function streamSummary(
   return () => ctrl.abort();
 }
 
-/** 一轮问答。role 只有 user / assistant 两种，够用了。 */
-export interface ItemChatTurn {
-  role: "user" | "assistant";
-  text: string;
+export interface PlatformHealth {
+  platform: string;
+  label: string;
+  count: number;
+  last_fetched_at: number;
+  last_run_at: number;
+  last_ok_at: number;
+  /** 最近一次采集的成败；null = 没跑完 / 没跑过 */
+  last_ok: boolean | null;
+  failed: boolean;
+  interrupted: boolean;
+  stale: boolean;
+  available: boolean;
+  interval: number;
+  /** ok / failed / stale / unavailable */
+  state: "ok" | "failed" | "stale" | "unavailable" | string;
+  running: boolean;
+  error: string;
+  note: string;
 }
-
-export interface ItemChatHandlers {
-  /** 模型在思考但还没出字，用来把「卡住了」换成「在想」 */
-  onStatus?: (phase: string) => void;
-  onDelta: (text: string) => void;
-  onDone: (provider?: string) => void;
-  onError: (message: string) => void;
-}
-
-/**
- * 就当前这条内容提问。带上已经生成的总结和最近几轮历史，
- * 这样模型知道用户看到的是什么，不用重新问「你说哪条」。
- */
-export function streamItemChat(
-  id: string,
-  body: { message: string; depth?: string; summary?: SummaryPayload | null; history?: ItemChatTurn[] },
-  h: ItemChatHandlers,
-): () => void {
-  if (DEMO) {
-    h.onError("静态演示站没有模型：问答要连 AI，本机运行才有。");
-    return () => {};
-  }
-  const ctrl = new AbortController();
-  void (async () => {
-    let resp: Response;
-    try {
-      resp = await fetch("/api/item/" + encodeURIComponent(id) + "/chat/stream", {
-        method: "POST",
-        signal: ctrl.signal,
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({
-          message: body.message,
-          depth: body.depth || undefined,
-          summary: body.summary ?? undefined,
-          history: (body.history ?? []).slice(-6),
-        }),
-      });
-    } catch (err) {
-      if (!ctrl.signal.aborted) h.onError(err instanceof Error ? err.message : "请求失败");
-      return;
-    }
-    if (!resp.ok || !resp.body) {
-      h.onError(await failureText(resp, `请求失败（${resp.status}）`));
-      return;
-    }
-    await pumpStream(
-      resp,
-      ctrl.signal,
-      (frame) => {
-        if (frame.type === "status") h.onStatus?.(String(frame.phase ?? ""));
-        else if (frame.type === "delta") h.onDelta(String(frame.text ?? ""));
-        else if (frame.type === "done") h.onDone(frame.provider ? String(frame.provider) : undefined);
-        else if (frame.type === "error") h.onError(String(frame.message ?? "没能回答"));
-      },
-      h.onError,
-    );
-  })();
-  return () => ctrl.abort();
-}
-
 
 export interface Health {
   ok: boolean;
@@ -912,9 +862,13 @@ export interface Health {
   items: number;
   db: string;
   plugins: number;
-  platforms: { platform: string; count: number; last_fetched_at: number }[];
+  platforms: PlatformHealth[];
   demo: boolean;
   refreshing: boolean;
+  /** 插件目录读不动之类的全局错误；有内容要原样给用户看 */
+  plugin_errors?: string[];
+  /** failed + stale + unavailable 的平台数，顶栏据此常驻警示 */
+  needs_attention?: number;
 }
 
 export class ApiError extends Error {

@@ -31,24 +31,25 @@ INSTRUCTIONS = """你是 OneFeed 的助手，能操作这个应用，不只是�
 
 规矩：
 1. 先想清楚要做几件事，再动手：找内容用 search_items，看细节用 get_item，
-   要改界面用 ui_*，要存起来用 save_item，要总结用 summarize_item / summarize_batch，
-   要成文件用 export_markdown。
+   库里没有就用 pull_feed 去抓，要改界面用 ui_*，要存起来用 save_item，
+   要总结用 summarize_item / summarize_batch，要成文件用 export_markdown。
 2. 一次 run 最多 10 次动作、12 步、120 秒。检索类动作（search/get/similar/feed_stats）
    加起来最多 4 次：拿到 3-5 条能用的就停下来做正事，不要反复换词搜同一个东西。
    单次总结可能要十几秒：一次只总结你真正要用的几条（批量上限 6），把时间留给 summarize 和 export。
 3. 只能挑检索结果里出现过的 id，原样抄，不许编。宁可少给，不许凑数。
 4. 用户提到平台/时间/时长/点赞，要么真的生效，要么在 reply 里说清没做到哪条。
 5. 结果少（≤2 条）就说明为什么少：是库里没有、条件太窄，还是时间太新。
-   第一次搜出 0 条时，运行器会自动去平台抓一轮再查（见第 9 条），那一步不用你动手。
+   搜出 0 条时自己判断：用户要的东西库里明显没有（新话题、冷门平台、刚发生的事），
+   就调 pull_feed 去抓一轮再查（见第 9 条）。
 6. reply 是给人看的一句话（≤60 字），不要复述步骤；picks 按相关度排，最多 8 条。
 7. 用户让你「存起来 / 收藏」就直接调 save_item；让你「切到某平台看」就调 ui_filter。
 8. 用户要「简报 / 总结成 md / 导出」是两步活：summarize_item（1 条）或 summarize_batch（多条）
    → 紧接着 export_markdown。中间不要再搜一遍、不要再刷新采集；回报里给出文件路径即可，
    别把正文念一遍。总结失败或某条没正文时，说清是哪条没成，不要编内容。
-9. 库里第一次搜出 0 条时，运行器会自动去平台抓一轮、再用同样的条件查一次
-   （每轮最多一次，可能几十秒，仍受平台冷却限制）；这会显示成一条步骤，你不用自己调
-   refresh_feed。只有用户明确说「刷新 / 更新 / 再抓一次」才调它：它是 L3，会先问用户。
-   自动那一轮抓完仍然 0 条，就直说「抓过了，这几个平台确实没有」，不要拿别的条目凑数。
+9. pull_feed 是你自己去平台抓一轮（可能几十秒，仍受平台冷却限制），每轮最多一次。
+   用户问的东西搜不到、或结果明显不够时，不要只回「没有」：先调 pull_feed，抓完用同样的
+   条件再搜一次，再给结论；抓完仍然 0 条就直说「抓过了，这几个平台确实没有」，不要拿
+   别的条目凑数。只有用户明确说「刷新 / 更新 / 再抓一次」才调 refresh_feed（L3，会先问）。
 10. 动手前先调 set_plan 把步骤摊开（3-5 条短句，用「动词 + 对象」，例：「翻今天 AI 相关」
    「各写一句总结」），再一条条做。这轮要调两次以上工具（检索 + 总结、多条总结 + 导出、问一句 +
    检索）就先 plan；一次工具就能完事的单句检索不必 plan，直接做完回一句。
@@ -70,6 +71,8 @@ class RunState:
     decisions: dict[str, bool] = field(default_factory=dict)
     answers: dict[str, dict[str, Any]] = field(default_factory=dict)
     plan_steps: list[str] = field(default_factory=list)
+    # 这一轮用的采集器：用户点停止时要能顺手叫停它自己发起的那一轮采集
+    runner: Any = None
 
 
 class Cancelled(Exception):
@@ -90,6 +93,13 @@ def cancel(run_id: str) -> bool:
     if state is None:
         return False
     state.cancel = True
+    # 只停「回答」不够：这一轮 Agent 自己发起的采集也要一起停。
+    # owner=run_id 保证只碰自己的那一轮，用户手点的那一轮不归它管。
+    if state.runner is not None:
+        try:
+            state.runner.cancel(owner=run_id)
+        except Exception:
+            pass
     for event in list(state.pending.values()):
         event.set()
     return True
@@ -138,8 +148,8 @@ class Deps:
     deadline: float = 0.0  # 本轮整段的硬截止（time.time() 基准），确认等待不能吃穿它
     searches: int = 0  # 检索类动作已用次数；上限固定，避免模型把预算全花在反复搜
     search_hit: bool = False
-    auto_pulled: bool = False  # 本轮是否已经「搜不到 → 自动抓一轮」
-    auto_pull_enabled: bool = True  # 设置里可关；关掉后 0 条就只换词，不再打外网
+    pulled: bool = False  # 本轮是否已经让 Agent 自己去抓过一轮（每轮最多一次）
+    auto_pull_enabled: bool = True  # 设置里可关；关掉后 Agent 就不许自己打外网抓
 
     def remember(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
@@ -251,6 +261,29 @@ def _run_action(deps: Deps, writer: EventWriter, name: str,
         if first_note:
             writer.emit("step", "budget", {"title": "动作次数用满", "kind": "note"})
         return _budget_error(deps, "动作次数")
+    if name == "pull_feed":
+        # 抓取是模型自己判断的（不是「搜到 0 条就必抓」），但仍要有三道闸：
+        # 设置允许、每轮一次、整轮剩余时间够。闸不过就把原因回给模型，让它用现有结果收尾。
+        reason = ""
+        if not deps.auto_pull_enabled:
+            reason = "设置里关掉了 Agent 主动抓取，先用现有结果回答"
+        elif deps.ctx.runner is None:
+            reason = "刷新组件不在，抓不了"
+        elif deps.pulled:
+            reason = "这一轮已经抓过一次了，用现有结果回答，不要再抓"
+        else:
+            remaining = (deps.deadline - time.time()) if deps.deadline else MAX_SECONDS
+            if remaining < AUTO_PULL_MIN_SECONDS:
+                reason = "这轮剩余时间不够抓一轮了，先用现有结果回答"
+            else:
+                deps.pulled = True
+                # 留 20 秒给重查与写结论：抓取和回答共用同一个 120 秒预算
+                deps.ctx.refresh_timeout = max(10.0, min(AUTO_PULL_MAX_WAIT, remaining - 20.0))
+        if reason:
+            writer.emit("tool", name, {"ok": False, "ms": 0,
+                                       "args": json.dumps(args, ensure_ascii=False)[:300],
+                                       "result": reason})
+            return {"ok": False, "error": reason}
     if search_over:
         if first_search_note:
             writer.emit("step", "search_cap", {"title": "检索够了，先用手上这些", "kind": "note"})
@@ -277,11 +310,6 @@ def _run_action(deps: Deps, writer: EventWriter, name: str,
                                    "args": preview, "result": str(exc)[:300]})
         return {"ok": False, "error": str(exc)}
     ms = int((time.time() - started) * 1000)
-    # 第一次搜出 0 条：别急着告诉用户「没有」，先自动抓一轮再查（每轮一次）
-    if (name == "search_items" and isinstance(result, dict)
-            and int(result.get("count") or 0) == 0):
-        result = _auto_pull(deps, writer, args, result)
-        ms = int((time.time() - started) * 1000)
     rows = result.get("items") if isinstance(result, dict) else None
     if isinstance(rows, list):
         deps.remember(rows)
@@ -320,6 +348,8 @@ def _title_for(name: str, args: dict[str, Any]) -> str:
         return f"标记 {args.get('state')}"
     if name == "refresh_feed":
         return "触发采集刷新"
+    if name == "pull_feed":
+        return "去平台抓一轮新内容"
     if name == "summarize_item":
         return f"总结 {args.get('id')}"
     if name == "summarize_batch":
@@ -347,7 +377,7 @@ def _take_plan(writer: EventWriter, args: dict[str, Any]) -> dict[str, Any]:
 
 
 AUTO_PULL_MIN_SECONDS = 30.0  # 剩得比这少就别开抓：抓一半被拆掉，用户等到的是空结果
-AUTO_PULL_MAX_WAIT = 50.0  # 自动那一轮最多等这么久，剩下的时间留给模型写结论
+AUTO_PULL_MAX_WAIT = 50.0  # Agent 自己抓的一轮最多等这么久，剩下的时间留给模型写结论
 
 
 def _auto_pull_setting() -> bool:
@@ -355,72 +385,6 @@ def _auto_pull_setting() -> bool:
         return bool(settings_mod.load().get("agent_auto_pull", True))
     except Exception:
         return True
-
-
-def _auto_pull(deps: Deps, writer: EventWriter, args: dict[str, Any],
-               first: dict[str, Any]) -> dict[str, Any]:
-    """第一次搜出 0 条时的兜底：去平台抓一轮，再用同一条件查一次。
-
-    为什么放在运行器里，而不是只靠提示词：模型只看得到「库里 0 条」，
-    看不到「平台上有、只是还没采」。让它自己决定去抓，多半会直接收尾说「没有」。
-    这里做成确定性的一条路：每轮最多一次，仍受平台冷却与整轮剩余时间约束——
-    绕过的是「等用户点允许」，不是限流。
-    """
-    if deps.auto_pulled or not deps.auto_pull_enabled or deps.ctx.runner is None:
-        return first
-    remaining = (deps.deadline - time.time()) if deps.deadline else MAX_SECONDS
-    if remaining < AUTO_PULL_MIN_SECONDS:
-        writer.emit("step", "auto_pull", {"title": "库里没有，但这轮没时间抓了",
-                                          "kind": "note"})
-        return first
-    deps.auto_pulled = True
-    query = first.get("query") or {}
-    pids = [str(p) for p in (query.get("platforms") or [])]
-    names = "、".join(smart_platform_name(p) for p in pids) or "各平台"
-    writer.emit("step", "auto_pull", {"title": f"库里没有，先去{names}抓一轮",
-                                      "kind": "note"})
-    # 留 20 秒给重查与收尾：抓取和写结论共用同一个 120 秒预算
-    budget = max(10.0, min(AUTO_PULL_MAX_WAIT, remaining - 20.0))
-    try:
-        pulled = act_mod.pull_feed(deps.ctx, pids, timeout=budget, announce=False,
-                                   should_stop=lambda: writer.state.cancel)
-    except Exception as exc:  # 抓取失败不该带崩这一轮：按原来的空结果继续
-        writer.emit("step", "auto_pull", {"title": "抓取没成，先用现有结果",
-                                          "kind": "note", "detail": str(exc)[:120]})
-        return first
-    if writer.state.cancel:
-        raise Cancelled("cancelled")
-    added = int(pulled.get("added") or 0)
-    progress = pulled.get("progress") or {}
-    skipped = [str(v.get("note") or "") for v in (progress.get("plugins") or {}).values()
-               if isinstance(v, dict) and v.get("status") == "skipped"]
-    if pulled.get("ok"):
-        if progress.get("running"):
-            note = "还在抓，先给你已经入库的部分"
-        elif added:
-            note = f"抓完一轮，新增 {added} 条"
-        elif skipped:
-            note = (skipped[0] or "这几个平台都在冷却，没能抓")[:80]
-        elif progress.get("error"):
-            note = str(progress["error"])[:80]
-        else:
-            note = "抓完一轮，没有新增"
-    else:
-        note = str(pulled.get("error") or "抓取没成")[:80]
-    writer.emit("step", "auto_pull", {"title": note, "kind": "note"})
-    try:
-        again = act_mod.call(deps.ctx, "search_items", args)
-    except Exception:
-        first["auto_pull"] = {"ok": bool(pulled.get("ok")), "added": added, "note": note}
-        return first
-    if not isinstance(again, dict):
-        return first
-    again["auto_pull"] = {"ok": bool(pulled.get("ok")), "added": added, "note": note}
-    if int(again.get("count") or 0) == 0:
-        again["note"] = note + "；还是没搜到，换个说法或放宽条件。"
-    else:
-        again["note"] = note + "；下面是抓完之后重新检索的结果。"
-    return again
 
 
 def _await_answer(deps: Deps, writer: EventWriter, args: dict[str, Any],
@@ -574,8 +538,13 @@ def build_agent(model: Any, deps: Deps, writer: EventWriter, max_tools: int) -> 
 
     @agent.tool
     def refresh_feed(ctx: RunContext[Deps], platforms: list[str] | None = None) -> dict[str, Any]:
-        """触发一次采集并等它跑完（几十秒）。会打外网，需要用户确认。"""
+        """用户明确要求刷新时用：抓一轮并等它跑完（几十秒），会先弹确认。"""
         return _run_action(deps, writer, "refresh_feed", {"platforms": platforms})
+
+    @agent.tool
+    def pull_feed(ctx: RunContext[Deps], platforms: list[str] | None = None) -> dict[str, Any]:
+        """自己判断需要新内容时，直接去平台抓一轮（每轮最多一次，几十秒）。"""
+        return _run_action(deps, writer, "pull_feed", {"platforms": platforms})
 
     @agent.tool
     def summarize_item(ctx: RunContext[Deps], id: str, force: bool = False) -> dict[str, Any]:
@@ -687,6 +656,8 @@ def run(store: Any, message: str, history: list[dict[str, str]] | None = None,
         store.start_agent_run(state.run_id, state.thread_id, message, model_name)
         writer.emit("run_start", "run_start",
                     {"run_id": state.run_id, "input": message, "model": model_name})
+    if runner is not None:
+        state.runner = runner
     deps = Deps(ctx=act_mod.Ctx(store=store, run_id=state.run_id, thread_id=state.thread_id,
                                 runner=runner,
                                 exports_dir=Path(store.path).parent / act_mod.EXPORT_DIR_NAME),
@@ -784,7 +755,7 @@ def start(store: Any, message: str, history: list[dict[str, str]] | None = None,
           context: dict[str, Any] | None = None) -> dict[str, Any]:
     """起一轮运行并立刻返回 run_id（AC-4：run_start 先落库再返回）。"""
     state = RunState(run_id=uuid.uuid4().hex[:16],
-                     thread_id=thread_id or uuid.uuid4().hex[:12])
+                     thread_id=thread_id or uuid.uuid4().hex[:12], runner=runner)
     with _STATES_LOCK:
         _STATES[state.run_id] = state
     model_name = ""

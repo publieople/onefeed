@@ -14,7 +14,7 @@ export default function AgentPage() {
   const { threadId: routeThread } = useParams();
   const navigate = useNavigate();
   const { threadId, turns, busy } = useAgentSession();
-  const { items, loading } = useAgentHistory();
+  const { items, loading, running = [] } = useAgentHistory();
   const { loadHistory, resumeThread, newThread } = useAgentActions();
 
   useEffect(() => {
@@ -94,6 +94,13 @@ export default function AgentPage() {
                 }
               >
                 <span className="min-w-0 flex-1 truncate text-[12.5px]">{item.title || "新对话"}</span>
+                {running.includes(item.id) ? (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent"
+                    title="后台还在跑"
+                    aria-label="后台还在跑"
+                  />
+                ) : null}
                 <span className="shrink-0 text-[11px] text-fade">{item.runs} 轮</span>
               </button>
             ))}

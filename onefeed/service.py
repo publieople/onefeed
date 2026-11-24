@@ -86,6 +86,12 @@ class RefreshRunner:
             # 前端只看 running 会把「抓完了但还在 prune/cluster」误判成已完成，
             # 于是列表在整理落地前就被重取一遍。phase 把这一小段说清楚。
             "phase": "idle", "new_total": 0,
+            # 谁发起的这一轮：user = 顶栏按钮 / 明确要求刷新；agent = Agent 自己判断要抓。
+            # 前端据此决定要不要刷新主信息流：Agent 的战果只在它自己的窗口里说。
+            "source": "user", "owner": "",
+            # 取消是协作式的：置位后不再开新平台，正在跑的那一个让它自己跑完。
+            # 插件调用没有中断点，强杀线程会把半截写入留给下一轮。
+            "cancel_requested": False, "cancelled": 0,
         }
 
     # ------------------------------------------------------------ 对外
@@ -111,11 +117,13 @@ class RefreshRunner:
         return max(0, last + interval - now)
 
     def trigger(self, platforms: Iterable[str] | None = None,
-                warmup: bool = False, force: bool = False) -> tuple[bool, dict[str, Any]]:
+                warmup: bool = False, force: bool = False,
+                source: str = "user", owner: str = "") -> tuple[bool, dict[str, Any]]:
         """返回 (是否真的启动, 当前状态)。已在跑时返回 (False, 状态)。
 
         force=True 跳过平台冷却（用户明确要求「现在就抓」时用）。
         冷却是按平台算的，不是整轮算：B 站刚抓过，不该拦住知乎。
+        source/owner 标明这一轮是谁发起的；Agent 发起的轮次不触发主信息流刷新。
         """
         with self._lock:
             if self._state["running"]:
@@ -157,24 +165,50 @@ class RefreshRunner:
                 "warmup": warmup,
                 "market": {"checked": 0, "updated": [], "failed": []},
                 "plugins": plugins,
+                "source": "agent" if source == "agent" else "user",
+                "owner": str(owner or ""),
+                "cancel_requested": False,
+                "cancelled": 0,
             }
             if active:
-                self._thread = threading.Thread(target=self._run, args=(active, warmup),
-                                                name="onefeed-refresh", daemon=True)
+                self._thread = threading.Thread(
+                    target=self._run, args=(active, warmup, source, owner),
+                    name="onefeed-refresh", daemon=True)
                 self._thread.start()
             return True, json.loads(json.dumps(self._state))
+
+    def cancel(self, owner: str | None = None) -> bool:
+        """叫停一轮采集：只对自己的轮次生效（owner 为空 = 谁都可以停）。
+
+        插件调用本身没有中断点，所以这里只做两件事：置位，并把还没开始的平台
+        标成 cancelled。正在跑的平台会跑完当前这一次，然后把剩下的跳过。
+        """
+        with self._lock:
+            if not self._state["running"]:
+                return False
+            current = str(self._state.get("owner") or "")
+            # 带 owner 的取消只认自己那一轮：current 为空说明是用户手点的一轮，
+            # Agent 的停止不能顺手把它也停了。
+            if owner and current != owner:
+                return False
+            self._state["cancel_requested"] = True
+            for entry in self._state["plugins"].values():
+                if entry.get("status") == "queued":
+                    entry.update(status="cancelled", note="已停止，这一轮不再抓", ms=0)
+            return True
 
     # ------------------------------------------------------------ 内部
     def _set(self, pid: str, **fields: Any) -> None:
         with self._lock:
             entry = self._state["plugins"].setdefault(pid, {})
             entry.update(fields)
-            if fields.get("status") in ("ok", "failed", "skipped"):
+            if fields.get("status") in ("ok", "failed", "skipped", "cancelled"):
                 self._state["done"] = sum(
                     1 for p in self._state["plugins"].values()
-                    if p.get("status") in ("ok", "failed", "skipped"))
+                    if p.get("status") in ("ok", "failed", "skipped", "cancelled"))
 
-    def _run(self, ids: list[str], warmup: bool) -> None:
+    def _run(self, ids: list[str], warmup: bool, source: str = "user",
+             owner: str = "") -> None:
         try:
             with self._lock:
                 self._state["phase"] = "fetching"
@@ -197,6 +231,11 @@ class RefreshRunner:
                                                  "failed": [{"id": "registry",
                                                              "error": f"{type(exc).__name__}: {exc}"[:160]}]}
             for pid in ids:
+                with self._lock:
+                    stopped = bool(self._state.get("cancel_requested"))
+                    status = (self._state.get("plugins", {}).get(pid) or {}).get("status")
+                if stopped or status != "queued":
+                    continue
                 started = time.time()
                 self._set(pid, status="running")
                 run_id = self.store.start_run(pid, demo=demo_mode())
@@ -228,19 +267,33 @@ class RefreshRunner:
             # 平台都跑完了，但整理还没落地：这一小段必须有自己的 phase，
             # 否则前端一看到 running=false 就重取列表，排序会在整理完成前闪一下。
             with self._lock:
+                cancelled = bool(self._state.get("cancel_requested"))
                 self._state["phase"] = "settling"
-            try:
-                self.store.prune(keep_days=self.prune_days)
-                smart.cluster(self.store)
-            except Exception:
-                pass
+            if not cancelled:
+                try:
+                    self.store.prune(keep_days=self.prune_days)
+                    smart.cluster(self.store)
+                except Exception:
+                    pass
         finally:
             with self._lock:
                 plugins = self._state.get("plugins") or {}
                 failed = any(p.get("status") == "failed" for p in plugins.values())
                 ok = any(p.get("status") == "ok" for p in plugins.values())
-                # 有失败就是 partial：结果仍可用，只是缺一两个平台
-                self._state["phase"] = "partial" if failed else ("done" if ok else "empty")
+                cancelled = bool(self._state.get("cancel_requested"))
+                # 还没轮到的平台在这里补成 cancelled：进度条不能永远停在 5/7
+                if cancelled:
+                    for entry in plugins.values():
+                        if entry.get("status") == "queued":
+                            entry.update(status="cancelled", note="已停止，这一轮不再抓", ms=0)
+                    self._state["cancelled"] = sum(
+                        1 for p in plugins.values() if p.get("status") == "cancelled")
+                    self._state["done"] = sum(
+                        1 for p in plugins.values()
+                        if p.get("status") in ("ok", "failed", "skipped", "cancelled"))
+                # 有失败就是 partial：结果仍可用，只是缺一两个平台；叫停单独标 cancelled
+                self._state["phase"] = ("cancelled" if cancelled else
+                                        ("partial" if failed else ("done" if ok else "empty")))
                 self._state["running"] = False
                 self._state["finished_at"] = int(time.time())
 

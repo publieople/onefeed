@@ -65,7 +65,10 @@ function sameRun(a: RunState | null, b: RunState): boolean {
     a.total === b.total &&
     a.error === b.error &&
     a.started_at === b.started_at &&
-    a.finished_at === b.finished_at
+    a.finished_at === b.finished_at &&
+    a.source === b.source &&
+    a.new_total === b.new_total &&
+    a.cancelled === b.cancelled
   );
 }
 
@@ -105,6 +108,9 @@ export default function App() {
   // 每帧还有 MAX_SPEED × dt 上限，冲不进还没取回来的地方。
   useSmoothWheelScroll();
   const wasRunning = useRef(false);
+  // Agent 自己抓的时候主窗口什么都不该动：不换进度、不重取列表、不演刷新。
+  // 但用户这时手点刷新会收到 409，得能解释一句，所以状态留个 ref。
+  const agentPulling = useRef(false);
   // 演示模式：不联网，刷新只是重放同一份本地样例。轮询里要据实说明，
   // 否则用户会以为「点了刷新但内容没动」是坏了（2026-11-21 就是这么被问的）。
   const demoRef = useRef(false);
@@ -161,6 +167,14 @@ export default function App() {
       try {
         const data = await getJSON<{ state: RunState }>("/api/progress");
         if (!alive) return;
+        // Agent 自己判断抓的那一轮只属于 Agent 窗口：主信息流不刷新、顶栏不显示进度。
+        // 用户手点的那一轮（source=user）才走下面的收场/登场演出。
+        if (data.state.source === "agent") {
+          agentPulling.current = Boolean(data.state.running);
+          wasRunning.current = false;
+          return;
+        }
+        agentPulling.current = false;
         // 1600ms 一次轮询，绝大多数时候什么都没变：只在真变了才 setState，
         // 否则顶栏、进度条、每张卡都会跟着重渲染一轮。
         setProgress((prev) => (sameRun(prev, data.state) ? prev : data.state));
@@ -248,10 +262,16 @@ export default function App() {
       wasRunning.current = true;
       setProgress(state ?? { ...IDLE, running: true });
     } catch (err) {
-      // 已经在跑不是错误：状态条会显示当前进度，这里静默
-      if ((err as { code?: string }).code !== "refresh_running") {
-        showToast({ text: (err as Error).message });
+      // 已经在跑不是错误：用户自己那一轮有状态条，这里静默；
+      // 但如果是 Agent 在抓，主窗口看不到它的进度，必须说一句，否则像按钮坏了。
+      const code = (err as { code?: string }).code;
+      if (code === "refresh_running") {
+        if (agentPulling.current) {
+          showToast({ text: "Agent 正在抓一轮，等它跑完再刷新" });
+        }
+        return;
       }
+      showToast({ text: (err as Error).message });
     }
   }, [showToast, location.pathname]);
 
@@ -267,7 +287,12 @@ export default function App() {
         wasRunning.current = true;
         if (res?.state) setProgress(res.state);
       } catch (err) {
-        if ((err as { code?: string }).code === "refresh_running") return;
+        if ((err as { code?: string }).code === "refresh_running") {
+          if (agentPulling.current) {
+            showToast({ text: "Agent 正在抓一轮，等它跑完再重试" });
+          }
+          return;
+        }
         showToast({ text: (err as Error).message });
       }
     },

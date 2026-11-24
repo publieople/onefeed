@@ -141,6 +141,45 @@ def test_trigger_batches_by_platform_and_force_bypasses_cooldown():
     assert runner.snapshot()["plugins"]["v2ex"]["status"] == "ok"
 
 
+def test_cancel_stops_queued_platforms():
+    """叫停采集：正在跑的平台让它跑完，还没开始的立刻标成 cancelled。
+
+    真机上的停止按钮走的就是这条路——Agent 的 run 取消后必须把 RefreshRunner
+    一起停下，否则界面说「停下了」、后台还在一个个抓。
+    """
+    store = make_store()
+    runner = RefreshRunner(store)
+
+    def slow(_pid: str):
+        time.sleep(0.25)
+        return []
+
+    runner._load = slow
+    started, state = runner.trigger(
+        platforms=["v2ex", "juejin", "zhihu"], force=True,
+        source="agent", owner="run-cancel")
+    assert started is True
+    assert state["source"] == "agent" and state["owner"] == "run-cancel"
+
+    deadline = time.time() + 2
+    while runner.snapshot()["plugins"]["v2ex"]["status"] != "running" and time.time() < deadline:
+        time.sleep(0.01)
+    assert runner.snapshot()["plugins"]["v2ex"]["status"] == "running"
+
+    assert runner.cancel(owner="someone-else") is False, "别人的轮次不能被顺手停掉"
+    assert runner.cancel(owner="run-cancel") is True
+    wait_idle(runner, 3.0)
+
+    final = runner.snapshot()
+    assert final["phase"] == "cancelled"
+    assert final["cancel_requested"] is True
+    assert final["plugins"]["v2ex"]["status"] == "ok", "正在跑的那个允许跑完"
+    assert final["plugins"]["juejin"]["status"] == "cancelled"
+    assert final["plugins"]["zhihu"]["status"] == "cancelled"
+    assert final["cancelled"] == 2, "剩下几个平台都要记进 cancelled，进度条不能停在 1/3"
+    assert final["done"] == final["total"] == 3
+
+
 def test_demo_mode_is_skipped_not_failed_and_cooldown_ignored():
     store = make_store()
     runner = RefreshRunner(store)

@@ -1,4 +1,4 @@
-import { Check, ListChecks, Loader2, ShieldAlert, X } from "lucide-react";
+import { Check, Clock3, ListChecks, Loader2, ShieldAlert, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "../api";
 import { platform } from "../platform";
@@ -11,6 +11,7 @@ const ACTION_LABELS: Record<string, string> = {
   save_item: "收藏",
   mark_read: "标记",
   refresh_feed: "触发采集",
+  pull_feed: "去平台抓内容",
 };
 
 interface Props {
@@ -63,6 +64,8 @@ export default function AgentConsole({
   const elapsed = startRef.current ? Math.max(0, Math.round((now - startRef.current) / 1000)) : 0;
 
   const steps: string[] = Array.isArray(plan?.data?.steps) ? plan.data.steps.map(String) : [];
+  // 抓取进度每秒一帧，不能当普通 step 全铺出来；只留最后一帧，画成一条会动的进度
+  const pull = events.filter((event) => event.kind === "pull").pop();
   const rows = events.filter(
     (event) =>
       event.kind === "step" ||
@@ -73,7 +76,12 @@ export default function AgentConsole({
   );
   // 心跳里的「现在在干什么」：拿最后一行的标题，没有就退回「正在想」
   const lastRow = rows[rows.length - 1];
-  const phase = lastRow ? String(lastRow.data.title ?? lastRow.name ?? "") : "";
+  const phase =
+    pull && pull.data.status === "running"
+      ? String(pull.data.title ?? "正在抓内容")
+      : lastRow
+        ? String(lastRow.data.title ?? lastRow.name ?? "")
+        : "";
 
   return (
     <div className="space-y-1.5 rounded-xl border border-line/70 bg-wash/40 px-2.5 py-2">
@@ -140,6 +148,8 @@ export default function AgentConsole({
         ),
       )}
 
+      {pull ? <PullRow event={pull} /> : null}
+
       {running ? (
         <div className="flex items-baseline gap-1.5 pt-0.5 text-[11px] text-fade">
           <span className="h-1 w-1 animate-pulse self-center rounded-full bg-ink/60" />
@@ -159,6 +169,44 @@ export default function AgentConsole({
           )}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** 抓取进度：Agent 自己去平台抓的那一轮，只在这一条线程里可见 */
+function PullRow({ event }: { event: AgentEvent }) {
+  const d = (event.data ?? {}) as Record<string, unknown>;
+  const status = String(d.status ?? "");
+  const running = status === "running";
+  const background = status === "background";
+  const failed = status === "failed";
+  const done = Number(d.done ?? 0);
+  const total = Number(d.total ?? 0);
+  const pct = total ? Math.max(4, Math.min(100, Math.round((done / total) * 100))) : running ? 8 : 100;
+  return (
+    <div className="fade-in rounded-lg border border-line/60 bg-paper/50 px-2 py-1.5">
+      <div className="flex items-center gap-1.5 text-[11.5px] text-muted">
+        {running ? (
+          <Loader2 size={11} className="animate-spin text-accent" />
+        ) : background ? (
+          <Clock3 size={11} className="text-fade" />
+        ) : failed ? (
+          <X size={11} className="text-danger" />
+        ) : (
+          <Check size={11} className="text-accent" />
+        )}
+        <span className="min-w-0 truncate text-ink">{String(d.title ?? "去平台抓内容")}</span>
+        <span className="ml-auto shrink-0 text-[10px] text-fade">Agent 自己抓的</span>
+      </div>
+      <div className="mt-1 h-1 overflow-hidden rounded-full bg-line/60" aria-hidden>
+        <span
+          className={
+            "block h-full rounded-full transition-[width] duration-500 " +
+            (failed ? "bg-danger" : background ? "bg-accent/50" : "bg-accent")
+          }
+          style={{ width: pct + "%" }}
+        />
+      </div>
     </div>
   );
 }

@@ -27,7 +27,6 @@ import {
 import type { OutletCtx } from "../App";
 import { parseStreamText } from "../streamText";
 import { CommentBody } from "../components/CommentBody";
-import ItemChat from "../components/ItemChat";
 import { confirmDialog } from "../components/ui/Confirm";
 import { useAgentActions } from "../agent/AgentProvider";
 import { useRailSlot } from "../layout/RailSlot";
@@ -1045,7 +1044,7 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
 
   /* 告诉 Agent「我在看哪一条」：右栏点「总结这一条」不用再问你指谁。
      离开详情页要清掉，否则在信息流里问「总结这条」会指向上一条。 */
-  const { setFocus } = useAgentActions();
+  const { setFocus, openWith } = useAgentActions();
   useEffect(() => {
     if (!item) return;
     setFocus({ id: item.id, title: item.title, platform: item.platform });
@@ -1288,8 +1287,34 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
           url={item.url}
           busyDepth={busyDepth}
         />
-        {/* 就这一条继续问：挂在总结下面，和顶部那个全库 Agent 分开 */}
-        <ItemChat itemId={id} depth={effectiveDepth} summary={summary?.ok ? (summary.summary ?? null) : null} />
+        {/* 就这一条继续问：全站只有一个 Agent，这里只负责把「在问哪条」带过去，
+            不再自带一套对话状态（两套历史各记各的，谁也接不上谁）。 */}
+        <section className="mt-5 rounded-xl border border-line px-4 py-3.5" aria-label="就这条内容问 Agent">
+          <div className="flex items-center gap-2">
+            <MessageCircle size={13} className="text-muted" />
+            <span className="text-[12.5px] font-medium">问问这条</span>
+            <span className="text-[11px] text-fade">带上这条的标题、正文和总结，接着聊</span>
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {["最值得记住的是哪一点", "有什么没讲清的地方", "这条和同题其他平台说法一样吗"].map((text) => (
+              <button
+                key={text}
+                type="button"
+                onClick={() => openWith(text)}
+                className="rounded-full border border-line px-2.5 py-1 text-[12px] text-muted transition-colors hover:border-ink/25 hover:text-ink"
+              >
+                {text}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => openWith("")}
+              className="ml-auto inline-flex items-center gap-1 rounded-full bg-solid px-3 py-1 text-[12px] text-solid-fg transition-transform active:scale-95"
+            >
+              打开 Agent
+            </button>
+          </div>
+        </section>
         </div>
       ) : null}
 

@@ -138,14 +138,19 @@ class Action:
     summary: str
     params: dict[str, dict[str, Any]]
     run: Callable[..., dict[str, Any]]
+    # L3 默认要用户点确认；Agent 自己判断的一次抓取不算「外部副作用请求」，
+    # 它读的是本地已经配置好的采集器，再弹一次确认只会把对话卡住。
+    needs_confirm: bool = True
 
 
 REGISTRY: dict[str, Action] = {}
 
 
-def action(name: str, level: str, summary: str, params: dict[str, dict[str, Any]]):
+def action(name: str, level: str, summary: str, params: dict[str, dict[str, Any]],
+           needs_confirm: bool = True):
     def deco(fn: Callable[..., dict[str, Any]]):
-        REGISTRY[name] = Action(name, level, summary, params, fn)
+        REGISTRY[name] = Action(name, level, summary, params, fn,
+                                needs_confirm=needs_confirm)
         return fn
     return deco
 
@@ -223,7 +228,7 @@ def call(ctx: Ctx, name: str, args: dict[str, Any] | None = None) -> dict[str, A
         if spec is None:
             continue  # 模型多给字段就当没给：严格报错会让它反复重试
         clean[key] = _coerce(value, spec, key, name)
-    if act.level == L3 and name not in ctx.confirmed:
+    if act.level == L3 and act.needs_confirm and name not in ctx.confirmed:
         raise ConfirmRequired(name, act.summary, "会打外网、可能触发平台风控")
     started = time.time()
     result = act.run(ctx, **clean)
@@ -398,38 +403,102 @@ def act_mark_read(ctx: Ctx, ids=None, state: str = "read") -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- L3 外部副作用
-def pull_feed(ctx: Ctx, platforms=None, timeout: float | None = None,
-              announce: bool = True,
-              should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
-    """抓一轮并同步等到跑完；用户点刷新与 Agent 自动兜底共用这一条路。
+def _pull_event(snap: dict[str, Any], source: str, added: int,
+                status: str = "") -> dict[str, Any]:
+    """把一轮采集的现场压成 Agent 窗口能画的一行。
 
-    L3 确认在 call() 里，不在这个函数里：Agent 自动兜底绕开的是「等用户点允许」，
-    不是平台冷却。抓太密会被平台返回空列表，看起来像「今天没内容」，比抓不到更糟。
+    AgentConsole 只认自己的事件流，所以这里不带 store，也不改任何东西；
+    前端拿到 done/total 就能画进度，拿到 label 就能说清「现在在抓谁」。
+    """
+    plugins = snap.get("plugins") or {}
+    current = ""
+    for entry in plugins.values():
+        if entry.get("status") == "running":
+            current = str(entry.get("label") or "")
+            break
+    phase = str(snap.get("phase") or "")
+    if status:
+        state = status
+    elif snap.get("running"):
+        state = "running"
+    elif phase == "cancelled":
+        state = "cancelled"
+    elif phase == "empty":
+        state = "empty"
+    else:
+        state = "done"
+    done = int(snap.get("done") or 0)
+    total = int(snap.get("total") or 0)
+    if state == "running":
+        title = f"正在抓 {current} {done}/{total}" if current else f"正在抓 {done}/{total}"
+    elif state == "background":
+        title = "抓取还没跑完，交给后台继续"
+    elif state == "cancelled":
+        title = "已停止，剩下的平台不抓了"
+    elif state == "empty":
+        title = "这一轮没有实际抓取"
+    elif state == "failed":
+        title = "这一轮没抓成"
+    else:
+        title = f"抓完了，新增 {added} 条"
+    return {"title": title, "status": state, "phase": phase,
+            "done": done, "total": total, "added": added,
+            "current": current, "source": source,
+            "cancelled": int(snap.get("cancelled") or 0),
+            "error": str(snap.get("error") or "")}
+
+
+def pull_feed(ctx: Ctx, platforms=None, timeout: float | None = None,
+              announce: bool = True, source: str = "user", owner: str = "",
+              should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
+    """抓一轮并同步等到跑完；用户点刷新与 Agent 自主抓取共用这一条路。
+
+    source/owner 要一路传到 runner：Agent 发起的那一轮不该让主信息流刷新，
+    而用户点停止时又要能按 owner 精确叫停自己的那一轮。
+    只有 owner 非空（Agent 轮次）才往事件流派进度，用户手里的顶栏胶囊另有来源。
     """
     runner = ctx.runner
     if runner is None:
         return {"ok": False, "error": "刷新组件不在，无法采集"}
     pids = norm_platforms(platforms) or None
     before = ctx.store.count()
-    started, snapshot = runner.trigger(platforms=pids)
+    started, snapshot = runner.trigger(platforms=pids, source=source, owner=owner)
     snapshot = snapshot or {}
     if not started and not snapshot.get("running"):
         # 没起新的一轮、也没有正在跑的：冷却挡完了 / 没有插件。原样把原因交回去。
-        return {"ok": False,
-                "error": str(snapshot.get("error") or "已经有一轮刷新在跑"),
-                "progress": snapshot}
+        result = {"ok": False,
+                  "error": str(snapshot.get("error") or "已经有一轮刷新在跑"),
+                  "progress": snapshot}
+        if owner:
+            ctx.send("pull", "pull_feed", _pull_event(snapshot, source, 0, "failed"))
+        return result
     budget = float(ctx.refresh_timeout if timeout is None else timeout)
     deadline = time.time() + max(5.0, budget)
+    last_emit = 0.0
     while time.time() < deadline:
         if should_stop is not None and should_stop():
-            return {"ok": False, "error": "已停止", "stopped": True,
-                    "progress": runner.snapshot() if hasattr(runner, "snapshot") else {}}
+            # 前端点「停止」不只是不再听了：把这一轮采集也一起叫停。
+            runner.cancel(owner=owner or None)
+            snap = runner.snapshot() if hasattr(runner, "snapshot") else {}
+            if owner:
+                ctx.send("pull", "pull_feed", _pull_event(snap, source, 0, "cancelled"))
+            return {"ok": False, "error": "已停止", "stopped": True, "progress": snap}
         # 已经在跑（自己起的，或用户手点的那一轮）都跟着等，不另起
         if not runner.running():
             break
+        now = time.time()
+        if owner and now - last_emit >= 1.0:
+            last_emit = now
+            ctx.send("pull", "pull_feed",
+                     _pull_event(runner.snapshot(), source, ctx.store.count() - before))
         time.sleep(0.5)
     snap = runner.snapshot() if hasattr(runner, "snapshot") else {}
     added = ctx.store.count() - before
+    # 等够预算还没跑完：这一轮已经交回给用户，不能继续显示「正在抓」，
+    # 否则回答都出来了，进度行还在转，像卡死。
+    final_status = "background" if snap.get("running") else ""
+    if owner:
+        ctx.send("pull", "pull_feed", _pull_event(snap, source, added, final_status))
     if announce:
         ctx.send("step", "refresh_feed",
                  {"title": f"刷新完成，新增 {added} 条", "detail": snap})
@@ -440,7 +509,19 @@ def pull_feed(ctx: Ctx, platforms=None, timeout: float | None = None,
 @action("refresh_feed", L3, "触发一次采集刷新，并等它跑完（可能几十秒）。",
         {"platforms": _p("list", "只刷这些平台，空=全部")})
 def act_refresh_feed(ctx: Ctx, platforms=None) -> dict[str, Any]:
-    return pull_feed(ctx, platforms)
+    return pull_feed(ctx, platforms, source="user")
+
+
+@action("pull_feed", L3,
+        "去各平台抓一轮新内容。搜索没结果、或用户问的东西库里明显没有时，自己判断要不要抓；"
+        "每轮最多一次，抓完把新增了几条告诉用户。",
+        {"platforms": _p("list", "只抓这些平台，空=全部")},
+        needs_confirm=False)
+def act_pull_feed(ctx: Ctx, platforms=None) -> dict[str, Any]:
+    if not ctx.run_id:
+        return {"ok": False, "error": "这条动作只能在 Agent 轮次里用"}
+    return pull_feed(ctx, platforms, timeout=ctx.refresh_timeout, announce=False,
+                     source="agent", owner=ctx.run_id)
 
 
 # ---------------------------------------------------------------- L2 长任务

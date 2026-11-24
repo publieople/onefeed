@@ -106,7 +106,11 @@ def test_agent_survives_navigation() -> None:
     # 会话在 Provider 里：换页面（Agent 自己打开的那条）不重建
     assert "<AgentProvider>" in APP, "App 没包 AgentProvider"
     assert "<AgentSurface />" in APP, "唤起器/抽屉没挂到全局"
-    assert "AgentProvider" in AGENT and "useState<AgentTurn[]>" in AGENT
+    # 每个线程一份会话 + 一条独立的事件流，切走不关流、切回能接着看
+    assert "AgentProvider" in AGENT
+    assert "useState<Record<string, SessionCore>>" in AGENT, "会话又退回全局单份了"
+    assert "streamsRef" in AGENT and "sessionsRef" in AGENT, "后台线程没有独立的事件流"
+    assert "thread_id: key" in AGENT, "新会话没先铸一个 thread id，切回来会找不到"
     # 详情页右栏 + 上下文上报
     assert '"rail"' in AGENT and '"sheet"' in AGENT and '"closed"' in AGENT
     assert "useRailSlot()" in ITEM and "setSiblings(" in ITEM, "详情页要把同题交给外壳右栏"
@@ -140,6 +144,7 @@ def test_settings_baseline_and_unload_guard() -> None:
     assert 'setBaseline("")' not in SETTINGS, "baseline 又被写成空串，dirty 会恒为 false"
     assert 'setBaseline(JSON.stringify(next))' in SETTINGS
     assert "beforeunload" in SETTINGS, "没保存就关页面会静默丢改动"
+    assert "choiceDialog" in SETTINGS and 'secondaryText: "不保存"' in SETTINGS, "站内离开没有保存/不保存/取消三选"
 
 
 @case
@@ -316,7 +321,6 @@ def test_every_dialog_takes_over_the_hotkey_stack() -> None:
 
 
 # ---------------------------------------------------------------- 总结粒度与条目对话
-CHAT = read("components", "ItemChat.tsx")
 API = read("api.ts")
 LOADER = read("pages", "itemPageLoader.ts")
 
@@ -376,35 +380,16 @@ def test_settings_has_default_depth_picker() -> None:
 
 
 @case
-def test_item_chat_is_a_real_stream() -> None:
-    """总结下方的对话：走流式、能停、有开场建议、不丢历史。"""
-    assert "streamItemChat" in API and "/chat/stream" in API
-    assert "streamItemChat(" in CHAT
-    assert "slice(-6)" in CHAT, "只带最近几轮，别把整段塞回去"
-    assert "onDelta" in CHAT and "setLive" in CHAT, "正文要边到边显示"
-    assert "const stop = () =>" in CHAT and "onClick={stop}" in CHAT, "生成中要能停"
-    assert "Square" in CHAT, "停止键是方块，不是又一个箭头"
-    # 停止后要留下半句并注明「是被你停的」，否则像回答失败
-    assert "按你点的停止收的尾" in CHAT and "stopped: true" in CHAT
-    assert "SUGGESTIONS" in CHAT and "Starters" in CHAT, "空态给三个能直接点的问题"
-    assert 'aria-live="polite"' in CHAT
-    assert "stopped" in CHAT
-
-
-@case
-def test_item_chat_keyboard_and_composition() -> None:
-    """Enter 发送、Shift+Enter 换行，输入法组字时不误发。"""
-    assert "isComposing" in CHAT, "中文输入法回车选词会误发"
-    assert "shiftKey" in CHAT
-    assert "max-h-" in CHAT and "rows=" in CHAT, "输入框要能自己长高"
-
-
-@case
-def test_chat_avoids_exit_animations() -> None:
-    """退出动画在动画帧被节流时永远不结束——这一条以前让面板关不掉。"""
-    assert "AnimatePresence" not in CHAT, "对话列表不要用 AnimatePresence"
-    assert "exit=" not in CHAT, "别给消息加 exit，卸载要即时"
-    assert "motion.li" in CHAT and "initial=" in CHAT, "进场动效保留"
+def test_item_page_hands_questions_to_global_agent() -> None:
+    """详情页不再挂第二套对话：问题交给右侧全局 Agent，并带上这句话。"""
+    assert "问问这条" in ITEM
+    assert "useAgentActions" in ITEM and "openWith" in ITEM
+    for text in ("最值得记住的是哪一点", "有什么没讲清的地方", "这条和同题其他平台说法一样吗"):
+        assert text in ITEM
+    assert "打开 Agent" in ITEM
+    assert "ItemChat" not in ITEM, "详情页不该再挂独立对话"
+    assert not (SRC / "components" / "ItemChat.tsx").exists(), "合并后旧组件要删掉"
+    assert "streamItemChat" not in API, "旧客户端流也一起清掉"
 
 
 def main() -> int:
