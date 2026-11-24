@@ -67,4 +67,8 @@ if (name == "search_items" and isinstance(result, dict) and int(result.get("coun
 - `tests/test_agent_runtime.py` 2b 段新增三个场景：首次搜空自动抓并重查到 1 条（`AutoRunner.calls == 1`、事件流里两条 `auto_pull` 步骤）、同一轮两次搜空只抓一次、开关关闭后不抓。该文件 106 项检查全过。
 - `tests/test_refresh.py` 不受影响；`plugin_runtime/host.py` 的发现循环补了 `OSError` 容错，单个插件目录读不动只记一条 `errors`，不再让整轮启动/测试炸掉。
 - 前端 `npm run build` 通过（见提交记录里的 bundle 体积）。
-- 真机：设置页能看到新开关；问一个库里没有的词，顶栏刷新胶囊出现「正在抓 …」，Agent 步骤里多出「库里没有，先去各平台抓一轮」，回答基于新抓到的内容。
+- 真机（2026-11-24 12:47，本机 `uv run python -m onefeed`，真实七平台）：
+  - 问「拓扑绝缘体薄膜的外延生长最近有什么进展」，库里 1442 条命中 0；事件流按顺序出现 `search_items` → `auto_pull`「库里没有，先去各平台抓一轮」→ `auto_pull`「还在抓，先给你已经入库的部分」。
+  - 50 秒等待预算到点时整轮还在跑，工具结果带回 `auto_pull: {ok: true, added: 19}`；随后后台把这一轮跑完，健康接口显示 1461 条（最终 1493），六平台 `last_fetched_at` 全部刷新。
+  - 重查仍是 0 条（库里确实没有材料学内容），Agent 没有硬凑，先问了一句「要继续吗」，选「就到这」后回答「库里 1461 条全是知乎/B站/抖音等热榜流内容，没有科研材料学方向」。整轮 6 步 / 103 秒。
+  - B 站这一轮没抓到：`onefeed-plugins\plugins\bilibili` 目录在 Windows 层不可读（连 `Get-Acl` 都拒绝访问，`last_fetched_at` 停在前一天），发现循环把它记进 `errors`：「插件目录读不动：…bilibili（[WinError 5] 拒绝访问）」。其余六个平台正常。
