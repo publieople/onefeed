@@ -65,6 +65,8 @@ DEFAULTS: dict[str, Any] = {
     "agent_auto_pull": True,
     # AI 总结默认粒度。详情页右上角可以逐条临时改，这里定的是「新打开一条用哪档」。
     "summary_depth": "balanced",
+    # 关注页默认布局：list（单列日期组）/ timeline（按作者）/ compact（两列紧凑）。
+    "following_layout": "list",
 }
 
 ENV_KEYS = {"registry_url": "ONEFEED_REGISTRY", "plugins_dir": "ONEFEED_PLUGINS_DIR"}
@@ -72,6 +74,7 @@ SECRET_KEYS = ("ai_api_key",)
 SORTS = ("freshness", "engagement")
 # 与 summary.DEPTHS 对齐。settings 被 summary import，反过来引会成环，所以这里单列一份。
 SUMMARY_DEPTHS = ("brief", "balanced", "detailed")
+FOLLOWING_LAYOUTS = ("list", "timeline", "compact")
 MAX_PROVIDERS = 5
 
 
@@ -275,6 +278,12 @@ def validate(patch: dict[str, Any]) -> dict[str, Any]:
         if value not in SUMMARY_DEPTHS:
             raise ValueError(f"summary_depth 只能是 {', '.join(SUMMARY_DEPTHS)}")
         out["summary_depth"] = value
+
+    if "following_layout" in patch:
+        value = str(patch["following_layout"] or "").strip()
+        if value not in FOLLOWING_LAYOUTS:
+            raise ValueError(f"following_layout 只能是 {', '.join(FOLLOWING_LAYOUTS)}")
+        out["following_layout"] = value
 
     if "ai_agent_max_tools" in patch:
         try:

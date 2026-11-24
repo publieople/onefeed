@@ -17,6 +17,7 @@ from plugin_runtime.host import PluginHost
 
 from . import __version__, market, settings as settings_mod
 from .api import router
+from .following import FollowingRunner
 from .service import RefreshRunner, sync_installed
 from .store import Store
 
@@ -40,6 +41,14 @@ def create_app(store: Store | None = None, plugins_dir: Path | None = None) -> F
         limit=int(conf.get("per_plugin_limit") or 12),
         prune_days=int(conf.get("prune_days") or 14),
         auto_update=bool(conf.get("auto_update")),
+    )
+    # 关注流与主信息流共用同一个插件宿主，但进度/冷却/失败完全分开：
+    # 关注页自己的同步按钮只推动 following 那一套。
+    app.state.store.recover_following_runs()
+    app.state.following = FollowingRunner(
+        app.state.store,
+        host=app.state.refresher.host,
+        limit=int(conf.get("per_plugin_limit") or 12),
     )
 
     app.include_router(router)

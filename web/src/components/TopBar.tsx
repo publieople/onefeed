@@ -76,6 +76,28 @@ export default function TopBar({ health, progress, onRefresh, onRetry }: Props) 
             feed · {health?.plugins ?? 0} sources
           </span>
         </NavLink>
+        {/* 两条内容通道的切换：信息流是平台推荐，关注是「我关注的人」。 */}
+        <nav aria-label="内容视图" className="ml-1 flex items-center rounded-full border border-line bg-wash/40 p-0.5">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              "flex h-7 items-center rounded-full px-2.5 text-[12px] transition " +
+              (isActive ? "bg-paper text-ink shadow-sm" : "text-muted hover:text-ink")
+            }
+          >
+            信息流
+          </NavLink>
+          <NavLink
+            to="/following"
+            className={({ isActive }) =>
+              "flex h-7 items-center rounded-full px-2.5 text-[12px] transition " +
+              (isActive ? "bg-paper text-ink shadow-sm" : "text-muted hover:text-ink")
+            }
+          >
+            关注
+          </NavLink>
+        </nav>
         {/* 右组是一排同规格的件：刷新（进度从它左边长出来）→ 采集情况 → 主题 / 市场 / 设置。
             采集那件以前是一行裸文本，宽度随字数跳，现在和图标按钮同高同位。 */}
         <div className="ml-auto flex items-center gap-1">

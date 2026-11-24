@@ -19,6 +19,7 @@ from plugin_runtime.paths import state_root
 
 from . import (__version__, ai as ai_mod, auth as auth_mod, market, media as media_mod,
                smart, settings as settings_mod, summary as summary_mod)
+from .following import FOLLOWING_FEED, FollowingRunner
 from .service import RefreshRunner, demo_mode, sync_installed
 from .store import SORTS, Store
 
@@ -60,6 +61,164 @@ def _store(request: Request) -> Store:
 def _runner(request: Request) -> RefreshRunner:
     return request.app.state.refresher
 
+def _following_runner(request: Request) -> FollowingRunner:
+    return request.app.state.following
+
+
+# 关注页固定按这个顺序展示平台：B 站、抖音、小红书、知乎。
+# 插件没装 / 没声明 following / 没登录 都要如实显示，而不是从列表里消失。
+FOLLOWING_PLATFORMS = ("bilibili", "douyin", "xiaohongshu", "zhihu")
+FOLLOWING_LABELS = {"bilibili": "B 站", "douyin": "抖音",
+                    "xiaohongshu": "小红书", "zhihu": "知乎"}
+
+
+def _login_probe(plugin_id: str) -> tuple[bool | None, str]:
+    """只看本机凭证文件，不启动插件。返回 (是否已登录, 一句话说明)。
+
+    None = 这个平台没有可读的 cookie 文件（B 站由 bili CLI 管），
+    不能据此断言「没登录」；真正是否可用由同步结果说话。
+    """
+    spec = auth_mod.SPECS.get(plugin_id)
+    if spec is None:
+        if plugin_id == "bilibili":
+            home = state_root() / "toolhome" / "bili-cli" / "credential.json"
+            appdata = Path.home() / "AppData" / "Roaming" / "bili-cli" / "credential.json"
+            if home.is_file() or appdata.is_file():
+                return True, "B 站登录由 bili CLI 管理"
+            return None, "B 站登录由本机 bili CLI 管理，同步失败时会说明"
+        return None, ""
+    path = state_root() / "cookies" / f"{plugin_id}.json"
+    if path.is_file():
+        names = auth_mod._cookie_names(plugin_id)
+        if any(n.lower() in {c.lower() for c in spec["cookies"]} for n in names):
+            return True, f"已登录（{len(names)} 个 cookie）"
+    # 浏览器型插件可能只把登录态留在了持久档案里（cookie 文件是登录窗口顺手导出的副本）。
+    # 档案在就说明「可能登录过」，这里不下「没登录」的结论，交给同步结果验证。
+    profile = state_root() / "browser" / plugin_id / "Default" / "Preferences"
+    if profile.is_file():
+        return None, "浏览器档案已有，同步时会验证登录态"
+    if path.is_file():
+        return False, f"{spec['label']} cookie 里没有 {spec['cookies'][0]}，需要重新登录"
+    return False, f"{spec['label']}还没登录"
+
+
+def _looks_like_login_error(text: str) -> bool:
+    """同步失败时，只有明确提到登录才敢把平台标成「需要登录」。"""
+    low = str(text or "").lower()
+    return any(word in low for word in ("登录", "login", "未登录", "认证", "cookie"))
+
+
+def _following_platforms(request: Request) -> dict[str, Any]:
+    runner = _following_runner(request)
+    store = _store(request)
+    manifests = {m.id: m for m in runner.manifests()}
+    installed = {str(p["id"]) for p in store.list_plugins()}
+    stats = runner.last_runs()
+    counts = {str(r["platform"]): r for r in store.following_counts(FOLLOWING_FEED)}
+    rows: list[dict[str, Any]] = []
+    supported_ids = set(runner.platform_ids())
+    for pid in FOLLOWING_PLATFORMS:
+        manifest = manifests.get(pid)
+        label = (manifest.name if manifest is not None and manifest.name
+                 else FOLLOWING_LABELS.get(pid, pid))
+        has_row = pid in installed or manifest is not None
+        supported = pid in supported_ids
+        logged_in, login_note = _login_probe(pid)
+        stat = stats.get(pid) or {}
+        count_row = counts.get(pid) or {}
+        if not has_row:
+            state, note = "not_installed", "还没安装这个平台的插件"
+        elif not supported:
+            state, note = "unsupported", "这个平台的插件还没有关注流能力"
+        elif logged_in is False:
+            state, note = "need_login", login_note
+        elif stat.get("last_ok") is False and _looks_like_login_error(str(stat.get("error") or "")):
+            state, note = "need_login", str(stat.get("error") or "上次同步要求登录")
+        else:
+            state, note = "ready", login_note
+        rows.append({
+            "platform": pid,
+            "label": label,
+            "installed": has_row,
+            "supported": supported,
+            "logged_in": logged_in,
+            "state": state,
+            "note": note,
+            "count": int(count_row.get("count") or 0),
+            "last_seen_at": int(count_row.get("last_seen_at") or 0),
+            "last_sync_at": int(stat.get("last_run_at") or 0),
+            "last_ok_at": int(stat.get("last_ok_at") or 0),
+            "last_ok": stat.get("last_ok"),
+            "saved_count": int(stat.get("count") or 0),
+            "new_count": int(stat.get("new_count") or 0),
+            "error": str(stat.get("error") or ""),
+        })
+    try:
+        errors = list(request.app.state.refresher.host.errors)
+    except Exception:
+        errors = []
+    return {"platforms": rows, "plugin_errors": errors,
+            "counts": store.following_counts(FOLLOWING_FEED),
+            "count": store.following_count(FOLLOWING_FEED),
+            "syncing": runner.running(), "progress": runner.snapshot()}
+
+
+@router.get("/following")
+def following(
+    request: Request,
+    platform: str | None = Query(None, description="逗号分隔，例：bilibili,zhihu"),
+    kind: str | None = Query(None),
+    author: str | None = Query(None),
+    cursor: str | None = Query(None),
+    limit: int = Query(30, ge=1, le=100),
+) -> dict:
+    """关注流：只读平台原生关注的人发了什么，不混推荐流。"""
+    platforms = [p.strip() for p in platform.split(",") if p.strip()] if platform else None
+    store = _store(request)
+    rows, next_cursor = store.following_page(platforms=platforms, kind=kind, author=author,
+                                             cursor=cursor, limit=limit)
+    meta = _following_platforms(request)
+    return {"items": rows, "next": next_cursor, "count": len(rows),
+            "platforms": meta["platforms"], "plugin_errors": meta["plugin_errors"],
+            "counts": meta["counts"], "total": meta["count"],
+            "syncing": meta["syncing"], "progress": meta["progress"]}
+
+
+@router.post("/following/refresh")
+def following_refresh(request: Request, body: dict[str, Any] | None = Body(None)) -> dict:
+    body = body or {}
+    platforms = body.get("platforms")
+    if isinstance(platforms, str):
+        platforms = [p.strip() for p in platforms.split(",") if p.strip()]
+    if platforms is not None and not isinstance(platforms, list):
+        raise HTTPException(status_code=422, detail={
+            "code": "bad_platforms", "message": "platforms 必须是数组",
+            "hint": '例：{"platforms": ["bilibili"]}'})
+    runner = _following_runner(request)
+    ok, state = runner.trigger(
+        platforms=[str(p) for p in platforms] if platforms else None,
+        force=bool(body.get("force")),
+        source=str(body.get("source") or "user"),
+        owner=str(body.get("owner") or ""),
+    )
+    if not ok and state.get("running"):
+        raise HTTPException(status_code=409, detail={
+            "code": "following_running", "message": "关注流正在同步",
+            "hint": "等这一轮跑完；关注页会自己刷新"})
+    return {"ok": ok, "state": state}
+
+
+@router.get("/following/progress")
+def following_progress(request: Request) -> dict:
+    return {"state": _following_runner(request).snapshot()}
+
+
+@router.post("/following/cancel")
+def following_cancel(request: Request, body: dict[str, Any] | None = Body(None)) -> dict:
+    owner = str((body or {}).get("owner") or "") or None
+    return {"ok": _following_runner(request).cancel(owner=owner)}
+
+
 
 def _sse(event: dict[str, Any]) -> str:
     """一条 SSE 事件。ensure_ascii=False 是必须的：中文别被转义成六字符，白白多占带宽。"""
@@ -77,6 +236,9 @@ def _apply_settings(request: Request, conf: dict[str, Any],
     if runner.limit != limit:
         runner.limit = limit
         applied.append(f"每轮条数 → {limit}")
+    following = getattr(request.app.state, "following", None)
+    if following is not None and following.limit != limit:
+        following.limit = limit
 
     days = int(conf.get("prune_days") or 14)
     if runner.prune_days != days:
@@ -92,6 +254,8 @@ def _apply_settings(request: Request, conf: dict[str, Any],
     current_dir = Path(str(getattr(runner.host, "plugins_dir", "") or ".")).resolve()
     if current_dir != target.resolve():
         runner.host = PluginHost(plugins_dir=target)
+        if following is not None:
+            following.host = runner.host
         sync_installed(_store(request), target)
         applied.append(f"插件目录 → {target}")
 

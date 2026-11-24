@@ -701,6 +701,22 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                   </label>
                 </div>
 
+                <label className="block max-w-[280px]">
+                  <span className="text-[13px] font-medium">关注页布局</span>
+                  <select
+                    value={form.following_layout ?? "list"}
+                    onChange={(e) => setForm({ ...form, following_layout: e.target.value })}
+                    className="mt-1.5 h-9 w-full rounded-lg border border-line bg-paper px-2.5 text-[13px] outline-none focus:border-ink/40"
+                  >
+                    <option value="list">列表 · 按日期</option>
+                    <option value="timeline">时间线 · 按作者</option>
+                    <option value="compact">紧凑 · 双列</option>
+                  </select>
+                  <span className="mt-1 block text-[11px] text-fade">
+                    关注页顶部也能临时切换；这里决定下次打开时的默认布局。
+                  </span>
+                </label>
+
                 <div className="rounded-lg border border-line px-3.5 py-3">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <span className="text-[13px] font-medium">平台抓取间隔</span>

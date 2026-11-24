@@ -38,6 +38,53 @@ export interface FeedItem {
   favorite_note?: string;
 }
 
+export type FollowingLayout = "list" | "timeline" | "compact";
+
+/** 关注流条目：比信息流多三项，时间未知时按首次看到时间排 */
+export interface FollowingItem extends FeedItem {
+  following?: boolean;
+  time_estimated?: boolean;
+  feed_first_seen_at?: number;
+  feed_last_seen_at?: number;
+}
+
+export interface FollowingPlatform {
+  platform: string;
+  label: string;
+  installed: boolean;
+  supported: boolean;
+  logged_in: boolean | null;
+  /** not_installed / unsupported / need_login / ready */
+  state: string;
+  note: string;
+  count: number;
+  last_seen_at: number;
+  last_sync_at: number;
+  last_ok_at: number;
+  last_ok: boolean | null;
+  saved_count: number;
+  new_count: number;
+  error: string;
+}
+
+export interface FollowingCount {
+  platform: string;
+  count: number;
+  last_seen_at: number;
+}
+
+export interface FollowingResponse {
+  items: FollowingItem[];
+  next: string | null;
+  count: number;
+  platforms: FollowingPlatform[];
+  plugin_errors?: string[];
+  counts: FollowingCount[];
+  total: number;
+  syncing: boolean;
+  progress: RunState;
+}
+
 export interface ParsedQuery {
   raw: string;
   platforms: string[];
@@ -193,6 +240,8 @@ export interface SettingsValues {
   vision_summary: boolean;
   /** 新打开一条时用哪档总结粒度：brief / balanced / detailed */
   summary_depth?: SummaryDepth | string;
+  /** 关注页默认布局：list / timeline / compact */
+  following_layout?: FollowingLayout | string;
   ai_base_url: string;
   ai_model: string;
   /** 只写不读：后端返回时永远为空串 */

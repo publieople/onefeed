@@ -19,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 
@@ -185,6 +185,39 @@ CREATE TABLE IF NOT EXISTS item_marks (              -- 稍后再看 / 已读 / 
 #   · 稍后再看 = 临时的「等会儿看」，卡片上一键加/减，没有备注，加入即排到最前；
 #   · 收藏夹   = 长期留档，只在详情页收藏、必须写一句为什么留，移出要二次确认。
 # 两者共表就会互相污染（标记一改，两边的排序和时间都没了），所以各走一张表、各走一套接口。
+# 关注流：同一条内容可以同时出现在信息流和关注流，items 只存一行，
+# 这里记「它出现在哪条流里、什么时候第一次/最后一次见到」。
+# following_runs 与 runs 分开：关注流是另一个同步器，不该占主信息流的冷却和状态。
+FOLLOWING_SCHEMA = """
+CREATE TABLE IF NOT EXISTS item_feeds (
+    item_id       TEXT NOT NULL,
+    feed          TEXT NOT NULL DEFAULT 'following',
+    platform      TEXT NOT NULL DEFAULT '',
+    author_id     TEXT NOT NULL DEFAULT '',
+    first_seen_at INTEGER NOT NULL DEFAULT 0,
+    last_seen_at  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (item_id, feed)
+);
+CREATE INDEX IF NOT EXISTS idx_item_feeds_feed
+    ON item_feeds(feed, platform, first_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_item_feeds_author
+    ON item_feeds(feed, platform, author_id, first_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS following_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    plugin      TEXT NOT NULL DEFAULT '',
+    feed        TEXT NOT NULL DEFAULT 'following',
+    started_at  INTEGER NOT NULL DEFAULT 0,
+    finished_at INTEGER NOT NULL DEFAULT 0,
+    ok          INTEGER,
+    count       INTEGER NOT NULL DEFAULT 0,
+    new_count   INTEGER NOT NULL DEFAULT 0,
+    error       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_following_runs_plugin
+    ON following_runs(feed, plugin, id DESC);
+"""
+
 FAVORITES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS item_favorites (          -- 收藏夹：长期留档 + 一句备注
     item_id       TEXT PRIMARY KEY,
@@ -336,6 +369,8 @@ class Store:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
                 if "demo" not in columns:
                     conn.execute("ALTER TABLE runs ADD COLUMN demo INTEGER NOT NULL DEFAULT 1")
+            if version < 10:
+                conn.executescript(FOLLOWING_SCHEMA)
             if version < 9:
                 # 总结缓存改成 (item_id, depth) 复合主键。SQLite 改不了主键，只能重建表；
                 # 老数据没有档位，一律记成「平衡」——那是它们当时的生成口径。
@@ -536,6 +571,150 @@ class Store:
             self._decode_row(row)
         next_cursor = encode_cursor(rows[-1], sort) if has_more and rows else None
         return rows, next_cursor
+
+
+    # ------------------------------------------------------------ 关注流
+    def mark_feed_items(self, items: Iterable[Any], feed: str = "following") -> int:
+        """把这批条目登记到某条流里；一条内容可以在信息流和关注流各有一行。
+
+        first_seen_at 只在第一次插入时写，last_seen_at 每次刷新都更新，
+        前端据此能说「这条在关注流里躺了多久」，也不会因为重复同步把旧内容顶成新的。
+        """
+        rows = []
+        now = int(time.time())
+        for it in items:
+            data = it.to_dict() if hasattr(it, "to_dict") else dict(it)
+            item_id = str(data.get("id") or "")
+            if not item_id:
+                continue
+            rows.append((item_id, feed, str(data.get("platform") or ""),
+                         str(data.get("author_id") or ""), now, now))
+        if not rows:
+            return 0
+        sql = ("INSERT INTO item_feeds (item_id, feed, platform, author_id, "
+               "first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?) "
+               "ON CONFLICT(item_id, feed) DO UPDATE SET last_seen_at=excluded.last_seen_at, "
+               "platform=excluded.platform, "
+               "author_id=CASE WHEN excluded.author_id != '' THEN excluded.author_id "
+               "ELSE item_feeds.author_id END")
+        with self._write_lock:
+            cur = self.conn.executemany(sql, rows)
+            self.conn.commit()
+        return cur.rowcount if cur.rowcount >= 0 else len(rows)
+
+    def following_page(self, feed: str = "following",
+                       platforms: Sequence[str] | None = None,
+                       kind: str | None = None, author: str | None = None,
+                       cursor: str | None = None,
+                       limit: int = 30) -> tuple[list[dict[str, Any]], str | None]:
+        """关注流分页。排序键 = 发布时间，没有发布时间就用第一次见到它的时间。
+
+        不能直接用 items.published_at：小红书笔记很多不给时间，全按 0 会沉底，
+        但用户刚关注到的新内容应该在最上面。time_estimated 让前端知道这是估的。
+        """
+        limit = max(1, min(int(limit), 100))
+        key = "COALESCE(NULLIF(i.published_at, 0), f.first_seen_at)"
+        where = ["f.feed = ?"]
+        params: list[Any] = [feed]
+        if platforms:
+            where.append(f"i.platform IN ({', '.join('?' for _ in platforms)})")
+            params.extend(platforms)
+        if kind:
+            where.append("i.kind = ?")
+            params.append(kind)
+        if author:
+            where.append("(f.author_id = ? OR i.author_id = ?)")
+            params.extend([author, author])
+        decoded = decode_cursor(cursor)
+        if decoded:
+            ts, ident = decoded
+            where.append(f"({key} < ? OR ({key} = ? AND i.id < ?))")
+            params.extend([ts, ts, ident])
+        where.append("COALESCE(m.hidden, 0) = 0")
+        clause = "WHERE " + " AND ".join(where)
+        sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
+               f"m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, "
+               f"m.note AS mark_note, f.first_seen_at AS feed_first_seen_at, "
+               f"f.last_seen_at AS feed_last_seen_at, f.author_id AS feed_author_id, "
+               f"{key} AS sort_key "
+               f"FROM item_feeds f JOIN items i ON i.id = f.item_id "
+               f"LEFT JOIN item_marks m ON m.item_id = i.id "
+               f"{clause} ORDER BY sort_key DESC, i.id DESC LIMIT ?")
+        params.append(limit + 1)
+        rows = [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        for row in rows:
+            sort_key = int(row.pop("sort_key", 0) or 0)
+            self._decode_row(row)
+            row["following"] = True
+            row["feed_first_seen_at"] = int(row.pop("feed_first_seen_at", sort_key) or sort_key)
+            row["feed_last_seen_at"] = int(row.pop("feed_last_seen_at", sort_key) or sort_key)
+            row["time_estimated"] = int(row.get("published_at") or 0) <= 0
+        next_cursor = None
+        if has_more and rows:
+            last = rows[-1]
+            ts = int(last.get("published_at") or 0) or int(last.get("feed_first_seen_at") or 0)
+            next_cursor = f"{ts}|{last['id']}"
+        return rows, next_cursor
+
+    def following_counts(self, feed: str = "following") -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT platform, COUNT(*) AS n, MAX(last_seen_at) AS last "
+            "FROM item_feeds WHERE feed = ? GROUP BY platform", (feed,)).fetchall()
+        return [{"platform": r["platform"], "count": r["n"], "last_seen_at": r["last"]} for r in rows]
+
+    def following_count(self, feed: str = "following") -> int:
+        return int(self.conn.execute(
+            "SELECT COUNT(*) FROM item_feeds WHERE feed = ?", (feed,)).fetchone()[0])
+
+    def following_run_stats(self, feed: str = "following") -> dict[str, dict[str, Any]]:
+        """每个平台上一次同步的成败；关注页用它区分「没同步过」「上次失败」。"""
+        rows = self.conn.execute(
+            "SELECT r.* FROM following_runs r WHERE r.feed = ? AND r.id IN ("
+            "  SELECT MAX(id) FROM following_runs WHERE feed = ? GROUP BY plugin)",
+            (feed, feed)).fetchall()
+        out = {str(r["plugin"]): {"last_run_at": int(r["finished_at"] or r["started_at"] or 0),
+                                  "last_ok": (None if r["ok"] is None else bool(r["ok"])),
+                                  "count": int(r["count"] or 0),
+                                  "new_count": int(r["new_count"] or 0),
+                                  "error": str(r["error"] or "")}
+               for r in rows}
+        ok_rows = self.conn.execute(
+            "SELECT plugin, MAX(finished_at) AS t FROM following_runs "
+            "WHERE feed = ? AND ok = 1 GROUP BY plugin", (feed,)).fetchall()
+        for r in ok_rows:
+            item = out.setdefault(str(r["plugin"]), {})
+            item["last_ok_at"] = int(r["t"] or 0)
+        return out
+
+    def start_following_run(self, plugin: str, feed: str = "following") -> int:
+        with self._write_lock:
+            cur = self.conn.execute(
+                "INSERT INTO following_runs (plugin, feed, started_at) VALUES (?, ?, ?)",
+                (plugin, feed, int(time.time())))
+            self.conn.commit()
+        return int(cur.lastrowid)
+
+    def finish_following_run(self, run_id: int, ok: bool, count: int,
+                             new_count: int = 0, error: str = "") -> None:
+        with self._write_lock:
+            self.conn.execute(
+                "UPDATE following_runs SET finished_at = ?, ok = ?, count = ?, "
+                "new_count = ?, error = ? WHERE id = ?",
+                (int(time.time()), 1 if ok else 0, int(count), int(new_count),
+                 error[:500], run_id))
+            self.conn.commit()
+
+    def recover_following_runs(self, feed: str = "following") -> int:
+        """进程重启后，把没跑完的同步标成失败，别让关注页永远显示「正在同步」。"""
+        with self._write_lock:
+            cur = self.conn.execute(
+                "UPDATE following_runs SET ok = 0, finished_at = ?, "
+                "error = '上次同步没跑完' WHERE feed = ? AND ok IS NULL",
+                (int(time.time()), feed))
+            self.conn.commit()
+        return cur.rowcount
 
     # ------------------------------------------------------------ 检索
     @staticmethod
@@ -1043,6 +1222,10 @@ class Store:
         with self._write_lock:
             cur = self.conn.execute(
                 "DELETE FROM items WHERE fetched_at < ? AND published_at < ?", (cutoff, cutoff))
+            # item_feeds 跟着 items 走：内容被清掉后，关注流里也不能留孤儿行，
+            # 否则「N 条」会越算越大，点进去却全是空。
+            self.conn.execute(
+                "DELETE FROM item_feeds WHERE item_id NOT IN (SELECT id FROM items)")
             self.conn.commit()
         return cur.rowcount
 

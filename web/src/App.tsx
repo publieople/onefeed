@@ -16,6 +16,7 @@ const ItemPage = lazy(loadItemPageComponent);
 const MarketPage = lazy(() => import("./pages/MarketPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const AgentPage = lazy(() => import("./pages/AgentPage"));
+const FollowingPage = lazy(() => import("./pages/FollowingPage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 import { AgentProvider } from "./agent/AgentProvider";
 import AgentSurface from "./agent/AgentSurface";
@@ -356,6 +357,7 @@ export default function App() {
           >
             <Routes location={location}>
               <Route path="/" element={<FeedPage ctx={ctx} />} />
+              <Route path="/following" element={<FollowingPage ctx={ctx} />} />
               <Route path="/item/:id" element={<ItemPage ctx={ctx} />} />
               <Route path="/market" element={<MarketPage ctx={ctx} />} />
               <Route path="/settings" element={<SettingsPage ctx={ctx} />} />
