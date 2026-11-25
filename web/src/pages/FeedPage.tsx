@@ -878,6 +878,14 @@ export default function FeedPage({ ctx }: Props) {
               "已经到底了"
             )}
           </motion.span>
+          {!ctx.autoRunning && !feed.merging && !feed.next && ctx.autoResult?.error ? (
+            <button
+              onClick={() => ctx.autoRefresh(selected.length ? selected : undefined)}
+              className="rounded-full border border-line px-2.5 py-1 text-[11.5px] text-muted transition hover:border-ink/25 hover:text-ink"
+            >
+              重试
+            </button>
+          ) : null}
           {ctx.autoRunning && ctx.autoProgress?.total ? (
             <span className="h-[3px] w-32 overflow-hidden rounded-full bg-wash">
               <span

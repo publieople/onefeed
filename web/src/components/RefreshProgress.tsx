@@ -55,11 +55,51 @@ export default function RefreshProgress({
         label: p.label || id,
         status: p.status,
         error: p.error,
+        nextAt: Number(p.next_at ?? 0),
       })),
     [progress],
   );
   const failed = rows.filter((r) => r.status === "failed");
+  const skipped = rows.filter((r) => r.status === "skipped");
   const runningLabel = rows.find((r) => r.status === "running")?.label ?? "";
+  // 全部被冷却拦下时后端不起线程，phase=empty、finished_at 有值但没有 new_total。
+  // 以前这一支被念成「没有新增 抓完了」，看起来像抓过一轮，其实一个平台都没动。
+  const allCooling =
+    !live &&
+    (phase === "empty" ||
+      (rows.length > 0 && skipped.length === rows.length) ||
+      (!rows.length && String(progress?.error ?? "").includes("冷却")));
+  const allFailed = !live && rows.length > 0 && failed.length === rows.length;
+  const waits = skipped
+    .map((r) => r.nextAt - Math.floor(Date.now() / 1000))
+    .filter((n) => n > 0);
+  const coolingWait = waits.length ? Math.min(...waits) : 0;
+  const resultHead =
+    newTotal > 0
+      ? "+" + newTotal + " 条"
+      : allCooling
+        ? "都在冷却"
+        : allFailed
+          ? "都没抓到"
+          : failed.length
+            ? "部分没抓到"
+            : skipped.length
+              ? "有平台在冷却"
+              : "没有新增";
+  const resultTail =
+    newTotal > 0
+      ? "刚放进来了"
+      : allCooling
+        ? coolingWait > 0
+          ? "最早 " + coolingWait + " 秒后"
+          : "稍后再试"
+        : allFailed
+          ? "稍后重试"
+          : failed.length
+            ? "这轮 0 条新增"
+            : skipped.length
+              ? "这轮没抓全"
+              : "抓完了";
 
   const show =
     Boolean(progress) &&
@@ -168,10 +208,10 @@ export default function RefreshProgress({
           ) : (
             <>
               <span className={"relative shrink-0 font-medium " + (newTotal > 0 ? "text-ink" : "text-muted")}>
-                {newTotal > 0 ? "+" + newTotal + " 条" : "没有新增"}
+                {resultHead}
               </span>
               <span className="relative hidden shrink-0 text-fade sm:inline">
-                {newTotal > 0 ? "刚放进来了" : "抓完了"}
+                {resultTail}
               </span>
             </>
           )}

@@ -1066,6 +1066,9 @@ export interface FeedQuery {
 // 顺便也省掉一次「白屏然后重排」。
 const feedCache = new Map<string, FeedResponse>();
 
+/** 自动检查合并最多往前翻几页：一页 18 条，8 页足够覆盖 7 个平台的一轮满额新增。 */
+const MAX_MERGE_PAGES = 8;
+
 export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
   const cacheKey = JSON.stringify([
     query.platforms,
@@ -1077,6 +1080,11 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
   ]);
   const seed = feedCache.get(cacheKey);
   const [items, setItems] = useState<FeedItem[]>(() => seed?.items ?? []);
+  // 合并时要拿「合并前的 id 集合」判断新条目到哪儿为止；state 在异步循环里会过期。
+  const itemsRef = useRef<FeedItem[]>(seed?.items ?? []);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   const [next, setNext] = useState<string | null>(() => seed?.next ?? null);
   const [count, setCount] = useState(() => seed?.count ?? 0);
   const [parsed, setParsed] = useState<ParsedQuery | null>(() => seed?.parsed ?? null);
@@ -1166,8 +1174,11 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
   const mergedAutoKey = useRef(0);
 
   /**
-   * 自动检查完成后的合并：只重取首屏，把新条目并到前面，旧的已加载页原样留着。
-   * 不走 load(!append)：那会把列表换成一屏，用户滚到很深处时位置会被夹回底部。
+   * 自动检查完成后的合并：从首屏开始往后翻，直到碰见合并前就有的条目。
+   * 只并新块，旧的已加载页原样留着；不走 load(!append)，否则用户滚到很深处会被夹回底部。
+   *
+   * 以前只 GET 一页（18 条）：一轮新增 53 条时，第 19 条以后永远进不了列表，
+   * 底部却写着「看看新增的 53 条」。现在按旧列表的 id 边界翻页，把整段新增都接住。
    */
   const merge = useCallback(async () => {
     if (flight.current) return;
@@ -1176,15 +1187,41 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
     setError("");
     const oldHeight = document.documentElement.scrollHeight;
     const oldY = window.scrollY;
+    const oldIds = new Set(itemsRef.current.map((entry) => entry.id));
+    const collected: FeedItem[] = [];
+    const seen = new Set<string>();
+    let first: FeedResponse | null = null;
     try {
-      const data = await getJSON<FeedResponse>(build(null));
-      seedSaved(data.items);
-      setItems((prev) => {
-        const fresh = new Set(data.items.map((entry) => entry.id));
-        return [...data.items, ...prev.filter((entry) => !fresh.has(entry.id))];
-      });
-      setCount(data.count);
-      setParsed(data.parsed);
+      let cursor: string | null = null;
+      let hitOld = false;
+      for (let page = 0; page < MAX_MERGE_PAGES && !hitOld; page += 1) {
+        let data: FeedResponse;
+        try {
+          data = await getJSON<FeedResponse>(build(cursor));
+        } catch (err) {
+          if (page === 0) throw err;
+          // 后面某页失败时，已经拿到的前几页仍然有用，不能整段丢掉。
+          if ((err as Error).name !== "AbortError") setError((err as Error).message);
+          break;
+        }
+        first ??= data;
+        for (const entry of data.items) {
+          if (seen.has(entry.id)) continue;
+          seen.add(entry.id);
+          collected.push(entry);
+        }
+        hitOld = data.items.some((entry) => oldIds.has(entry.id));
+        cursor = data.next;
+        if (!cursor) break;
+      }
+      if (!collected.length) return;
+      seedSaved(collected);
+      const fresh = new Set(collected.map((entry) => entry.id));
+      setItems((prev) => [...collected, ...prev.filter((entry) => !fresh.has(entry.id))]);
+      if (first) {
+        setCount(first.count);
+        setParsed(first.parsed);
+      }
       // FeedPage 在 layout effect 里按高度差把滚动位置补回来，新卡插在上面时视线不跳。
       setMergeShift({ oldHeight, oldY });
       setMergeEpoch((n) => n + 1);

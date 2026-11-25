@@ -99,6 +99,7 @@ def test_progress_pops_out_of_the_button_and_takes_no_room():
     assert "aria-busy={live}" in bar
     assert "onefeed:refresh-dismissed" in bar, "「收起」只隐藏本轮"
     assert "new_total" in bar and "重试失败" in bar
+    assert "都在冷却" in bar and "next_at" in bar, "全部冷却不能念成「没有新增」"
     # 失败详情不能展开在行内：行高一变，正文就会跟着跳
     assert "onefeed:toast" in bar
     # 信息流里不再有那一条占整行的进度带
@@ -144,9 +145,30 @@ def test_scroll_bottom_checks_auto_and_says_so():
     assert "看看新增的" in feed
     # 合并新首屏不能换 next：人已经加载好的分页要留着
     assert "export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0)" in api
-    assert "const fresh = new Set(data.items.map((entry) => entry.id));" in api
-    assert "return [...data.items, ...prev.filter((entry) => !fresh.has(entry.id))];" in api
+    # 新增可能超过一页（18 条）：合并要按旧 id 边界继续翻页，不能只取首屏
+    assert "const oldIds = new Set(itemsRef.current.map((entry) => entry.id));" in api
+    assert "for (let page = 0; page < MAX_MERGE_PAGES && !hitOld; page += 1)" in api
+    assert "hitOld = data.items.some((entry) => oldIds.has(entry.id));" in api
+    assert "const fresh = new Set(collected.map((entry) => entry.id));" in api
+    assert "[...collected, ...prev.filter((entry) => !fresh.has(entry.id))]" in api
     assert "mergeShift" in api and "mergeEpoch" in api
+
+
+def test_auto_failure_can_retry_and_manual_refresh_explains_busy():
+    """自动检查失败不能锁死 10 分钟；手点刷新撞上自动检查也不能静默。"""
+    app = read("web/src/App.tsx")
+    feed = read("web/src/pages/FeedPage.tsx")
+    # 失败后必须复位节流，否则滚到底也只会看到同一句红字
+    catch = app[app.index("const autoRefresh = useCallback"):]
+    catch = catch[: catch.index("}, [autoRunning, progress?.running, loadSummary]);")]
+    assert "autoAt.current = 0;" in catch
+    # 重试入口：按当前筛选的平台再查一次
+    assert "setAutoResult(null);" in app
+    assert "ctx.autoRefresh(selected.length ? selected : undefined)" in feed
+    assert "重试" in feed
+    # 409 不只可能是 Agent 在抓，也可能是自动检查在跑
+    assert "自动检查正在跑，等它跑完再刷新" in app
+    assert "自动检查正在跑，等它跑完再重试" in app
 
 
 def test_topbar_progress_is_not_a_dead_button():

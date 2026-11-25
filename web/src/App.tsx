@@ -323,12 +323,14 @@ export default function App() {
       if (code === "refresh_running") {
         if (agentPulling.current) {
           showToast({ text: "Agent 正在抓一轮，等它跑完再刷新" });
+        } else if (autoRunning || autoSending.current) {
+          showToast({ text: "自动检查正在跑，等它跑完再刷新" });
         }
         return;
       }
       showToast({ text: (err as Error).message });
     }
-  }, [showToast, location.pathname]);
+  }, [showToast, location.pathname, autoRunning]);
 
   /** 只重试失败的那几个平台：整轮重跑会让冷却中的平台再被跳过一次 */
   const refreshPlatforms = useCallback(
@@ -345,13 +347,15 @@ export default function App() {
         if ((err as { code?: string }).code === "refresh_running") {
           if (agentPulling.current) {
             showToast({ text: "Agent 正在抓一轮，等它跑完再重试" });
+          } else if (autoRunning || autoSending.current) {
+            showToast({ text: "自动检查正在跑，等它跑完再重试" });
           }
           return;
         }
         showToast({ text: (err as Error).message });
       }
     },
-    [showToast],
+    [showToast, autoRunning],
   );
 
   /**
@@ -362,6 +366,8 @@ export default function App() {
     if (DEMO) return;
     if (autoSending.current || autoRunning || progress?.running) return;
     if (autoAt.current && Date.now() - autoAt.current < 10 * 60 * 1000) return;
+    // 重试时先把上一轮的红字清掉：按钮已经按下去，不能让旧错误留在原地。
+    setAutoResult(null);
     autoAt.current = Date.now();
     autoSending.current = true;
     try {
@@ -392,6 +398,9 @@ export default function App() {
         autoAt.current = 0;
         return;
       }
+      // 网络抖动/接口报错不是「刚查过」：不复位的话 10 分钟内滚到底都不会再试，
+      // 底部那句「自动检查没成功」就成了死路。
+      autoAt.current = 0;
       setAutoResult({ at: Date.now(), new_total: 0, failed: 0, cooling: 0, error: (err as Error).message });
     } finally {
       autoSending.current = false;
