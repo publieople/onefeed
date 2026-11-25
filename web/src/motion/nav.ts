@@ -25,6 +25,13 @@ export interface NavOpts {
   /** 参与变形的元素。最多 3 个；重名会被丢掉（重名会让浏览器整体降级成根转场） */
   names?: NavName[];
   /**
+   * 新快照拍下之前调用：此时旧快照已经定格，React 也已经提交完新 DOM。
+   * 给「换边挂名」用：两端都在同一棵树里时（比如灯箱盖在缩略图上），
+   * 旧的一侧在 start 前挂名，新的一侧只能等这里再把名字接过去，
+   * 否则同一张快照里重名，浏览器会整段降级成根转场。
+   */
+  afterApply?: () => void;
+  /**
    * 转场收尾时调用（成功、失败、降级都算一次）。
    * 给「代位元素」用：那类临时盒子必须在旧快照之后、新快照之前挂上去，
    * 再在动画跑完之后摘掉，否则下一次转场会撞见重名。
@@ -125,6 +132,12 @@ export function runNav(kind: NavKind, apply: () => void, opts: NavOpts = {}): vo
     ran = true;
     // React 默认批处理更新，快照可能拿到旧 DOM；强制同帧提交
     flushSync(apply);
+    // 新 DOM 已经落盘、新快照还没拍：这时换边挂名字最安全
+    try {
+      opts.afterApply?.();
+    } catch {
+      /* 名字没挂上只会少一段动画，不该把交互本身弄断 */
+    }
   };
   let closed = false;
   const done = () => {

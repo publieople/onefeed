@@ -488,6 +488,56 @@ html.nav-vt.nav-vt-back::view-transition-new(of-title) {
   }
 }
 
+/* 灯箱：点开缩略图时，同一个 of-lb 从缩略图的小盒子长到整屏大图；关掉时反向缩回。
+   两端不会同时挂名：打开时旧快照是缩略图，新快照是大图；关闭时反过来。
+   只让目标侧参与插值，避免把一张低清缩略图拉满整屏。 */
+html.nav-vt::view-transition-group(of-lb) {
+  z-index: 6;
+  animation-duration: 0.42s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html.nav-vt.nav-vt-back::view-transition-group(of-lb) {
+  animation-duration: 0.34s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html.nav-vt::view-transition-old(of-lb) {
+  animation: none;
+  opacity: 0;
+}
+
+html.nav-vt::view-transition-new(of-lb) {
+  animation: nav-lb-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html.nav-vt.nav-vt-back::view-transition-old(of-lb) {
+  animation: nav-lb-out 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+html.nav-vt.nav-vt-back::view-transition-new(of-lb) {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes nav-lb-in {
+  0% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes nav-lb-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* Agent 面板：底部抽屉与详情页右栏是同一个东西换了位置（两边都挂 of-agent 这个名字），
    group 的盒子由浏览器插值，看到的是整块面板从底部滑到右侧；开合时再叠一点淡入淡出。
    收起方向反过来：留在场上的是抽屉那张快照，所以动画挂在 old 侧。 */

@@ -290,7 +290,7 @@ function Lightbox({
           src={images[index]}
           alt=""
           referrerPolicy="no-referrer"
-          style={{ viewTransitionName: "of-lb" }}
+          data-lb-image=""
           onClick={(e) => {
             e.stopPropagation();
             setZoom((v) => !v);
@@ -1060,17 +1060,42 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
     return () => setSiblings([]);
   }, [data?.siblings, setSiblings]);
 
-  // 点缩略图：图从缩略图的位置长成整屏大图，关掉时再缩回去
+  // 点缩略图：图从缩略图的位置长成整屏大图，关掉时再缩回去。
+  // 缩略图和灯箱大图会同时存在于 DOM 里，名字不能常驻在 img 上：
+  // 旧快照挂缩略图，apply 之后把名字交给新挂载的大图，两端才各有一个 of-lb。
   const openLightbox = useCallback((index: number, el?: HTMLElement) => {
     if (!el) {
       setLightbox(index);
       return;
     }
-    runNav("lightbox", () => setLightbox(index), { names: [{ el, name: "of-lb" }] });
+    runNav("lightbox", () => setLightbox(index), {
+      names: [{ el, name: "of-lb" }],
+      afterApply: () => {
+        el.style.viewTransitionName = "";
+        const img = document.querySelector<HTMLElement>("[data-lb-image]");
+        if (img) img.style.viewTransitionName = "of-lb";
+      },
+      after: () => {
+        el.style.viewTransitionName = "";
+        const img = document.querySelector<HTMLElement>("[data-lb-image]");
+        if (img) img.style.viewTransitionName = "";
+      },
+    });
   }, []);
   const closeLightbox = useCallback((index: number) => {
     const thumb = document.querySelector<HTMLElement>('[data-lb-index="' + index + '"]');
-    runNav("lightbox", () => setLightbox(null), { names: thumb ? [{ el: thumb, name: "of-lb" }] : [] });
+    const img = document.querySelector<HTMLElement>("[data-lb-image]");
+    // 关闭是反向：走 back 这一组，CSS 才会让大图快照留在场上缩回去
+    runNav("back", () => setLightbox(null), {
+      names: img ? [{ el: img, name: "of-lb" }] : [],
+      // 大图已经卸载，这时才能把名字交给缩略图；两端同时挂名会被浏览器当成重名
+      afterApply: () => {
+        if (thumb) thumb.style.viewTransitionName = "of-lb";
+      },
+      after: () => {
+        if (thumb) thumb.style.viewTransitionName = "";
+      },
+    });
   }, []);
 
   const stats = useMemo(() => (item ? statCards(item, detail?.detail ?? null) : []), [item, detail]);

@@ -71,6 +71,8 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 
 2026-11-25 信息流交互收口：Agent 跑完自动把过程折成「过程 N 步 · 秒数」一行，只留结果；详情页「打开 Agent」改从右缘展开，不再让底栏胶囊横穿整页；滑到列表底部会自动检查新内容，只并首屏、保留滚动位置，并在底部报进度与新增数。详见 [`docs/agent-auto-refresh-2026-11-25.md`](docs/agent-auto-refresh-2026-11-25.md)。
 
+2026-11-25 图文灯箱改成从缩略图缩放展开：点开大图时同一张图从缩略图盒子长到整屏，关闭时缩回原位置，不再跳变；多图左右翻、原尺寸查看与键盘操作保持原样。详见 [`docs/lightbox-zoom-2026-11-25.md`](docs/lightbox-zoom-2026-11-25.md)。
+
 实测（2026-11-15 21:00，本机，端口 8791）：275 条 / 6 平台；卡片统一成「平台标签 + kind + 时间 / 媒体 / 标题 / 摘要 / 作者 + 互动」，缺封面走虚线占位块而不是假装加载失败；B 站抽屉能拉到 20 条真实评论（楼中楼 3 层内）；市场页能把 B 站 0.1.0 一键更新到 0.2.0；热度排序按平台内分位归一，六个平台都能上榜首；设置页可改插件目录、registry、每轮条数、评论条数、默认排序、保留天数与自动更新，保存即生效；`8787` 被别的程序占用时自动改用 `8788` 并在启动日志里说明。
 
 截图：`design/ui-feed.png`（信息流）、`design/ui-drawer.png`（详情 + 评论）、`design/ui-settings.png` / `design/ui-settings-full.png`（设置页）、`design/ui-market.png` / `design/ui-market-after.png`（市场更新前后）。
@@ -242,6 +244,7 @@ spec 变更 → 评审通过 → 同步 tasks.md → 写代码 → PR 关联 tas
 - [`specs/012-demo-site/spec.md`](specs/012-demo-site/spec.md) — 静态演示站（Pages 快照 / 只读边界 / 部署）
 - [`docs/following-accounts-2026-11-25.md`](docs/following-accounts-2026-11-25.md) — 关注名单、作者主页与 B 站直播过滤
 - [`docs/agent-auto-refresh-2026-11-25.md`](docs/agent-auto-refresh-2026-11-25.md) — Agent 过程收起、详情页右栏与触底自动检查
+- [`docs/lightbox-zoom-2026-11-25.md`](docs/lightbox-zoom-2026-11-25.md) — 图文灯箱从缩略图缩放展开与缩回
 
 ## 许可
 
