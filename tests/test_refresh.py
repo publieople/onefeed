@@ -180,6 +180,20 @@ def test_cancel_stops_queued_platforms():
     assert final["done"] == final["total"] == 3
 
 
+
+def test_auto_source_is_kept_and_unknown_falls_back_to_user():
+    """滚到底的自动检查要靠 source=auto 才能不演刷新；手点的那轮仍是 user。"""
+    runner = RefreshRunner(make_store())
+    runner._load = lambda _pid: []
+    started, state = runner.trigger(platforms=["v2ex"], force=True, source="auto")
+    assert started is True
+    assert state["source"] == "auto", "自动检查的来源被吞了，前端会当成手点刷新"
+    wait_idle(runner)
+    started, state = runner.trigger(platforms=["juejin"], force=True, source="who-knows")
+    assert started is True
+    assert state["source"] == "user", "未知来源不能漏进状态，前端的分支只认三类"
+
+
 def test_demo_mode_is_skipped_not_failed_and_cooldown_ignored():
     store = make_store()
     runner = RefreshRunner(store)

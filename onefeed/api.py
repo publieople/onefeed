@@ -1373,8 +1373,10 @@ def refresh(request: Request, payload: dict[str, Any] = Body(default={})) -> dic
     platforms = payload.get("platforms") if isinstance(payload, dict) else None
     # force=true：用户明确要求「现在就抓」，越过平台冷却（默认不越：防的是风控）
     force = bool(payload.get("force")) if isinstance(payload, dict) else False
+    # 滚到底的自动检查带 source=auto：前端据此只把新条目并进列表，不触发展开/收起演出。
+    source = str(payload.get("source") or "user") if isinstance(payload, dict) else "user"
     _COMMENT_CACHE.clear()  # 新一轮采集后评论可能变了，别拿旧缓存糊弄
-    started, state = _runner(request).trigger(platforms=platforms, force=force)
+    started, state = _runner(request).trigger(platforms=platforms, force=force, source=source)
     if not started:
         raise HTTPException(status_code=409, detail={
             "code": "refresh_running", "message": "已经在刷新了",

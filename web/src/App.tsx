@@ -33,12 +33,29 @@ interface ToastMsg {
   action?: { label: string; run: () => void };
 }
 
+/** 滚到底自动检查的结果：只在信息流底部说给用户听，不动顶栏、不演刷新。 */
+export interface AutoRefreshResult {
+  at: number;
+  new_total: number;
+  failed: number;
+  cooling: number;
+  error?: string;
+}
+
 export interface OutletCtx {
   progress: RunState | null;
   reloadKey: number;
   /** 只有「刷新真的结束且本轮有新增」才 +1；换筛选、收藏、bump 都不会动它。
       信息流的清场登场只认这个序号，不能拿 reloadKey 当信号。 */
   refreshSeq: number;
+  /** 自动检查完成一次就 +1：列表把新首屏并到顶上，保留已加载的页与滚动位置。 */
+  autoKey: number;
+  autoRunning: boolean;
+  /** 自动检查自己的进度：不写进顶栏那枚 progress，免得凭空弹出一轮「抓完了」。 */
+  autoProgress: RunState | null;
+  autoResult: AutoRefreshResult | null;
+  /** 滚到底后自动去各平台看一眼；传 platforms 时只查当前筛选的平台。10 分钟内只跑一次。 */
+  autoRefresh: (platforms?: string[]) => void;
   refresh: () => void;
   /** 只重试指定平台（保留冷却语义，不整轮重跑） */
   refreshPlatforms: (platforms: string[]) => void;
@@ -80,6 +97,14 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [refreshSeq, setRefreshSeq] = useState(0);
+  // 自动检查不碰 reloadKey：它跳过「清场 → 逐个登场」，只让列表把新首屏并进来。
+  const [autoKey, setAutoKey] = useState(0);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoProgress, setAutoProgress] = useState<RunState | null>(null);
+  const [autoResult, setAutoResult] = useState<AutoRefreshResult | null>(null);
+  const autoWasRunning = useRef(false);
+  const autoSending = useRef(false);
+  const autoAt = useRef(0);
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   // 所有 toast 共用一个定时器：之前「全局提示」和「开始刷新」各挂各的 setTimeout，
@@ -174,6 +199,34 @@ export default function App() {
         if (data.state.source === "agent") {
           agentPulling.current = Boolean(data.state.running);
           wasRunning.current = false;
+          return;
+        }
+        // 滚到底的自动检查：只在信息流底部说话。顶栏进度、reloadKey、刷新演出都不动。
+        if (data.state.source === "auto") {
+          agentPulling.current = false;
+          if (data.state.running) {
+            autoWasRunning.current = true;
+            setAutoRunning(true);
+            setAutoProgress(data.state);
+            return;
+          }
+          if (autoWasRunning.current) {
+            autoWasRunning.current = false;
+            setAutoRunning(false);
+            setAutoProgress(null);
+            const autoRows = Object.entries(data.state.plugins ?? {});
+            setAutoResult({
+              at: Date.now(),
+              new_total: Number(
+                data.state.new_total ??
+                  autoRows.reduce((n, [, p]) => n + Number((p as { new_count?: number }).new_count ?? 0), 0),
+              ),
+              failed: autoRows.filter(([, p]) => p.status === "failed").length,
+              cooling: autoRows.filter(([, p]) => p.status === "skipped").length,
+            });
+            setAutoKey((k) => k + 1);
+            void loadSummary();
+          }
           return;
         }
         agentPulling.current = false;
@@ -301,6 +354,50 @@ export default function App() {
     [showToast],
   );
 
+  /**
+   * 滚到底后的自动检查：不占顶栏、不换 reloadKey，完成后只让列表并一次新首屏。
+   * 10 分钟内只跑一次；用户手点的那一轮、Agent 那一轮在跑时都让位。
+   */
+  const autoRefresh = useCallback(async (platforms?: string[]) => {
+    if (DEMO) return;
+    if (autoSending.current || autoRunning || progress?.running) return;
+    if (autoAt.current && Date.now() - autoAt.current < 10 * 60 * 1000) return;
+    autoAt.current = Date.now();
+    autoSending.current = true;
+    try {
+      const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", {
+        source: "auto",
+        ...(platforms?.length ? { platforms } : {}),
+      });
+      const state = res?.state;
+      if (state?.running) {
+        autoWasRunning.current = true;
+        setAutoRunning(true);
+        setAutoProgress(state);
+      } else {
+        const rows = Object.entries(state?.plugins ?? {});
+        setAutoResult({
+          at: Date.now(),
+          new_total: Number(state?.new_total ?? 0),
+          failed: rows.filter(([, p]) => p.status === "failed").length,
+          cooling: rows.filter(([, p]) => p.status === "skipped").length,
+        });
+        setAutoKey((k) => k + 1);
+        void loadSummary();
+      }
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "refresh_running") {
+        // 别的轮次占着采集器：这一轮不算数，别让 10 分钟冷却从一次让位开始。
+        autoAt.current = 0;
+        return;
+      }
+      setAutoResult({ at: Date.now(), new_total: 0, failed: 0, cooling: 0, error: (err as Error).message });
+    } finally {
+      autoSending.current = false;
+    }
+  }, [autoRunning, progress?.running, loadSummary]);
+
   useEffect(() => {
     refreshRef.current = refresh;
   }, [refresh]);
@@ -325,7 +422,8 @@ export default function App() {
   });
 
   const ctx: OutletCtx = {
-    progress, reloadKey, refreshSeq, refresh, refreshPlatforms,
+    progress, reloadKey, refreshSeq, autoKey, autoRunning, autoProgress, autoResult, autoRefresh,
+    refresh, refreshPlatforms,
     summary, settings, reloadSettings, bump,
   };
 

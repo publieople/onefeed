@@ -2,9 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { ArrowUp, Bookmark, Loader2, Star } from "lucide-react";
+import { ArrowUp, Bookmark, Loader2, RefreshCw, Star } from "lucide-react";
 import type { OutletCtx } from "../App";
 import { prefetchDetail, useFeed, type FeedItem } from "../api";
+import { DEMO } from "../demo";
 import Card from "../components/Card";
 import Chips from "../components/Chips";
 import ColsPicker from "../components/ui/ColsPicker";
@@ -144,7 +145,7 @@ export default function FeedPage({ ctx }: Props) {
     () => ({ platforms: selected, kind: "", sort: activeSort, q, since, saved: savedOnly }),
     [selected, activeSort, q, since, savedOnly],
   );
-  const feed = useFeed(query, ctx.reloadKey);
+  const feed = useFeed(query, ctx.reloadKey, ctx.autoKey);
   // 列数按网格实测宽度算（侧栏开合、窗口缩放都走这条），不再用 md:/xl: 视口断点
   const grid = useGridCols();
   const active = selected.length > 0 || q.trim().length > 0 || savedOnly;
@@ -458,27 +459,69 @@ export default function FeedPage({ ctx }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backId, feed.loading, feed.items.length]);
 
-  // ── 无限预取：离底部还有一屏半就开始取下一页，滚到底时内容已经在了。
-  // 传感器挂在底部那条状态上，它只在还有下一页（或正在取）时存在。
-  // 回调里读的是 ref：feed.more 每次渲染都是新函数，直接进依赖会让 observer 反复重建。
+  // ── 触底：先无限预取下一页；真的到最底了，再自动去各平台看一眼有没有新内容。
+  // 传感器一直挂在底部状态条上，所以「已经到底了」也能成为自动检查的落点。
+  // 回调里读 ref：feed.more / autoRefresh 每次渲染都是新函数，直接进依赖会让 observer 反复重建。
   const sentinel = useRef<HTMLDivElement | null>(null);
   const moreRef = useRef(feed.more);
   moreRef.current = feed.more;
   const nextRef = useRef(feed.next);
   nextRef.current = feed.next;
+  const autoRef = useRef(ctx.autoRefresh);
+  autoRef.current = ctx.autoRefresh;
+  // 自动检查跟着当前筛选走：筛了 V2EX 就只查 V2EX，新增数才对得上这一屏。
+  const autoPlatformsRef = useRef<string[]>([]);
+  autoPlatformsRef.current = selected;
+  const autoReadyRef = useRef(false);
+  autoReadyRef.current =
+    !DEMO &&
+    !feed.next &&
+    !feed.loading &&
+    !feed.moreLoading &&
+    !ctx.autoRunning &&
+    !ctx.progress?.running &&
+    feed.items.length > 0;
+  // 首屏没滚过就不算「往下滑」：短文列表不该一进来就去打平台。
+  // 用 state 而不是 ref：一屏只有几条时传感器首帧就在视野里，observer 回调先跑、
+  // 那时还没滚过；等真滚了必须把 observer 重建一次，否则它不会再回来问。
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => {
+      if (window.scrollY > 120) setScrolled(true);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
   useEffect(() => {
     const el = sentinel.current;
-    if (!el || !feed.next) return;
+    if (!el) return;
     if (typeof IntersectionObserver === "undefined") return;
+    let autoTimer = 0;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting) && nextRef.current) void moreRef.current();
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (nextRef.current) {
+          void moreRef.current();
+          return;
+        }
+        if (!autoReadyRef.current || !scrolled) return;
+        // 稍等一下：触底那一下经常还在惯性滚动，别在飞行途中又起一轮采集。
+        window.clearTimeout(autoTimer);
+        autoTimer = window.setTimeout(() => {
+          if (autoReadyRef.current) {
+            autoRef.current(autoPlatformsRef.current.length ? autoPlatformsRef.current : undefined);
+          }
+        }, 600);
       },
       { rootMargin: "0px 0px 1200px 0px" },
     );
     io.observe(el);
-    return () => io.disconnect();
-  }, [feed.next]);
+    return () => {
+      window.clearTimeout(autoTimer);
+      io.disconnect();
+    };
+  }, [feed.next, feed.items.length, ctx.autoRunning, ctx.progress?.running, ctx.autoKey, scrolled]);
 
   // 一屏都没铺满（筛选后只剩几条）时传感器够不着，自己补一次，别让人对着空荡荡的页面
   useEffect(() => {
@@ -489,6 +532,19 @@ export default function FeedPage({ ctx }: Props) {
     }, 80);
     return () => window.clearTimeout(timer);
   }, [feed.next, feed.loading, feed.moreLoading, feed.items.length]);
+
+  // 自动检查把首屏新条目插到了上面：按高度差把滚动位置补回来，
+  // 人停在原地看的那几张卡不因为上面多了一排而往下跳。
+  const mergeSeen = useRef(0);
+  useLayoutEffect(() => {
+    if (!feed.mergeShift || feed.mergeEpoch === mergeSeen.current) return;
+    mergeSeen.current = feed.mergeEpoch;
+    const { oldHeight, oldY } = feed.mergeShift;
+    // 在最顶上时不需要补：新卡就该出现在眼前。
+    if (oldY < 200) return;
+    const grown = document.documentElement.scrollHeight - oldHeight;
+    if (grown > 0) window.scrollTo({ top: oldY + grown });
+  }, [feed.mergeEpoch, feed.mergeShift]);
 
   // AI 对话框把「它理解的条件」交给信息流：用事件而不是上下文，
   // 免得为一个筛选状态把整个 App 的 props 再穿一遍。
@@ -773,15 +829,15 @@ export default function FeedPage({ ctx }: Props) {
         </div>
       ) : null}
 
-      {/* 取下一页的状态条：高度固定 56px，状态在「正在获取 / 往下滑」之间切换时
-          页面不会因为这一行变高变矮而抖一下。滚到底时它正好在视口里，也就是传感器的落点。 */}
-      {feed.next || feed.moreLoading ? (
+      {/* 触底状态条：高度固定 56px，翻页 / 自动检查 / 结果都在这一行换字，页面不抖。
+          它一直存在（包括「已经到底了」），IntersectionObserver 才有落点。 */}
+      {feed.items.length ? (
         <div
           ref={sentinel}
           aria-live="polite"
-          className="mt-8 flex min-h-[56px] items-center justify-center"
+          data-auto-refresh={ctx.autoRunning ? "running" : "idle"}
+          className="mt-8 flex min-h-[56px] flex-col items-center justify-center gap-1.5"
         >
-          {/* 三种状态在同一行原地换字，高度不变；换的时候淡一下，不然像页面闪了一下 */}
           <motion.span
             key={feed.moreLoading ? "loading" : "idle"}
             initial={{ opacity: 0, y: 4 }}
@@ -789,20 +845,56 @@ export default function FeedPage({ ctx }: Props) {
             transition={{ duration: DUR.micro, ease: EASE }}
             className="flex items-center gap-2 text-[12.5px] text-fade"
           >
-            {feed.moreLoading ? (
+            {ctx.autoRunning ? (
+              <>
+                <RefreshCw size={13} className="animate-spin text-accent" />
+                正在看看有没有新内容
+                {ctx.autoProgress && ctx.autoProgress.total
+                  ? `… ${ctx.autoProgress.done}/${ctx.autoProgress.total}`
+                  : "…"}
+              </>
+            ) : feed.merging ? (
+              <>
+                <Loader2 size={13} className="animate-spin" />
+                正在把新内容放进来…
+              </>
+            ) : feed.moreLoading ? (
               <>
                 <Loader2 size={13} className="animate-spin" />
                 正在获取新内容…
               </>
-            ) : (
+            ) : feed.next ? (
               "继续往下滑，自动接着取"
+            ) : ctx.autoResult?.error ? (
+              `自动检查没成功：${ctx.autoResult.error}`
+            ) : ctx.autoResult ? (
+              <>
+                自动检查完
+                {ctx.autoResult.new_total > 0 ? `：新增 ${ctx.autoResult.new_total} 条` : "：这轮没有新内容"}
+                {ctx.autoResult.failed ? ` · ${ctx.autoResult.failed} 个平台没抓到` : ""}
+                {ctx.autoResult.cooling ? ` · ${ctx.autoResult.cooling} 个平台冷却中` : ""}
+              </>
+            ) : (
+              "已经到底了"
             )}
           </motion.span>
+          {ctx.autoRunning && ctx.autoProgress?.total ? (
+            <span className="h-[3px] w-32 overflow-hidden rounded-full bg-wash">
+              <span
+                className="block h-full rounded-full bg-accent transition-[width] duration-500"
+                style={{ width: Math.round((ctx.autoProgress.done / ctx.autoProgress.total) * 100) + "%" }}
+              />
+            </span>
+          ) : null}
+          {!ctx.autoRunning && !feed.next && (ctx.autoResult?.new_total ?? 0) > 0 ? (
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              className="rounded-full border border-line px-2.5 py-1 text-[11.5px] text-muted transition hover:border-ink/25 hover:text-ink"
+            >
+              看看新增的 {ctx.autoResult?.new_total} 条
+            </button>
+          ) : null}
         </div>
-      ) : feed.items.length ? (
-        <p className="rise mt-8 flex min-h-[56px] items-center justify-center text-[12.5px] text-fade">
-          已经到底了
-        </p>
       ) : null}
     </div>
   );

@@ -1066,7 +1066,7 @@ export interface FeedQuery {
 // 顺便也省掉一次「白屏然后重排」。
 const feedCache = new Map<string, FeedResponse>();
 
-export function useFeed(query: FeedQuery, reloadKey: number) {
+export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
   const cacheKey = JSON.stringify([
     query.platforms,
     query.kind,
@@ -1084,6 +1084,10 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
   // 下一页单独一套状态：自动预取时不能把首屏的「正在取内容…」再翻出来，
   // 也不能让列表底部那块占位忽有忽无（整页会跟着抖）。
   const [moreLoading, setMoreLoading] = useState(false);
+  // 自动检查只并首屏：新条目挂到列表顶上，已加载的页与滚动位置都留着。
+  const [merging, setMerging] = useState(false);
+  const [mergeEpoch, setMergeEpoch] = useState(0);
+  const [mergeShift, setMergeShift] = useState<{ oldHeight: number; oldY: number } | null>(null);
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   // 单飞：滚动传感器可能在一次请求飞在路上时又触发一次，重复请求会把同一页追两遍
@@ -1159,6 +1163,45 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
     [build, cacheKey],
   );
 
+  const mergedAutoKey = useRef(0);
+
+  /**
+   * 自动检查完成后的合并：只重取首屏，把新条目并到前面，旧的已加载页原样留着。
+   * 不走 load(!append)：那会把列表换成一屏，用户滚到很深处时位置会被夹回底部。
+   */
+  const merge = useCallback(async () => {
+    if (flight.current) return;
+    flight.current = true;
+    setMerging(true);
+    setError("");
+    const oldHeight = document.documentElement.scrollHeight;
+    const oldY = window.scrollY;
+    try {
+      const data = await getJSON<FeedResponse>(build(null));
+      seedSaved(data.items);
+      setItems((prev) => {
+        const fresh = new Set(data.items.map((entry) => entry.id));
+        return [...data.items, ...prev.filter((entry) => !fresh.has(entry.id))];
+      });
+      setCount(data.count);
+      setParsed(data.parsed);
+      // FeedPage 在 layout effect 里按高度差把滚动位置补回来，新卡插在上面时视线不跳。
+      setMergeShift({ oldHeight, oldY });
+      setMergeEpoch((n) => n + 1);
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") setError((err as Error).message);
+    } finally {
+      flight.current = false;
+      setMerging(false);
+    }
+  }, [build]);
+
+  useEffect(() => {
+    if (!autoKey || autoKey === mergedAutoKey.current) return;
+    mergedAutoKey.current = autoKey;
+    void merge();
+  }, [autoKey, merge]);
+
   useEffect(() => {
     void load(null, false);
   }, [load, reloadKey]);
@@ -1171,6 +1214,9 @@ export function useFeed(query: FeedQuery, reloadKey: number) {
     loading,
     loadedKey,
     moreLoading,
+    merging,
+    mergeEpoch,
+    mergeShift,
     error,
     more: () => (next ? load(next, true) : Promise.resolve()),
   };

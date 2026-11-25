@@ -851,9 +851,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       setOpen(false);
       return;
     }
-    // 详情页右栏（≥1080）：右栏是常驻槽位的一部分，收起只是把 tab 还给「稍后再看」，
-    // 不做缩回唤起器的转场 —— 那里没有唤起器可缩。
-    if (onItemPage && wide) {
+    // 详情页：右栏是常驻槽位的一部分（窄屏才是抽屉），收起只是把 tab 还给栏位，
+    // 不做缩回唤起器的转场 —— 那里没有唤起器可缩。右栏/抽屉各自负责退场。
+    if (onItemPage) {
       setOpen(false);
       return;
     }
@@ -869,12 +869,19 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       },
       { after: () => ghost.remove() },
     );
-  }, [open, onItemPage, wide]);
+  }, [open, onItemPage]);
 
   const openWith = useCallback(
     (prefill?: string) => {
       if (typeof prefill === "string") setDraft(prefill);
       if (open) {
+        window.setTimeout(() => inputRef.current?.focus(), 30);
+        return;
+      }
+      // 详情页：右栏从右缘长出来（Shell 的宽度补间 / 抽屉滑入），不该拿主页底栏的
+      // 胶囊当起点 —— 那会演成「底栏滑到右边」。这里直接开，转场交给栏位自己。
+      if (onItemPage) {
+        setOpen(true);
         window.setTimeout(() => inputRef.current?.focus(), 30);
         return;
       }
@@ -892,7 +899,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       );
       window.setTimeout(() => inputRef.current?.focus(), 30);
     },
-    [open, onItemPage, wide],
+    [open, onItemPage],
   );
 
   const setFocus = useCallback((next: AgentFocus | null) => setFocusState(next), []);

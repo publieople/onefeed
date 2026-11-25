@@ -120,6 +120,35 @@ def test_card_carries_the_new_marker():
     assert 'className="card-fresh"' in card
 
 
+
+def test_scroll_bottom_checks_auto_and_says_so():
+    """滚到底的自动检查走 source=auto：顶栏不动、不演刷新，只在底部报进度和结果。
+
+    这一层最容易被改回去：把 auto 当 user 刷新，整屏会突然收起；
+    或者只发请求不说话，用户以为到底就没内容了。
+    """
+    app = read("web/src/App.tsx")
+    feed = read("web/src/pages/FeedPage.tsx")
+    api = read("web/src/api.ts")
+    assert 'source: "auto"' in app
+    assert 'data.state.source === "auto"' in app, "自动检查被当成用户刷新了"
+    assert "setAutoKey((k) => k + 1)" in app
+    assert "Date.now() - autoAt.current < 10 * 60 * 1000" in app, "10 分钟节流没了"
+    assert "autoRefresh: (platforms?: string[]) => void;" in app
+    assert 'source: "auto",' in app and "...(platforms?.length ? { platforms } : {})" in app
+    # 自动检查只查当前筛选的平台；不传才是全平台
+    assert "autoRef.current(autoPlatformsRef.current.length ? autoPlatformsRef.current : undefined);" in feed
+    assert "data-auto-refresh" in feed
+    assert "正在看看有没有新内容…" in feed and "自动检查完：新增" in feed
+    assert "自动检查完：这轮没有新内容" in feed
+    assert "看看新增的" in feed
+    # 合并新首屏不能换 next：人已经加载好的分页要留着
+    assert "export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0)" in api
+    assert "const fresh = new Set(data.items.map((entry) => entry.id));" in api
+    assert "return [...data.items, ...prev.filter((entry) => !fresh.has(entry.id))];" in api
+    assert "mergeShift" in api and "mergeEpoch" in api
+
+
 def test_topbar_progress_is_not_a_dead_button():
     topbar = read("web/src/components/TopBar.tsx")
     assert "refreshTitle" in topbar and "正在抓 " in topbar

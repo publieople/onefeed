@@ -1,6 +1,6 @@
-import { Loader2, Sparkles, Square, Star } from "lucide-react";
-import { memo, useEffect, useRef } from "react";
-import type { FeedItem } from "../api";
+import { ChevronDown, ListChecks, Loader2, Sparkles, Square, Star } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
+import type { AgentEvent, FeedItem } from "../api";
 import AgentConsole from "../components/AgentConsole";
 import { platform } from "../platform";
 import { scrollInstant } from "../motion/useSmoothWheelScroll";
@@ -86,17 +86,6 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
               </div>
             </div>
 
-            {turn.trace?.length ? (
-              <div className="pl-8">
-                <AgentConsole
-                  events={turn.trace}
-                  answered={answered}
-                  answeredAsk={answeredAsk}
-                  readonly={turn.history}
-                />
-              </div>
-            ) : null}
-
             {turn.data?.items.length ? (
               <div className="space-y-1.5 pl-8">
                 {turn.data.items.slice(0, 8).map((item) => (
@@ -134,6 +123,18 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
                     {s}
                   </button>
                 ))}
+              </div>
+            ) : null}
+
+            {turn.trace?.length ? (
+              <div className="pl-8">
+                <TraceDisclosure
+                  events={turn.trace}
+                  answered={answered}
+                  answeredAsk={answeredAsk}
+                  readonly={turn.history}
+                  ms={turn.data?.ms}
+                />
               </div>
             ) : null}
           </div>
@@ -185,6 +186,60 @@ export default function AgentThread({ padding = "px-4 py-4" }: { padding?: strin
         <div className="flex items-center gap-2 text-[12px] text-fade">
           <Loader2 size={14} className="animate-spin" />
           Agent 正在本地库里翻…
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 已经跑完的一轮，过程默认收起来：用户要的是结果，不是每一步。
+ * 折叠行本身仍报出「几步 / 多久」，想复查再点开——展开的仍是同一个 AgentConsole。
+ */
+function TraceDisclosure({
+  events,
+  answered,
+  answeredAsk,
+  readonly,
+  ms,
+}: {
+  events: AgentEvent[];
+  answered?: Record<string, boolean>;
+  answeredAsk?: Record<string, string[]>;
+  readonly?: boolean;
+  ms?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const steps = events.filter(
+    (event) =>
+      event.kind === "step" ||
+      event.kind === "action" ||
+      event.kind === "need_confirm" ||
+      event.kind === "need_answer" ||
+      event.kind === "error",
+  ).length;
+  return (
+    <div data-agent-trace={open ? "open" : "collapsed"}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title={open ? "收起过程" : "展开过程"}
+        className="flex items-center gap-1.5 rounded-full border border-line/70 px-2 py-1 text-[11px] text-fade transition hover:border-ink/25 hover:text-ink"
+      >
+        <ListChecks size={11} />
+        <span>{steps ? `过程 ${steps} 步` : "过程"}</span>
+        {ms ? <span className="tabular-nums text-fade/80">· {(ms / 1000).toFixed(1)}s</span> : null}
+        <ChevronDown size={11} className={"transition-transform " + (open ? "rotate-180" : "")} />
+      </button>
+      {open ? (
+        <div className="mt-1.5">
+          <AgentConsole
+            events={events}
+            answered={answered}
+            answeredAsk={answeredAsk}
+            readonly={readonly}
+          />
         </div>
       ) : null}
     </div>

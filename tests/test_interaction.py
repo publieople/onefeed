@@ -121,6 +121,41 @@ def test_agent_survives_navigation() -> None:
 
 
 @case
+def test_finished_agent_turn_collapses_its_trace() -> None:
+    """跑完的一轮默认只留结果，过程折成一行；想复查再点开。
+
+    以前 trace 一直铺在结果前面，一轮十几步把真正的回答挤到屏幕外，
+    用户以为 Agent 还在干活。折叠行仍报「几步 / 多久」，信息没有丢。
+    """
+    assert "function TraceDisclosure(" in THREAD
+    assert "const [open, setOpen] = useState(false);" in THREAD, "过程又默认展开了"
+    assert 'data-agent-trace={open ? "open" : "collapsed"}' in THREAD
+    assert "aria-expanded={open}" in THREAD and "收起过程" in THREAD
+    # 结果在前，过程在后：第一眼看到的是答案，不是步骤
+    assert THREAD.index("turn.data ?") < THREAD.index("turn.trace?.length")
+    assert "<TraceDisclosure" in THREAD and "<AgentConsole" in THREAD
+
+
+@case
+def test_item_page_agent_opens_from_the_rail_not_the_pill() -> None:
+    """详情页点「打开 Agent」，右栏要从右缘长出来，不能从主页底栏的胶囊滑过来。
+
+    以前 openWith 无条件造 pill ghost + runNav("tab")，在详情页会演成
+    「底栏横穿整页飞到右边」。详情页没有唤起器可缩，打开/收起都交给栏位自己。
+    """
+    open_fn = AGENT.split("const openWith")[1].split("const setFocus")[0]
+    item_branch = open_fn.split("if (onItemPage) {")[1].split("}")[0]
+    assert "setOpen(true);" in item_branch, "详情页没有直接开右栏"
+    assert "createGhost" not in item_branch and "runNav(" not in item_branch, "详情页还在演底栏飞行"
+    assert open_fn.index("if (onItemPage)") < open_fn.index("createGhost"), "详情页分支必须在造 ghost 之前 return"
+    close_fn = AGENT.split("const close = useCallback")[1].split("const openWith")[0]
+    assert "if (onItemPage) {" in close_fn
+    assert close_fn.index("if (onItemPage)") < close_fn.index("createGhost"), "详情页收起不该缩回胶囊"
+    # 主页仍保留唤起器转场
+    assert "createGhost({ agent: \"pill\" })" in open_fn
+
+
+@case
 def test_destructive_ops_ask_first() -> None:
     # 清 key 要打字确认，其余是普通确认
     assert 'requireTyping: "CLEAR"' in SETTINGS

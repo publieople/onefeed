@@ -179,7 +179,8 @@ class RefreshRunner:
                 "warmup": warmup,
                 "market": {"checked": 0, "updated": [], "failed": []},
                 "plugins": plugins,
-                "source": "agent" if source == "agent" else "user",
+                # auto 是滚动到底后的自动检查：主窗口只合并新条目，不演「刷新」
+                "source": source if source in ("agent", "auto") else "user",
                 "owner": str(owner or ""),
                 "cancel_requested": False,
                 "cancelled": 0,
