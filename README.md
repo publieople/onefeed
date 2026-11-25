@@ -67,6 +67,8 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 
 2026-11-24 增加关注流：顶栏「信息流 / 关注」切换，B 站 / 抖音 / 小红书 / 知乎四个平台的原生关注流，支持列表、按作者时间线、紧凑三种布局，关注页同步与主信息流刷新互不影响。详见 [`docs/following-2026-11-24.md`](docs/following-2026-11-24.md)。
 
+2026-11-25 关注页补上「关注的人」名单：B 站登录后同步全部关注账号（602 个实测），支持搜索与平台筛选；点作者头像或名字进入作者主页，B 站作者页能从平台补历史作品；B 站直播动态从源头过滤，旧条目直接打开有说明。抖音 / 小红书 / 知乎暂不支持名单，页面明确标注。详见 [`docs/following-accounts-2026-11-25.md`](docs/following-accounts-2026-11-25.md)。
+
 实测（2026-11-15 21:00，本机，端口 8791）：275 条 / 6 平台；卡片统一成「平台标签 + kind + 时间 / 媒体 / 标题 / 摘要 / 作者 + 互动」，缺封面走虚线占位块而不是假装加载失败；B 站抽屉能拉到 20 条真实评论（楼中楼 3 层内）；市场页能把 B 站 0.1.0 一键更新到 0.2.0；热度排序按平台内分位归一，六个平台都能上榜首；设置页可改插件目录、registry、每轮条数、评论条数、默认排序、保留天数与自动更新，保存即生效；`8787` 被别的程序占用时自动改用 `8788` 并在启动日志里说明。
 
 截图：`design/ui-feed.png`（信息流）、`design/ui-drawer.png`（详情 + 评论）、`design/ui-settings.png` / `design/ui-settings-full.png`（设置页）、`design/ui-market.png` / `design/ui-market-after.png`（市场更新前后）。
@@ -236,6 +238,7 @@ spec 变更 → 评审通过 → 同步 tasks.md → 写代码 → PR 关联 tas
 - [`docs/PLATFORM_NOTES.md`](docs/PLATFORM_NOTES.md) — 还能接哪些平台（实测）
 - [`docs/DY_FEED_FINDINGS.md`](docs/DY_FEED_FINDINGS.md) — 抖音 feed 机制与签名坑
 - [`specs/012-demo-site/spec.md`](specs/012-demo-site/spec.md) — 静态演示站（Pages 快照 / 只读边界 / 部署）
+- [`docs/following-accounts-2026-11-25.md`](docs/following-accounts-2026-11-25.md) — 关注名单、作者主页与 B 站直播过滤
 
 ## 许可
 

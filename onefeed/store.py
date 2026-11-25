@@ -19,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _CJK = re.compile(r"[\u3400-\u9fff]")
 
@@ -55,7 +55,9 @@ CREATE TABLE IF NOT EXISTS items (
     extra         TEXT NOT NULL DEFAULT '{}',
     cluster_id    TEXT NOT NULL DEFAULT '',
     fetched_at    INTEGER NOT NULL DEFAULT 0,
-    engage_score  INTEGER NOT NULL DEFAULT 0
+    engage_score  INTEGER NOT NULL DEFAULT 0,
+    is_live       INTEGER NOT NULL DEFAULT 0,   -- 直播动态：先隐藏，不删
+    author_only   INTEGER NOT NULL DEFAULT 0    -- 作者页远端补页：不进主信息流
 );
 CREATE INDEX IF NOT EXISTS idx_items_pub ON items(published_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_items_platform ON items(platform, published_at DESC);
@@ -218,6 +220,30 @@ CREATE INDEX IF NOT EXISTS idx_following_runs_plugin
     ON following_runs(feed, plugin, id DESC);
 """
 
+# 关注名单（关注了哪些人）与关注流（关注的人发了什么）是两件事：
+# 前者按账号存一行，后者按内容存 item_feeds。分开之后，同一个人即使最近没发东西，
+# 也还能在「关注的人」里找到；内容被 prune 掉，也不会把关注关系一起删掉。
+# active 只表示「上一次完整同步时还在名单里」，断网或登录失效时不能据此删人。
+ACCOUNTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS following_accounts (
+    platform      TEXT NOT NULL,
+    account_id    TEXT NOT NULL,
+    name          TEXT NOT NULL DEFAULT '',
+    avatar        TEXT NOT NULL DEFAULT '',
+    url           TEXT NOT NULL DEFAULT '',
+    bio           TEXT NOT NULL DEFAULT '',
+    relation      TEXT NOT NULL DEFAULT 'following',
+    active        INTEGER NOT NULL DEFAULT 1,
+    followed_at   INTEGER NOT NULL DEFAULT 0,
+    first_seen_at INTEGER NOT NULL DEFAULT 0,
+    last_seen_at  INTEGER NOT NULL DEFAULT 0,
+    extra         TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (platform, account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_following_accounts_platform
+    ON following_accounts(platform, active, last_seen_at DESC);
+"""
+
 FAVORITES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS item_favorites (          -- 收藏夹：长期留档 + 一句备注
     item_id       TEXT PRIMARY KEY,
@@ -371,6 +397,18 @@ class Store:
                     conn.execute("ALTER TABLE runs ADD COLUMN demo INTEGER NOT NULL DEFAULT 1")
             if version < 10:
                 conn.executescript(FOLLOWING_SCHEMA)
+            if version < 11:
+                # v11：直播动态先隐藏、作者页补页不进主流、关注名单独立成表。
+                # 老的 B 站直播动态当时是按普通 short 入库的，只能从 extra 认出来。
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(items)")}
+                if "is_live" not in columns:
+                    conn.execute("ALTER TABLE items ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0")
+                if "author_only" not in columns:
+                    conn.execute("ALTER TABLE items ADD COLUMN author_only INTEGER NOT NULL DEFAULT 0")
+                conn.execute(
+                    "UPDATE items SET is_live = 1 "
+                    "WHERE platform = 'bilibili' AND extra LIKE '%\"dynamic_type\": \"live\"%'")
+                conn.executescript(ACCOUNTS_SCHEMA)
             if version < 9:
                 # 总结缓存改成 (item_id, depth) 复合主键。SQLite 改不了主键，只能重建表；
                 # 老数据没有档位，一律记成「平衡」——那是它们当时的生成口径。
@@ -416,14 +454,28 @@ class Store:
             self.conn.commit()
 
     # ------------------------------------------------------------ items
-    def upsert_items(self, items: Iterable[Any]) -> int:
-        """写一批 Item（dataclass）或 dict；按 id 覆盖。返回受影响行数。"""
+    def upsert_items(self, items: Iterable[Any], preserve_hidden: bool = False) -> int:
+        """写一批 Item（dataclass）或 dict；按 id 覆盖。返回受影响行数。
+
+        preserve_hidden=True 用于作者页补页：同一条内容如果早就以「直播隐藏」
+        或「作者页专用」的身份存在，后一次普通写入不能把它重新变成可见，
+        否则作者页抓一遍会把主信息流里本来藏着的条目翻出来。
+        """
         rows = [self._row_of(it) for it in items]
         if not rows:
             return 0
         cols = list(rows[0].keys())
         placeholders = ", ".join("?" for _ in cols)
-        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "id")
+        updates_parts = []
+        for c in cols:
+            if c == "id":
+                continue
+            if preserve_hidden and c in ("is_live", "author_only"):
+                updates_parts.append(
+                    f"{c}=CASE WHEN items.{c}=1 THEN 1 ELSE excluded.{c} END")
+            else:
+                updates_parts.append(f"{c}=excluded.{c}")
+        updates = ", ".join(updates_parts)
         sql = (f"INSERT INTO items ({', '.join(cols)}) VALUES ({placeholders}) "
                f"ON CONFLICT(id) DO UPDATE SET {updates}")
         values = [[r[c] for c in cols] for r in rows]
@@ -469,6 +521,8 @@ class Store:
             "duration": int(data.get("duration") or 0),
             "cluster_id": str(data.get("cluster_id") or ""),
             "fetched_at": int(data.get("fetched_at") or time.time()),
+            "is_live": 1 if data.get("is_live") else 0,
+            "author_only": 1 if data.get("author_only") else 0,
         }
         for key, col in STAT_COLUMNS.items():
             row[col] = int(data.get(key) or 0)
@@ -517,6 +571,8 @@ class Store:
             where.append(f"({key} < ? OR ({key} = ? AND i.id < ?))")
             params.extend([ts, ts, ident])
         where.append("COALESCE(m.hidden, 0) = 0")  # 「不感兴趣」的条目默认不进流
+        # 直播动态与作者页远端补页都不属于主信息流：数据留着，但默认不露面。
+        where.append("COALESCE(i.is_live, 0) = 0 AND COALESCE(i.author_only, 0) = 0")
         clause = "WHERE " + " AND ".join(where)
 
         if mix:
@@ -631,6 +687,7 @@ class Store:
             where.append(f"({key} < ? OR ({key} = ? AND i.id < ?))")
             params.extend([ts, ts, ident])
         where.append("COALESCE(m.hidden, 0) = 0")
+        where.append("COALESCE(i.is_live, 0) = 0 AND COALESCE(i.author_only, 0) = 0")
         clause = "WHERE " + " AND ".join(where)
         sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
                f"m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, "
@@ -660,13 +717,17 @@ class Store:
 
     def following_counts(self, feed: str = "following") -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT platform, COUNT(*) AS n, MAX(last_seen_at) AS last "
-            "FROM item_feeds WHERE feed = ? GROUP BY platform", (feed,)).fetchall()
+            "SELECT f.platform, COUNT(*) AS n, MAX(f.last_seen_at) AS last "
+            "FROM item_feeds f JOIN items i ON i.id = f.item_id "
+            "WHERE f.feed = ? AND COALESCE(i.is_live, 0) = 0 "
+            "AND COALESCE(i.author_only, 0) = 0 GROUP BY f.platform", (feed,)).fetchall()
         return [{"platform": r["platform"], "count": r["n"], "last_seen_at": r["last"]} for r in rows]
 
     def following_count(self, feed: str = "following") -> int:
         return int(self.conn.execute(
-            "SELECT COUNT(*) FROM item_feeds WHERE feed = ?", (feed,)).fetchone()[0])
+            "SELECT COUNT(*) FROM item_feeds f JOIN items i ON i.id = f.item_id "
+            "WHERE f.feed = ? AND COALESCE(i.is_live, 0) = 0 "
+            "AND COALESCE(i.author_only, 0) = 0", (feed,)).fetchone()[0])
 
     def following_run_stats(self, feed: str = "following") -> dict[str, dict[str, Any]]:
         """每个平台上一次同步的成败；关注页用它区分「没同步过」「上次失败」。"""
@@ -715,6 +776,171 @@ class Store:
                 (int(time.time()), feed))
             self.conn.commit()
         return cur.rowcount
+
+    # ------------------------------------------------------------ 关注名单
+    def upsert_following_accounts(self, platform: str, accounts: Iterable[Any],
+                                  complete: bool = True) -> int:
+        """把一次拉取到的关注名单写进库。
+
+        complete=True 表示这次拿到的是完整名单：本轮没出现的旧记录标 active=0，
+        但不删——断网、登录过期、平台只给第一页时，删了就再也找不回来。
+        名单本身为空时不动旧记录，避免一次异常的空响应把整张表清空。
+        """
+        rows = []
+        now = int(time.time())
+        seen: list[str] = []
+        for acc in accounts:
+            data = acc.to_dict() if hasattr(acc, "to_dict") else dict(acc)
+            account_id = str(data.get("account_id") or data.get("id") or "").strip()
+            if not account_id:
+                continue
+            seen.append(account_id)
+            extra = data.get("extra")
+            rows.append((
+                platform, account_id,
+                str(data.get("name") or ""),
+                str(data.get("avatar") or ""),
+                str(data.get("url") or ""),
+                str(data.get("bio") or ""),
+                str(data.get("relation") or "following"),
+                int(data.get("followed_at") or 0),
+                now, now,
+                json.dumps(extra if isinstance(extra, dict) else {}, ensure_ascii=False),
+            ))
+        with self._write_lock:
+            if rows:
+                self.conn.executemany(
+                    "INSERT INTO following_accounts (platform, account_id, name, avatar, url, "
+                    "bio, relation, followed_at, first_seen_at, last_seen_at, extra) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(platform, account_id) DO UPDATE SET "
+                    "name=CASE WHEN excluded.name != '' THEN excluded.name ELSE following_accounts.name END, "
+                    "avatar=CASE WHEN excluded.avatar != '' THEN excluded.avatar ELSE following_accounts.avatar END, "
+                    "url=CASE WHEN excluded.url != '' THEN excluded.url ELSE following_accounts.url END, "
+                    "bio=CASE WHEN excluded.bio != '' THEN excluded.bio ELSE following_accounts.bio END, "
+                    "relation=excluded.relation, "
+                    "followed_at=CASE WHEN excluded.followed_at > 0 THEN excluded.followed_at "
+                    "ELSE following_accounts.followed_at END, "
+                    "last_seen_at=excluded.last_seen_at, active=1, "
+                    "extra=CASE WHEN excluded.extra != '{}' THEN excluded.extra ELSE following_accounts.extra END",
+                    rows)
+            if complete and seen:
+                placeholders = ", ".join("?" for _ in seen)
+                self.conn.execute(
+                    f"UPDATE following_accounts SET active = 0 WHERE platform = ? "
+                    f"AND account_id NOT IN ({placeholders})", [platform] + seen)
+            self.conn.commit()
+        return len(rows)
+
+    def following_accounts(self, platform: str | None = None, active: bool | None = True,
+                           query: str | None = None, limit: int = 500,
+                           offset: int = 0) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[Any] = []
+        if platform:
+            where.append("platform = ?")
+            params.append(platform)
+        if active is not None:
+            where.append("active = ?")
+            params.append(1 if active else 0)
+        if query:
+            where.append("(name LIKE ? OR bio LIKE ? OR account_id LIKE ?)")
+            like = "%" + str(query).strip() + "%"
+            params.extend([like, like, like])
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        params.extend([max(1, min(int(limit), 1000)), max(0, int(offset))])
+        rows = self.conn.execute(
+            f"SELECT * FROM following_accounts {clause} "
+            f"ORDER BY active DESC, last_seen_at DESC, name COLLATE NOCASE LIMIT ? OFFSET ?",
+            params).fetchall()
+        out = []
+        for raw in rows:
+            row = dict(raw)
+            row["active"] = bool(row.get("active"))
+            try:
+                row["extra"] = json.loads(row.get("extra") or "{}")
+            except json.JSONDecodeError:
+                row["extra"] = {}
+            out.append(row)
+        return out
+
+    def following_account_counts(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT platform, SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active, "
+            "COUNT(*) AS total, MAX(last_seen_at) AS last_seen_at "
+            "FROM following_accounts GROUP BY platform").fetchall()
+        return [{"platform": r["platform"], "count": int(r["active"] or 0),
+                 "total": int(r["total"] or 0), "last_seen_at": int(r["last_seen_at"] or 0)}
+                for r in rows]
+
+    def get_following_account(self, platform: str, account_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM following_accounts WHERE platform = ? AND account_id = ?",
+            (platform, str(account_id))).fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        out["active"] = bool(out.get("active"))
+        try:
+            out["extra"] = json.loads(out.get("extra") or "{}")
+        except json.JSONDecodeError:
+            out["extra"] = {}
+        return out
+
+    # ------------------------------------------------------------ 作者页
+    def author_items(self, platform: str, account_id: str, cursor: str | None = None,
+                     limit: int = 30) -> tuple[list[dict[str, Any]], str | None]:
+        """某个作者的本地作品。作者页会补远端页，补回来的条目标 author_only=1，
+        仍然可以从这里读到；主信息流和检索会把它挡在外面。"""
+        limit = max(1, min(int(limit), 100))
+        key = "COALESCE(NULLIF(i.published_at, 0), i.fetched_at)"
+        where = ["i.platform = ?", "i.author_id = ?", "COALESCE(i.is_live, 0) = 0",
+                 "COALESCE(m.hidden, 0) = 0"]
+        params: list[Any] = [platform, str(account_id)]
+        decoded = decode_cursor(cursor)
+        if decoded:
+            ts, ident = decoded
+            where.append(f"({key} < ? OR ({key} = ? AND i.id < ?))")
+            params.extend([ts, ts, ident])
+        sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
+               f"m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, m.note AS mark_note, "
+               f"{key} AS sort_key FROM items i "
+               f"LEFT JOIN item_marks m ON m.item_id = i.id "
+               f"WHERE {' AND '.join(where)} ORDER BY sort_key DESC, i.id DESC LIMIT ?")
+        params.append(limit + 1)
+        rows = [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        for row in rows:
+            row.pop("sort_key", None)
+            self._decode_row(row)
+            row["time_estimated"] = int(row.get("published_at") or 0) <= 0
+        next_cursor = None
+        if has_more and rows:
+            last = rows[-1]
+            ts = int(last.get("published_at") or 0) or int(last.get("fetched_at") or 0)
+            next_cursor = f"{ts}|{last['id']}"
+        return rows, next_cursor
+
+    def find_author(self, platform: str, account_id: str) -> dict[str, Any] | None:
+        """从已入库内容里反推作者名片；作者还没同步进名单时，详情页也能打开。"""
+        row = self.conn.execute(
+            "SELECT author, author_id, author_avatar FROM items "
+            "WHERE platform = ? AND author_id = ? AND author_id != '' "
+            "ORDER BY COALESCE(NULLIF(published_at, 0), fetched_at) DESC LIMIT 1",
+            (platform, str(account_id))).fetchone()
+        if not row:
+            return None
+        return {"platform": platform, "account_id": str(account_id),
+                "name": str(row["author"] or ""), "avatar": str(row["author_avatar"] or ""),
+                "url": "", "bio": "", "relation": ""}
+
+    def author_item_count(self, platform: str, account_id: str) -> int:
+        return int(self.conn.execute(
+            "SELECT COUNT(*) FROM items i LEFT JOIN item_marks m ON m.item_id = i.id "
+            "WHERE i.platform = ? AND i.author_id = ? AND COALESCE(i.is_live, 0) = 0 "
+            "AND COALESCE(m.hidden, 0) = 0",
+            (platform, str(account_id))).fetchone()[0])
 
     # ------------------------------------------------------------ 检索
     @staticmethod
@@ -779,6 +1005,7 @@ class Store:
             where.append(f"i.id NOT IN ({', '.join('?' for _ in ids)})")
             params.extend(ids)
         where.append("COALESCE(m.hidden, 0) = 0")
+        where.append("COALESCE(i.is_live, 0) = 0 AND COALESCE(i.author_only, 0) = 0")
         clause = "WHERE " + " AND ".join(where)
         sql = (f"SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
                f"m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, "
@@ -805,6 +1032,7 @@ class Store:
             return []
         rows = self.conn.execute(
             "SELECT i.* FROM items i WHERE i.cluster_id = ? AND i.id != ? "
+            "AND COALESCE(i.is_live, 0) = 0 AND COALESCE(i.author_only, 0) = 0 "
             f"ORDER BY {ENGAGE_KEY} DESC LIMIT ?",
             (cluster_id, exclude_id, max(1, min(int(limit), 20)))).fetchall()
         out = [dict(r) for r in rows]
@@ -833,6 +1061,9 @@ class Store:
         # 收藏夹是另一张表：favorited 与 note 互不干扰
         row["favorited"] = bool(row.pop("fav_at", 0) or 0)
         row["favorite_note"] = str(row.pop("fav_note", "") or "")
+        # 两个开关是「怎么进来的」，不是内容属性；统一给布尔，前端不用记 0/1
+        row["is_live"] = bool(row.get("is_live") or 0)
+        row["author_only"] = bool(row.get("author_only") or 0)
 
     def get_item(self, item_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(
@@ -1201,18 +1432,25 @@ class Store:
 
     def all_titles(self) -> list[tuple[str, str, str]]:
         """(id, platform, title)，供同题合并用。"""
-        rows = self.conn.execute("SELECT id, platform, title FROM items").fetchall()
+        rows = self.conn.execute(
+            "SELECT id, platform, title FROM items "
+            "WHERE COALESCE(is_live, 0) = 0 AND COALESCE(author_only, 0) = 0").fetchall()
         return [(r["id"], r["platform"], r["title"] or "") for r in rows]
 
     def count(self, platform: str | None = None) -> int:
+        # 顶栏说的是「看得见的条目」：直播和作者页补页都藏着，别算进去吓人。
+        visible = "COALESCE(is_live, 0) = 0 AND COALESCE(author_only, 0) = 0"
         if platform:
-            return int(self.conn.execute("SELECT COUNT(*) FROM items WHERE platform = ?",
-                                         (platform,)).fetchone()[0])
-        return int(self.conn.execute("SELECT COUNT(*) FROM items").fetchone()[0])
+            return int(self.conn.execute(
+                f"SELECT COUNT(*) FROM items WHERE platform = ? AND {visible}",
+                (platform,)).fetchone()[0])
+        return int(self.conn.execute(f"SELECT COUNT(*) FROM items WHERE {visible}").fetchone()[0])
 
     def platforms(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT platform, COUNT(*) AS n, MAX(fetched_at) AS last FROM items GROUP BY platform"
+            "SELECT platform, COUNT(*) AS n, MAX(fetched_at) AS last FROM items "
+            "WHERE COALESCE(is_live, 0) = 0 AND COALESCE(author_only, 0) = 0 "
+            "GROUP BY platform"
         ).fetchall()
         return [{"platform": r["platform"], "count": r["n"], "last_fetched_at": r["last"]} for r in rows]
 

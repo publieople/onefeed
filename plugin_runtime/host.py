@@ -20,7 +20,8 @@ from .manifest import HOST_VERSION, Manifest, ManifestError, load_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TIMEOUTS = {"pull": 92.0, "comments": 92.0, "detail": 92.0, "summary": 92.0,
-                    "auth": 60.0, "init": 30.0}
+                    "auth": 60.0, "init": 30.0,
+                    "followingAccounts": 60.0, "authorProfile": 45.0, "authorPosts": 92.0}
 
 # 只认这两家官方播放器；插件自己拼的 iframe 一律不收（那是绕过风险边界）。
 EMBED_HOSTS = {"player.bilibili.com": "bilibili", "open.douyin.com": "douyin"}
@@ -326,6 +327,82 @@ class PluginHost:
                     "expiresAt": clamp(media.get("expiresAt"))}
         return None
 
+    def following_accounts(self, plugin_id: str, cursor: str | None = None,
+                           limit: int = 200) -> dict[str, Any]:
+        """取「我关注的人」名单。插件只交字段，宿主负责白名单与去重。"""
+        manifest = self.get(plugin_id)
+        if "following_accounts" not in manifest.features:
+            raise RuntimeError(f"[{plugin_id}] 插件未实现 following_accounts")
+        payload: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+        if cursor:
+            payload["cursor"] = cursor
+        out = self.run(plugin_id, "followingAccounts", payload)
+        if not out["ok"]:
+            raise RuntimeError(f"[{plugin_id}] {out['error']}")
+        value = out["value"] or {}
+        rows = value.get("items") if isinstance(value, dict) else value
+        if not isinstance(rows, list):
+            raise RuntimeError(f"[{plugin_id}] followingAccounts 必须返回 {{items: [], next: null}}")
+        seen: set[str] = set()
+        accounts: list[dict[str, Any]] = []
+        for raw in rows:
+            account = _normalize_account(plugin_id, raw)
+            if account is None or account["account_id"] in seen:
+                continue
+            seen.add(account["account_id"])
+            accounts.append(account)
+        nxt = value.get("next") if isinstance(value, dict) else None
+        return {"items": accounts, "next": str(nxt) if nxt else None}
+
+    def author_profile(self, plugin_id: str, account_id: str) -> dict[str, Any] | None:
+        """取作者资料。插件没实现 authorProfile 时返回 None，由本地库兜底。"""
+        manifest = self.get(plugin_id)
+        if "author_posts" not in manifest.features:
+            raise RuntimeError(f"[{plugin_id}] 插件未实现 author_posts")
+        out = self.run(plugin_id, "authorProfile", {"id": str(account_id)})
+        if not out["ok"]:
+            raise RuntimeError(f"[{plugin_id}] {out['error']}")
+        value = out["value"]
+        if not isinstance(value, dict):
+            return None
+        picked = {"account_id": str(account_id)}
+        for key in ("name", "avatar", "bio", "url"):
+            val = value.get(key)
+            if isinstance(val, str) and val.strip():
+                picked[key] = val.strip()[:500 if key == "bio" else 300]
+        for key in ("following", "follower", "posts"):
+            val = clamp(value.get(key))
+            if val:
+                picked[key] = val
+        return picked
+
+    def author_posts(self, plugin_id: str, account_id: str, cursor: str | None = None,
+                     limit: int = 20) -> dict[str, Any]:
+        """取作者发布的内容（远端）。返回的条目同样走 to_item 归一化。"""
+        manifest = self.get(plugin_id)
+        if "author_posts" not in manifest.features:
+            raise RuntimeError(f"[{plugin_id}] 插件未实现 author_posts")
+        payload: dict[str, Any] = {"id": str(account_id), "limit": max(1, min(int(limit), 50))}
+        if cursor:
+            payload["cursor"] = cursor
+        out = self.run(plugin_id, "authorPosts", payload)
+        if not out["ok"]:
+            raise RuntimeError(f"[{plugin_id}] {out['error']}")
+        value = out["value"] or {}
+        rows = value.get("items") if isinstance(value, dict) else value
+        if not isinstance(rows, list):
+            raise RuntimeError(f"[{plugin_id}] authorPosts 必须返回 {{items: [], next: null}}")
+        now = int(time.time())
+        items: list[Item] = []
+        for raw in rows:
+            try:
+                items.append(to_item(plugin_id, raw, fetched_at=now))
+            except ValueError as exc:
+                print(f"[{plugin_id}] 跳过无效 author item: {exc}", file=sys.stderr)
+        items.sort(key=lambda x: x.published_at, reverse=True)
+        nxt = value.get("next") if isinstance(value, dict) else None
+        return {"items": items[:limit], "next": str(nxt) if nxt else None}
+
     def auth(self, plugin_id: str) -> dict[str, Any]:
         manifest = self.get(plugin_id)
         if not any(f.requires_auth for f in manifest.feeds):
@@ -345,6 +422,27 @@ class PluginHost:
                 failures.append({"plugin": pid, "error": f"{type(exc).__name__}: {exc}"})
         items.sort(key=lambda x: x.published_at, reverse=True)
         return items, failures
+
+
+def _normalize_account(plugin_id: str, raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    account_id = str(raw.get("account_id") or raw.get("id") or raw.get("uid") or "").strip()
+    if not account_id:
+        return None
+    name = str(raw.get("name") or raw.get("nickname") or "").strip()
+    out: dict[str, Any] = {
+        "platform": plugin_id,
+        "account_id": account_id[:200],
+        "name": name[:200],
+        "avatar": str(raw.get("avatar") or raw.get("face") or "")[:500],
+        "url": str(raw.get("url") or "")[:500],
+        "bio": str(raw.get("bio") or raw.get("sign") or "")[:500],
+        "relation": str(raw.get("relation") or "following")[:30],
+        "followed_at": clamp(raw.get("followed_at") or 0),
+        "extra": raw.get("extra") if isinstance(raw.get("extra"), dict) else {},
+    }
+    return out
 
 
 def _kill_tree(pid: int) -> None:

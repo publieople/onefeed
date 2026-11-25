@@ -1,4 +1,5 @@
 import { memo, useRef, useState, type CSSProperties } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { prefetchItem } from "../api";
 import { loadItemPage } from "../pages/itemPageLoader";
@@ -237,6 +238,8 @@ function MetaLine({ item, body }: { item: FeedItem; body: string }) {
     卡片本体不该跟着重算（每张卡里都有一坨时间格式化与平台查表）。 */
 function Card({ item, onOpen, vtNames, reveal }: Props) {
   const p = platform(item.platform);
+  const navigate = useNavigate();
+  const location = useLocation();
   const body = excerpt(item);
   const kindLabel = KIND_LABEL[item.kind] ?? item.kind;
   const hoverTimer = useRef<number | null>(null);
@@ -373,26 +376,43 @@ function Card({ item, onOpen, vtNames, reveal }: Props) {
       <MetaLine item={item} body={body} />
 
       <footer className="mt-auto flex items-center gap-1.5 pt-2.5 text-[12px] text-muted">
-        {item.author_avatar ? (
-          <img
-            src={item.author_avatar}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            width={16}
-            height={16}
-            referrerPolicy="no-referrer"
-            className="h-4 w-4 rounded-full object-cover"
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = "none";
-            }}
-          />
-        ) : (
-          <span className="flex h-4 w-4 items-center justify-center rounded-full text-[11px] font-medium text-white" style={{ background: p.tint }}>
-            {(item.author || p.label).slice(0, 1)}
-          </span>
-        )}
-        <span className="max-w-[52%] truncate text-[13px]">{item.author || p.label}</span>
+        <span
+          className={
+            "relative z-10 flex min-w-0 items-center gap-1.5 pointer-events-auto " +
+            (item.author_id ? "cursor-pointer rounded transition hover:text-ink" : "")
+          }
+          title={item.author_id ? "看作者主页" : undefined}
+          onClick={(event) => {
+            if (!item.author_id) return;
+            event.preventDefault();
+            event.stopPropagation();
+            navigate("/author/" + encodeURIComponent(item.platform) + "/" + encodeURIComponent(item.author_id), {
+              // 记住是从哪一屏点进来的；作者页的「返回」要回这里，而不是回 /following
+              state: { from: location.pathname + location.search },
+            });
+          }}
+        >
+          {item.author_avatar ? (
+            <img
+              src={item.author_avatar}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              width={16}
+              height={16}
+              referrerPolicy="no-referrer"
+              className="h-4 w-4 shrink-0 rounded-full object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[11px] font-medium text-white" style={{ background: p.tint }}>
+              {(item.author || p.label).slice(0, 1)}
+            </span>
+          )}
+          <span className="max-w-[46%] truncate text-[13px]">{item.author || p.label}</span>
+        </span>
         <span className="ml-auto flex items-center gap-2.5 text-fade">
           {item.like_count > 0 ? (
             <span className="flex items-center gap-1">

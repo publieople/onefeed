@@ -34,6 +34,11 @@ class Item:
     view: int = 0
     tags: list[str] = field(default_factory=list)
     fetched_at: int = field(default_factory=lambda: int(time.time()))
+    # 直播动态：B 站 timeline 里会混进来，但点进去没有正文。
+    # 先留字段不删数据，前端/查询层统一过滤；以后要做直播时还能恢复。
+    is_live: bool = False
+    # 作者页远端补回来的历史内容：能进详情页，但默认不进主信息流和关注流。
+    author_only: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

@@ -17,7 +17,7 @@ from plugin_runtime.host import PluginHost
 
 from . import __version__, market, settings as settings_mod
 from .api import router
-from .following import FollowingRunner
+from .following import AccountsRunner, FollowingRunner
 from .service import RefreshRunner, sync_installed
 from .store import Store
 
@@ -45,11 +45,14 @@ def create_app(store: Store | None = None, plugins_dir: Path | None = None) -> F
     # 关注流与主信息流共用同一个插件宿主，但进度/冷却/失败完全分开：
     # 关注页自己的同步按钮只推动 following 那一套。
     app.state.store.recover_following_runs()
+    app.state.store.recover_following_runs("accounts")
     app.state.following = FollowingRunner(
         app.state.store,
         host=app.state.refresher.host,
         limit=int(conf.get("per_plugin_limit") or 12),
     )
+    # 关注名单是另一条账本：谁被我关注了，和「他们发了什么」分开同步。
+    app.state.accounts = AccountsRunner(app.state.store, host=app.state.refresher.host)
 
     app.include_router(router)
     _install_error_handlers(app)

@@ -27,6 +27,10 @@ export interface FeedItem {
   cluster_platforms: string[];
   reasons: string[];
   fetched_at: number;
+  /** 直播动态不进信息流：存量条目仍能直接打开，页面上要说明清楚 */
+  is_live?: boolean;
+  /** 作者页补回来的历史作品：只属于作者页，不进主信息流/关注流 */
+  author_only?: boolean;
   /** item_marks 拍平：收藏 / 已读（后端 page() 会带） */
   saved?: boolean;
   read?: boolean;
@@ -62,8 +66,9 @@ export interface FollowingPlatform {
   last_sync_at: number;
   last_ok_at: number;
   last_ok: boolean | null;
-  saved_count: number;
-  new_count: number;
+  saved_count?: number;
+  new_count?: number;
+  total?: number;
   error: string;
 }
 
@@ -83,6 +88,70 @@ export interface FollowingResponse {
   total: number;
   syncing: boolean;
   progress: RunState;
+}
+
+/** 关注名单里的一个人（不是他发的某条内容） */
+export interface FollowingAccount {
+  account_id: string;
+  platform: string;
+  name: string;
+  avatar: string;
+  url: string;
+  bio: string;
+  relation: string;
+  active?: number | boolean;
+  followed_at?: number;
+  first_seen_at?: number;
+  last_seen_at?: number;
+  extra?: Record<string, unknown>;
+}
+
+export interface FollowingAccountsResponse {
+  accounts: FollowingAccount[];
+  next: number | null;
+  count: number;
+  total: number;
+  platforms: FollowingPlatform[];
+  plugin_errors?: string[];
+  counts: FollowingCount[];
+  syncing: boolean;
+  progress: RunState;
+}
+
+export interface AuthorProfile {
+  platform: string;
+  account_id: string;
+  name: string;
+  avatar: string;
+  url: string;
+  bio: string;
+  label: string;
+  following: boolean;
+  relation?: string;
+  following_count?: number;
+  follower?: number;
+  posts?: number;
+}
+
+export interface AuthorPageResponse {
+  profile: AuthorProfile;
+  profile_error: string;
+  items: FollowingItem[];
+  next: string | null;
+  count: number;
+  total: number;
+  remote_supported: boolean;
+  platforms: FollowingPlatform[];
+  plugin_errors?: string[];
+}
+
+export interface AuthorFetchResult {
+  ok: boolean;
+  error: string;
+  fetched: number;
+  added: number;
+  next: string | null;
+  total: number;
 }
 
 export interface ParsedQuery {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronRight,
@@ -25,6 +25,7 @@ import {
 } from "../api";
 import { num, timeAgo } from "../format";
 import { platform } from "../platform";
+import FollowingAccounts from "../components/FollowingAccounts";
 
 const LAYOUTS: { id: FollowingLayout; label: string; icon: typeof List }[] = [
   { id: "list", label: "列表", icon: List },
@@ -115,6 +116,16 @@ function Row({
   onOpen: (item: FollowingItem) => void;
 }) {
   const p = platform(item.platform);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const goAuthor = (event: React.MouseEvent) => {
+    if (!item.author_id) return;
+    event.preventDefault();
+    event.stopPropagation();
+    navigate("/author/" + encodeURIComponent(item.platform) + "/" + encodeURIComponent(item.author_id), {
+      state: { from: location.pathname + location.search },
+    });
+  };
   return (
     <a
       href={"/item/" + encodeURIComponent(item.id)}
@@ -140,7 +151,13 @@ function Row({
           {showAuthor && item.author ? (
             <>
               <span>·</span>
-              <span className="truncate">{item.author}</span>
+              <span
+                className={item.author_id ? "cursor-pointer truncate hover:text-ink" : "truncate"}
+                onClick={goAuthor}
+                title={item.author_id ? "看作者主页" : undefined}
+              >
+                {item.author}
+              </span>
             </>
           ) : null}
         </span>
@@ -156,7 +173,15 @@ function Row({
           <span className="mt-1 line-clamp-2 block text-[12px] leading-relaxed text-muted">{item.text}</span>
         ) : null}
         <span className="mt-1 flex items-center gap-2.5 text-[11px] text-fade">
-          {!showAuthor && item.author ? <span className="max-w-[45%] truncate">@{item.author}</span> : null}
+          {!showAuthor && item.author ? (
+            <span
+              className={"max-w-[45%] truncate " + (item.author_id ? "cursor-pointer hover:text-ink" : "")}
+              onClick={goAuthor}
+              title={item.author_id ? "看作者主页" : undefined}
+            >
+              @{item.author}
+            </span>
+          ) : null}
           {item.like_count ? <span>赞 {num(item.like_count)}</span> : null}
           {item.comment_count ? <span>评 {num(item.comment_count)}</span> : null}
           {item.saved ? <span className="text-accent">已收藏</span> : null}
@@ -174,6 +199,18 @@ export default function FollowingPage({ ctx }: { ctx: OutletCtx }) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // tab 要进 URL：从「关注的人」点进作者页再返回时，得回到名单而不是跌回动态。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: "feed" | "accounts" = searchParams.get("tab") === "accounts" ? "accounts" : "feed";
+  const setTab = useCallback(
+    (next: "feed" | "accounts") => {
+      const params = new URLSearchParams(searchParams);
+      if (next === "accounts") params.set("tab", "accounts");
+      else params.delete("tab");
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
   const [data, setData] = useState<FollowingResponse | null>(null);
   const [items, setItems] = useState<FollowingItem[]>([]);
   const [next, setNext] = useState<string | null>(null);
@@ -398,12 +435,18 @@ export default function FollowingPage({ ctx }: { ctx: OutletCtx }) {
         <div>
           <h1 className="font-display text-[22px] font-semibold tracking-tight">关注</h1>
           <p className="mt-1 text-[12px] text-muted">
-            你关注的人发了什么 · 平台原生关注流，不混推荐
-            {data ? <span className="ml-2 text-fade">共 {data.total} 条</span> : null}
-            {lastSync ? <span className="ml-2 text-fade">· 上次同步 {timeAgo(lastSync)}</span> : null}
+            {tab === "feed" ? (
+              <>
+                你关注的人发了什么 · 平台原生关注流，不混推荐
+                {data ? <span className="ml-2 text-fade">共 {data.total} 条</span> : null}
+                {lastSync ? <span className="ml-2 text-fade">· 上次同步 {timeAgo(lastSync)}</span> : null}
+              </>
+            ) : (
+              <>你关注了谁 · 只同步你本人账号的名单，不是推荐关注</>
+            )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className={"flex items-center gap-2" + (tab === "accounts" ? " invisible" : "")}>
           {running ? (
             <div
               className="flex h-9 items-center gap-2 rounded-full border border-line bg-wash/60 pl-3 pr-1 text-[12px]"
@@ -434,6 +477,25 @@ export default function FollowingPage({ ctx }: { ctx: OutletCtx }) {
         </div>
       </header>
 
+      <div className="mt-4 inline-flex items-center rounded-full border border-line bg-wash/40 p-0.5" role="tablist" aria-label="关注页视图">
+        {([["feed", "动态"], ["accounts", "关注的人"]] as const).map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={
+              "h-7 rounded-full px-3 text-[12px] transition " +
+              (tab === id ? "bg-paper text-ink shadow-sm" : "text-muted hover:text-ink")
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "feed" ? (
+        <>
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setFilter("all")}
@@ -566,7 +628,23 @@ export default function FollowingPage({ ctx }: { ctx: OutletCtx }) {
                     {group.name.slice(0, 1)}
                   </span>
                 )}
-                <span className="text-[13px] font-medium text-ink">{group.name}</span>
+                <span
+                  className={
+                    "text-[13px] font-medium text-ink " +
+                    (group.items[0]?.author_id ? "cursor-pointer rounded hover:opacity-75" : "")
+                  }
+                  onClick={() => {
+                    const first = group.items[0];
+                    if (!first?.author_id) return;
+                    navigate(
+                      "/author/" + encodeURIComponent(first.platform) + "/" + encodeURIComponent(first.author_id),
+                      { state: { from: location.pathname + location.search } },
+                    );
+                  }}
+                  title={group.items[0]?.author_id ? "看作者主页" : undefined}
+                >
+                  {group.name}
+                </span>
                 <span className="text-[11px] text-fade">{group.items.length} 条</span>
               </div>
               <div className="mt-2 divide-y divide-line/60 rounded-xl border border-line bg-paper">
@@ -618,6 +696,10 @@ export default function FollowingPage({ ctx }: { ctx: OutletCtx }) {
       ) : items.length ? (
         <p className="mt-6 text-center text-[11px] text-fade">这一页到底了</p>
       ) : null}
+        </>
+      ) : (
+        <FollowingAccounts />
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import DOMPurify from "dompurify";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, Heart, Loader2, MessageCircle, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Copy, ExternalLink, Heart, Loader2, MessageCircle, Radio, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -1195,7 +1195,18 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
         {item.title}
       </h1>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted">
-        {item.author ? <span>{item.author}</span> : null}
+        {item.author && item.author_id ? (
+          <Link
+            to={"/author/" + encodeURIComponent(item.platform) + "/" + encodeURIComponent(item.author_id)}
+            state={{ from: location.pathname + location.search }}
+            className="rounded transition hover:text-ink"
+            title="看作者主页"
+          >
+            {item.author}
+          </Link>
+        ) : item.author ? (
+          <span>{item.author}</span>
+        ) : null}
         {item.author && item.published_at ? <span className="text-fade">·</span> : null}
         {item.published_at ? <span className="text-fade">{timeAgo(item.published_at)}</span> : null}
         {item.reasons?.length ? (
@@ -1208,6 +1219,23 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
           </span>
         ) : null}
       </div>
+
+      {item.is_live ? (
+        <div className="mt-4 rounded-xl border border-line bg-wash/45 px-4 py-3 text-[12.5px] leading-relaxed text-muted">
+          <div className="flex items-center gap-1.5 font-medium text-ink">
+            <Radio size={13} />
+            这是直播动态，不会进信息流
+          </div>
+          <p className="mt-1">
+            直播结束后没有可读的正文，所以它只在历史记录里留个位置。想看这个人的其他内容，点上面的作者名。
+          </p>
+          {item.url ? (
+            <a href={item.url} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1 text-accent hover:underline">
+              去 B 站看这条动态 <ExternalLink size={11} />
+            </a>
+          ) : null}
+        </div>
+      ) : null}
 
       {stats.length ? (
         <div className="mt-4 flex flex-wrap gap-2">

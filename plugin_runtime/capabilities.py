@@ -394,7 +394,7 @@ class Capabilities:
         method = str(req.get("method") or ("POST" if data is not None else "GET")).upper()
 
         if req.get("credential") == "self":
-            self._inject_cookie(headers)
+            self._inject_cookie(headers, req)
 
         timeout = min(float(req.get("timeoutMs") or 15000) / 1000.0, 30.0)
         self.log("info", f"http {method} {url[:120]}")
@@ -422,8 +422,14 @@ class Capabilities:
                 continue
         raise RuntimeError(f"请求失败（直连与代理均不通）: {type(last).__name__}: {last}")
 
-    def _inject_cookie(self, headers: dict[str, str]) -> None:
-        """credential=self：用插件自己配置的 cookie（宿主读取，明文不出宿主）。"""
+    def _inject_cookie(self, headers: dict[str, str], req: dict[str, Any] | None = None) -> None:
+        """credential=self：用插件自己配置的 cookie（宿主读取，明文不出宿主）。
+
+        cookieCase 是给那些「JSON 里存小写、HTTP 头必须大写」的平台用的：
+        B 站凭证文件是 sessdata/dedeuserid，而 api.bilibili.com 只认
+        SESSDATA/DedeUserID，键名原样拼会得到 code -101（账号未登录）。
+        """
+        req = req or {}
         raw = self.settings.get("cookie")
         if raw:
             headers["Cookie"] = str(raw)
@@ -431,19 +437,27 @@ class Capabilities:
         cookie_file = self.settings.get("cookieFile")
         if not cookie_file:
             return
-        path = Path(os.path.expanduser(str(cookie_file)))
+        path = Path(_expand(str(cookie_file), self.manifest.id))
         if not path.is_file():
             return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
+        case = str(req.get("cookieCase") or self.settings.get("cookieCase") or "keep").lower()
+        def name_of(key: Any) -> str:
+            key = str(key)
+            if case == "upper":
+                return key.upper()
+            if case == "lower":
+                return key.lower()
+            return key
         if isinstance(data, dict) and isinstance(data.get("cookies"), list):
-            pairs = [f"{c.get('name')}={c.get('value')}" for c in data["cookies"] if c.get("name")]
+            pairs = [f"{name_of(c.get('name'))}={c.get('value')}" for c in data["cookies"] if c.get("name")]
             if pairs:
                 headers["Cookie"] = "; ".join(pairs)
         elif isinstance(data, dict):
-            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in data.items())
+            headers["Cookie"] = "; ".join(f"{name_of(k)}={v}" for k, v in data.items())
 
     # ------------------------------------------------------------ cli
     def _cli(self, req: dict[str, Any]) -> dict[str, Any]:
@@ -685,7 +699,7 @@ class Capabilities:
         """
         raw = self.settings.get("cookieFile")
         if raw:
-            path = Path(os.path.expanduser(str(raw)))
+            path = Path(_expand(str(raw), self.manifest.id))
             if path.is_file():
                 return path
         fallback = state_root() / "cookies" / f"{self.manifest.id}.json"

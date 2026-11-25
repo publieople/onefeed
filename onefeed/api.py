@@ -19,7 +19,7 @@ from plugin_runtime.paths import state_root
 
 from . import (__version__, ai as ai_mod, auth as auth_mod, market, media as media_mod,
                smart, settings as settings_mod, summary as summary_mod)
-from .following import FOLLOWING_FEED, FollowingRunner
+from .following import FOLLOWING_FEED, AccountsRunner, FollowingRunner
 from .service import RefreshRunner, demo_mode, sync_installed
 from .store import SORTS, Store
 
@@ -63,6 +63,13 @@ def _runner(request: Request) -> RefreshRunner:
 
 def _following_runner(request: Request) -> FollowingRunner:
     return request.app.state.following
+
+def _accounts_runner(request: Request) -> AccountsRunner:
+    return request.app.state.accounts
+
+
+def _plugin_host(request: Request) -> PluginHost:
+    return request.app.state.refresher.host
 
 
 # 关注页固定按这个顺序展示平台：B 站、抖音、小红书、知乎。
@@ -161,6 +168,213 @@ def _following_platforms(request: Request) -> dict[str, Any]:
             "counts": store.following_counts(FOLLOWING_FEED),
             "count": store.following_count(FOLLOWING_FEED),
             "syncing": runner.running(), "progress": runner.snapshot()}
+
+
+def _account_platforms(request: Request) -> dict[str, Any]:
+    """关注名单的平台状态。和关注流分开算：插件可能能抓内容、但拿不到名单。"""
+    runner = _accounts_runner(request)
+    store = _store(request)
+    manifests = {m.id: m for m in runner.manifests()}
+    installed = {str(p["id"]) for p in store.list_plugins()}
+    stats = runner.last_runs()
+    counts = {str(r["platform"]): r for r in store.following_account_counts()}
+    rows: list[dict[str, Any]] = []
+    for pid in FOLLOWING_PLATFORMS:
+        manifest = manifests.get(pid)
+        label = (manifest.name if manifest is not None and manifest.name
+                 else FOLLOWING_LABELS.get(pid, pid))
+        has_row = pid in installed or manifest is not None
+        supported = pid in set(runner.platform_ids())
+        logged_in, login_note = _login_probe(pid)
+        stat = stats.get(pid) or {}
+        count_row = counts.get(pid) or {}
+        if not has_row:
+            state, note = "not_installed", "还没安装这个平台的插件"
+        elif not supported:
+            state, note = "unsupported", "这个平台的插件还没有关注名单能力"
+        elif logged_in is False:
+            state, note = "need_login", login_note
+        elif stat.get("last_ok") is False and _looks_like_login_error(str(stat.get("error") or "")):
+            state, note = "need_login", str(stat.get("error") or "上次同步要求登录")
+        else:
+            state, note = "ready", login_note
+        rows.append({
+            "platform": pid, "label": label, "installed": has_row,
+            "supported": supported, "logged_in": logged_in, "state": state, "note": note,
+            "count": int(count_row.get("count") or 0),
+            "total": int(count_row.get("total") or 0),
+            "last_seen_at": int(count_row.get("last_seen_at") or 0),
+            "last_sync_at": int(stat.get("last_run_at") or 0),
+            "last_ok_at": int(stat.get("last_ok_at") or 0),
+            "last_ok": stat.get("last_ok"),
+            "error": str(stat.get("error") or ""),
+        })
+    try:
+        errors = list(request.app.state.refresher.host.errors)
+    except Exception:
+        errors = []
+    return {"platforms": rows, "plugin_errors": errors,
+            "counts": store.following_account_counts(),
+            "count": sum(int(r.get("count") or 0) for r in store.following_account_counts()),
+            "syncing": runner.running(), "progress": runner.snapshot()}
+
+
+@router.get("/following/accounts")
+def following_accounts_list(
+    request: Request,
+    platform: str | None = Query(None, description="逗号分隔，例：bilibili,zhihu"),
+    q: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """关注名单：只读「我关注了谁」，和关注流的内容是两件事。"""
+    store = _store(request)
+    wanted = [p.strip() for p in platform.split(",") if p.strip()] if platform else []
+    single = wanted[0] if len(wanted) == 1 else None
+    rows = store.following_accounts(platform=single, active=True, query=q, limit=1000)
+    if len(wanted) > 1:
+        rows = [r for r in rows if str(r.get("platform")) in wanted]
+    elif not wanted:
+        rows = [r for r in rows if str(r.get("platform")) in FOLLOWING_PLATFORMS]
+    total = len(rows)
+    page = rows[offset:offset + limit]
+    meta = _account_platforms(request)
+    return {"accounts": page, "next": (offset + limit) if offset + limit < total else None,
+            "count": len(page), "total": total, "platforms": meta["platforms"],
+            "plugin_errors": meta["plugin_errors"], "counts": meta["counts"],
+            "syncing": meta["syncing"], "progress": meta["progress"]}
+
+
+@router.post("/following/accounts/refresh")
+def following_accounts_refresh(request: Request, body: dict[str, Any] | None = Body(None)) -> dict:
+    body = body or {}
+    platforms = body.get("platforms")
+    if isinstance(platforms, str):
+        platforms = [p.strip() for p in platforms.split(",") if p.strip()]
+    if platforms is not None and not isinstance(platforms, list):
+        raise HTTPException(status_code=422, detail={
+            "code": "bad_platforms", "message": "platforms 必须是数组",
+            "hint": '例：{"platforms": ["bilibili"]}'})
+    runner = _accounts_runner(request)
+    ok, state = runner.trigger(
+        platforms=[str(p) for p in platforms] if platforms else None,
+        force=bool(body.get("force")),
+        source=str(body.get("source") or "user"),
+        owner=str(body.get("owner") or ""),
+    )
+    if not ok and state.get("running"):
+        raise HTTPException(status_code=409, detail={
+            "code": "accounts_running", "message": "关注名单正在同步",
+            "hint": "等这一轮跑完；关注页会自己刷新"})
+    return {"ok": ok, "state": state}
+
+
+@router.get("/following/accounts/progress")
+def following_accounts_progress(request: Request) -> dict:
+    return {"state": _accounts_runner(request).snapshot()}
+
+
+@router.post("/following/accounts/cancel")
+def following_accounts_cancel(request: Request, body: dict[str, Any] | None = Body(None)) -> dict:
+    owner = str((body or {}).get("owner") or "") or None
+    return {"ok": _accounts_runner(request).cancel(owner=owner)}
+
+
+def _author_profile(request: Request, platform: str, account_id: str,
+                    refresh: bool = False) -> dict[str, Any]:
+    store = _store(request)
+    account = store.get_following_account(platform, account_id)
+    local = account or store.find_author(platform, account_id)
+    profile = dict(local) if local else {"platform": platform, "account_id": account_id,
+                                         "name": "", "avatar": "", "url": "", "bio": ""}
+    error = ""
+    if refresh or not profile.get("name"):
+        try:
+            remote = _plugin_host(request).author_profile(platform, account_id)
+        except Exception as exc:
+            remote = None
+            error = f"{type(exc).__name__}: {exc}"[:300]
+        if remote:
+            for key in ("name", "avatar", "bio", "url", "following", "follower", "posts"):
+                if remote.get(key):
+                    profile[key] = remote[key]
+            # 只刷新名单里已有的人；未关注作者的名片是临时展示，不能借读名片
+            # 把他写进 following_accounts，否则「关注的人」会越看越多。
+            if account:
+                try:
+                    store.upsert_following_accounts(platform, [{
+                        "account_id": account_id,
+                        "name": profile.get("name") or "",
+                        "avatar": profile.get("avatar") or "",
+                        "url": profile.get("url") or "",
+                        "bio": profile.get("bio") or "",
+                        "relation": profile.get("relation") or "following",
+                    }], complete=False)
+                except Exception:
+                    pass
+    profile["label"] = FOLLOWING_LABELS.get(platform, platform)
+    profile["following"] = bool(account and account.get("active"))
+    return {"profile": profile, "error": error}
+
+
+@router.get("/authors/{platform}/{account_id}")
+def author_page(request: Request, platform: str, account_id: str,
+                refresh: bool = Query(False), cursor: str | None = Query(None),
+                limit: int = Query(30, ge=1, le=100)) -> dict:
+    """作者页：先给本地已有作品，再按需去平台补一页。"""
+    store = _store(request)
+    data = _author_profile(request, platform, account_id, refresh=refresh)
+    items, next_cursor = store.author_items(platform, account_id, cursor=cursor, limit=limit)
+    host = _plugin_host(request)
+    try:
+        remote_supported = any(m.id == platform and "author_posts" in m.features
+                               for m in host.discover())
+    except Exception:
+        remote_supported = False
+    return {"profile": data["profile"], "profile_error": data["error"],
+            "items": items, "next": next_cursor, "count": len(items),
+            "total": store.author_item_count(platform, account_id),
+            "remote_supported": remote_supported,
+            "platforms": _account_platforms(request)["platforms"],
+            "plugin_errors": list(host.errors)}
+
+
+@router.get("/authors/{platform}/{account_id}/posts")
+def author_posts_local(request: Request, platform: str, account_id: str,
+                       cursor: str | None = Query(None),
+                       limit: int = Query(30, ge=1, le=100)) -> dict:
+    store = _store(request)
+    items, next_cursor = store.author_items(platform, account_id, cursor=cursor, limit=limit)
+    return {"items": items, "next": next_cursor, "count": len(items),
+            "total": store.author_item_count(platform, account_id)}
+
+
+@router.post("/authors/{platform}/{account_id}/fetch")
+def author_posts_fetch(request: Request, platform: str, account_id: str,
+                       body: dict[str, Any] | None = Body(None)) -> dict:
+    """从平台补一页作者作品。补回来的条目标 author_only，不进主信息流。"""
+    body = body or {}
+    cursor = str(body.get("cursor") or "") or None
+    limit = max(1, min(int(body.get("limit") or 30), 50))
+    store = _store(request)
+    try:
+        page = _plugin_host(request).author_posts(platform, account_id, cursor=cursor, limit=limit)
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:300],
+                "fetched": 0, "added": 0, "next": None,
+                "total": store.author_item_count(platform, account_id)}
+    items = list(page.get("items") or [])
+    known = store.item_ids([it.id for it in items])
+    added = sum(1 for it in items if it.id not in known)
+    for it in items:
+        # 只有第一次从作者页补进来的条目才标 author_only；同一条内容如果
+        # 本来就在主信息流可见，不能因为作者页抓了一次就把它藏起来。
+        it.author_only = it.id not in known
+    if items:
+        store.upsert_items(items, preserve_hidden=True)
+    return {"ok": True, "fetched": len(items), "added": added,
+            "next": page.get("next"), "error": "",
+            "total": store.author_item_count(platform, account_id)}
 
 
 @router.get("/following")

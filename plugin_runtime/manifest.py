@@ -17,7 +17,7 @@ CAPABILITIES = {"http", "browser", "cli"}
 KINDS = {"video", "images", "article", "short", "list"}
 # 能力（capabilities）说的是"插件能调什么"，feature 说的是"插件对外提供什么额外内容"。
 # 评论/详情/媒体都是可选能力：认领了才调，没认领的平台照常出卡片。
-FEATURES = {"comments", "detail", "media", "summary"}
+FEATURES = {"comments", "detail", "media", "summary", "following_accounts", "author_posts"}
 # 宿主能渲染的整站嵌入只有这两家：B 站官方播放器、抖音官方播放器。
 # 其它平台（小红书/知乎/快手…）一律走插件自渲染正文，别拿 iframe 硬套。
 EMBED_PROVIDERS = {"bilibili", "douyin"}

@@ -18,8 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from onefeed.app import create_app  # noqa: E402
-from onefeed.following import FOLLOWING_FEED, FollowingRunner  # noqa: E402
+from onefeed.following import ACCOUNTS_FEED, FOLLOWING_FEED, AccountsRunner, FollowingRunner  # noqa: E402
 from onefeed.store import Store  # noqa: E402
+from models import Item  # noqa: E402
 
 
 def make_store() -> Store:
@@ -45,16 +46,23 @@ def item(item_id: str, platform: str, published_at: int = 0, author_id: str = ""
 class FakeHost:
     demo = False
 
-    def __init__(self, items_by_plugin: dict[str, list[dict]], fail: tuple[str, ...] = (), delay: float = 0.0):
+    def __init__(self, items_by_plugin: dict[str, list[dict]], fail: tuple[str, ...] = (), delay: float = 0.0,
+                 accounts_by_plugin: dict[str, list[dict]] | None = None,
+                 posts_by_plugin: dict[str, list[dict]] | None = None):
         self.items_by_plugin = items_by_plugin
+        self.accounts_by_plugin = accounts_by_plugin or {}
+        self.posts_by_plugin = posts_by_plugin or {}
         self.fail = set(fail)
         self.delay = delay
         self.calls: list[tuple[str, str]] = []
+        self.account_calls: list[tuple[str, str | None]] = []
+        self.post_calls: list[tuple[str, str, str | None]] = []
         self.errors: list[str] = []
 
     def discover(self):
         return [
-            SimpleNamespace(id=pid, name=pid.upper(), feed_ids=lambda: ["recommend", "following"])
+            SimpleNamespace(id=pid, name=pid.upper(), features=["following_accounts", "author_posts"],
+                            feed_ids=lambda: ["recommend", "following"])
             for pid in self.items_by_plugin
         ]
 
@@ -65,6 +73,30 @@ class FakeHost:
         if plugin_id in self.fail:
             raise RuntimeError("平台挂了")
         return list(self.items_by_plugin.get(plugin_id, []))[:limit]
+
+    def following_accounts(self, plugin_id, cursor=None, limit=200):
+        self.account_calls.append((plugin_id, cursor))
+        if self.delay:
+            time.sleep(self.delay)
+        if plugin_id in self.fail:
+            raise RuntimeError("平台挂了")
+        return {"items": list(self.accounts_by_plugin.get(plugin_id, []))[:limit], "next": None}
+
+    def author_profile(self, plugin_id, account_id):
+        return {"name": "远端作者 " + account_id, "avatar": "https://example.com/a.jpg",
+                "bio": "简介", "url": "https://example.com/u/" + account_id,
+                "following": 12, "follower": 34}
+
+    def author_posts(self, plugin_id, account_id, cursor=None, limit=20):
+        self.post_calls.append((plugin_id, account_id, cursor))
+        return {"items": list(self.posts_by_plugin.get(plugin_id, []))[:limit], "next": None}
+
+
+def account(account_id: str, name: str = "") -> dict:
+    return {"account_id": account_id, "name": name or "账号 " + account_id,
+            "avatar": "https://example.com/" + account_id + ".jpg",
+            "url": "https://example.com/u/" + account_id,
+            "bio": "简介 " + account_id, "relation": "following"}
 
 
 def wait_idle(runner: FollowingRunner, timeout: float = 5.0) -> None:
@@ -213,12 +245,105 @@ def test_api_following_and_layout_setting():
     assert bad.status_code == 400
 
 
+def test_accounts_runner_and_api():
+    store = make_store()
+    host = FakeHost(
+        {"bilibili": [], "zhihu": []},
+        accounts_by_plugin={"bilibili": [account("up1"), account("up2")],
+                            "zhihu": [account("z1")]},
+    )
+    runner = AccountsRunner(store, host=host)
+    ok, state = runner.trigger(force=True)
+    assert ok and state["running"] and state["total"] == 2
+    wait_idle(runner)
+    assert runner.snapshot()["feed"] == ACCOUNTS_FEED
+    assert {r["account_id"] for r in store.following_accounts(platform="bilibili")} == {"up1", "up2"}
+    assert store.following_account_counts()[0]["platform"] in ("bilibili", "zhihu")
+
+    # 第二轮只返回 up2：up1 标记 inactive，不删；名单为空时不动旧记录
+    host.accounts_by_plugin = {"bilibili": [account("up2")]}
+    assert runner.trigger(force=True)[0]
+    wait_idle(runner)
+    active = {r["account_id"] for r in store.following_accounts(platform="bilibili")}
+    assert active == {"up2"}
+    assert len(store.following_accounts(platform="bilibili", active=None)) == 2
+    before = len(store.following_accounts(platform="bilibili", active=None))
+    host.accounts_by_plugin = {"bilibili": []}
+    assert runner.trigger(force=True)[0]
+    wait_idle(runner)
+    assert len(store.following_accounts(platform="bilibili", active=None)) == before
+
+    client = TestClient(create_app(store))
+    client.app.state.accounts = runner
+    body = client.get("/api/following/accounts", params={"platform": "bilibili"}).json()
+    assert body["total"] == 1 and body["accounts"][0]["account_id"] == "up2"
+    assert body["counts"] and body["platforms"]
+    found = client.get("/api/following/accounts", params={"q": "账号 up2"}).json()
+    assert found["total"] == 1
+    started = client.post("/api/following/accounts/refresh", json={"force": True})
+    assert started.status_code == 200 and started.json()["ok"] is True
+    wait_idle(runner)
+    assert client.get("/api/following/accounts/progress").json()["state"]["phase"] in ("done", "cancelled")
+
+
+def test_author_page_and_remote_posts():
+    store = make_store()
+    now = int(time.time())
+    seeded = item("bilibili:old", "bilibili", now - 100, "up1")
+    store.upsert_items([seeded])
+    host = FakeHost(
+        {"bilibili": [seeded]},
+        posts_by_plugin={"bilibili": [
+            # 同一条内容已经在主信息流可见：作者页再抓一次不能把它藏起来
+            Item(
+                id="bilibili:old", platform="bilibili", raw_id="BVold", title="作者的老视频",
+                kind="video", author="作者 up1", author_id="up1", url="https://example.com/BVold",
+                published_at=now - 100,
+            ),
+            Item(
+                id="bilibili:new", platform="bilibili", raw_id="BVnew", title="作者的新视频",
+                kind="video", author="作者 up1", author_id="up1", url="https://example.com/BVnew",
+                published_at=now - 5,
+            ),
+        ]},
+    )
+    client = TestClient(create_app(store))
+    client.app.state.accounts = AccountsRunner(store, host=host)
+    client.app.state.refresher.host = host
+
+    body = client.get("/api/authors/bilibili/up1").json()
+    assert body["profile"]["name"] == "作者 up1"
+    assert body["profile"]["following"] is False
+    assert body["total"] == 1 and [i["id"] for i in body["items"]] == ["bilibili:old"]
+    assert body["remote_supported"] is True
+
+    fetched = client.post("/api/authors/bilibili/up1/fetch", json={}).json()
+    assert fetched["ok"] is True and fetched["fetched"] == 2 and fetched["added"] == 1
+    after = client.get("/api/authors/bilibili/up1").json()
+    assert after["total"] == 2
+    assert [i["id"] for i in after["items"]][0] == "bilibili:new"
+    assert all(i["author_only"] for i in after["items"] if i["id"] == "bilibili:new")
+    # 作者页补回来的历史内容，不能出现在主信息流/关注流；
+    # 但本来就可见的那条不能被作者页顺手标成 author_only。
+    assert store.count() == 1
+    assert store.following_count() == 0
+    assert store.get_item("bilibili:old")["author_only"] is False
+
+    # 只是点进来看一眼的陌生人，不能被写进关注名单
+    ghost = client.get("/api/authors/bilibili/ghost").json()
+    assert ghost["profile"]["name"] == "远端作者 ghost"
+    assert ghost["profile"]["following"] is False
+    assert store.following_accounts(platform="bilibili", active=None) == []
+
+
 def main() -> int:
     test_mark_page_and_orphans()
     test_runner_syncs_marks_and_respects_cooldown()
     test_failure_isolation_and_cancel()
     test_api_following_and_layout_setting()
-    print("关注流 4 组检查全部通过")
+    test_accounts_runner_and_api()
+    test_author_page_and_remote_posts()
+    print("关注流 6 组检查全部通过")
     return 0
 
 
