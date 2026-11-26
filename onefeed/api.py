@@ -467,10 +467,7 @@ def _apply_settings(request: Request, conf: dict[str, Any],
     target = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
     current_dir = Path(str(getattr(runner.host, "plugins_dir", "") or ".")).resolve()
     if current_dir != target.resolve():
-        runner.host = PluginHost(plugins_dir=target)
-        if following is not None:
-            following.host = runner.host
-        sync_installed(_store(request), target)
+        _swap_plugin_host(request, target)
         applied.append(f"插件目录 → {target}")
 
     if touched and "registry_url" in touched and prev_registry is not None \
@@ -1444,20 +1441,40 @@ def install_plugin(request: Request, plugin_id: str) -> dict:
         raise HTTPException(status_code=400, detail={
             "code": "install_failed", "message": f"{type(exc).__name__}: {exc}"[:300],
             "hint": "检查网络、registry 缓存，或改用本地文件安装"})
-    conf = settings_mod.load()
-    target = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
-    _runner(request).host = PluginHost(plugins_dir=target)  # 重新发现插件目录
-    sync_installed(store, target)
+    _reload_plugins(request)
     return {"ok": True, "result": result}
 
 
+def _swap_plugin_host(request: Request, target: Path) -> PluginHost:
+    """换插件目录时，主信息流与关注流必须拿到同一个新宿主。
+
+    只换 refresher.host 会让 following / accounts 继续拿着旧宿主：新装的插件
+    在关注页不出现，卸载后还在。目录是事实，库只是索引，换完顺手同步。
+    """
+    target = Path(target)
+    host = PluginHost(plugins_dir=target)
+    _runner(request).host = host
+    for runner_name in ("following", "accounts"):
+        runner = getattr(request.app.state, runner_name, None)
+        if runner is not None:
+            runner.host = host
+    sync_installed(_store(request), target)
+    return host
+
+
 def _reload_plugins(request: Request) -> None:
-    """装/更新/卸载之后重新发现插件目录：目录是事实，库只是索引。"""
-    store = _store(request)
+    """装/更新/卸载之后重新发现插件：沿用当前生效目录，不重新读设置。
+
+    create_app() 可以显式传 plugins_dir（测试与嵌入式使用），这时设置里的目录
+    不是事实来源；装完插件再按设置解析会把宿主切到另一个目录，新插件就“消失”。
+    """
+    current = getattr(_runner(request).host, "plugins_dir", None)
+    if current:
+        _swap_plugin_host(request, Path(current))
+        return
     conf = settings_mod.load()
     target = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
-    _runner(request).host = PluginHost(plugins_dir=target)
-    sync_installed(store, target)
+    _swap_plugin_host(request, target)
 
 
 @router.post("/plugins/{plugin_id}/update")
@@ -1499,6 +1516,7 @@ def uninstall_plugin(request: Request, plugin_id: str) -> dict:
         raise HTTPException(status_code=400, detail={
             "code": "uninstall_failed", "message": f"{type(exc).__name__}: {exc}"[:300],
             "hint": "目录可能被占用或没有删除权限；目录已不存在时现在也会清理库记录"})
+    _reload_plugins(request)
     return {"ok": True, "result": result}
 
 

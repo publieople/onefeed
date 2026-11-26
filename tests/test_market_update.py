@@ -528,6 +528,12 @@ def main() -> int:
         check((sb2.plugin_root / "ghost" / "plugin.json").exists(), "重装后目录回来了")
         after = client.get("/api/plugins").json()
         check(any(p["id"] == "ghost" for p in after["installed"]), "重装后库里也登记了")
+        check(app.state.following.host is app.state.refresher.host,
+              "安装后关注流换到新的插件宿主")
+        check(app.state.accounts.host is app.state.refresher.host,
+              "安装后关注名单换到新的插件宿主")
+        check(any(m.id == "ghost" for m in app.state.following.host.discover()),
+              "安装后关注流宿主能发现新插件")
 
         # 目录再被删掉：卸载不能报「没有安装」，要幂等地清掉库记录
         shutil.rmtree(sb2.plugin_root / "ghost")
@@ -537,6 +543,10 @@ def main() -> int:
         final = client.get("/api/plugins").json()
         check(not any(p["id"] == "ghost" for p in final["installed"]),
               "目录不在时卸载也清掉了库记录")
+        check(app.state.following.host is app.state.refresher.host,
+              "卸载后关注流仍共用当前插件宿主")
+        check(not any(m.id == "ghost" for m in app.state.following.host.discover()),
+              "卸载后关注流宿主不再发现已删插件")
     finally:
         store2.close()
         restore_market(saved2)
