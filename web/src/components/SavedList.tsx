@@ -12,7 +12,9 @@ import { platform } from "../platform";
 export default function SavedList({ onOpen }: { onOpen?: () => void }) {
   const { openItem } = useAgentActions();
   const [items, setItems] = useState<FeedItem[]>([]);
+  const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState("");
   const [undo, setUndo] = useState<FeedItem | null>(null);
   // 正在淡出的那一行：先给 160ms 过渡，再真的从列表里摘掉
@@ -23,6 +25,7 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
     try {
       const data = await getJSON<FeedResponse>("/api/feed?saved=1&sort=saved&limit=30");
       setItems(data.items ?? []);
+      setNext(data.next ?? null);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "取不到稍后再看");
@@ -30,6 +33,24 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
       setLoading(false);
     }
   }, []);
+
+  const more = useCallback(async () => {
+    if (!next || moreLoading) return;
+    setMoreLoading(true);
+    try {
+      const data = await getJSON<FeedResponse>(
+        "/api/feed?saved=1&sort=saved&limit=30&cursor=" + encodeURIComponent(next),
+      );
+      const seen = new Set(items.map((row) => row.id));
+      setItems((prev) => [...prev, ...(data.items ?? []).filter((row) => !seen.has(row.id))]);
+      setNext(data.next ?? null);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取不到更早的稍后再看");
+    } finally {
+      setMoreLoading(false);
+    }
+  }, [items, moreLoading, next]);
 
   useEffect(() => {
     void load();
@@ -93,7 +114,7 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
       {items.length ? (
         <div className="flex shrink-0 items-center gap-1.5 px-3.5 pb-2 pt-1 text-[11.5px] text-fade">
           <Star size={11} />
-          {items.length} 条
+          {items.length} 条{next ? " · 还有更早的" : ""}
           <span className="ml-auto">按加入时间倒序</span>
         </div>
       ) : (
@@ -159,6 +180,18 @@ export default function SavedList({ onOpen }: { onOpen?: () => void }) {
             </li>
           );
         })}
+        {next ? (
+          <li className="px-1.5 pb-1 pt-2">
+            <button
+              onClick={() => void more()}
+              disabled={moreLoading}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-line px-3 py-2 text-[12px] text-muted transition hover:border-ink/25 hover:text-ink disabled:opacity-60"
+            >
+              {moreLoading ? <Loader2 size={12} className="animate-spin" /> : null}
+              {moreLoading ? "正在翻…" : "加载更早的"}
+            </button>
+          </li>
+        ) : null}
       </ul>
       ) : null}
       {undo ? (

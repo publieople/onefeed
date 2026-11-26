@@ -1319,15 +1319,15 @@ class Store:
             self.conn.commit()
         return bool(cur.rowcount)
 
-    def favorite_items(self, limit: int = 50) -> list[dict[str, Any]]:
+    def favorite_items(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             "SELECT i.*, m.saved AS mark_saved, m.read_at AS mark_read_at, "
             "m.hidden AS mark_hidden, m.saved_at AS mark_saved_at, m.note AS mark_note, "
             "f.created_at AS fav_at, f.note AS fav_note "
             "FROM item_favorites f JOIN items i ON i.id = f.item_id "
             "LEFT JOIN item_marks m ON m.item_id = i.id "
-            "ORDER BY f.created_at DESC LIMIT ?",
-            (max(1, min(int(limit), 200)),)).fetchall()
+            "ORDER BY f.created_at DESC LIMIT ? OFFSET ?",
+            (max(1, min(int(limit), 200)), max(0, int(offset)))).fetchall()
         out = [dict(r) for r in rows]
         for row in out:
             self._decode_row(row)
@@ -1351,7 +1351,7 @@ class Store:
         return {"item_id": row["item_id"], "depth": row["depth"], "payload": payload,
                 "fetched_at": int(row["fetched_at"] or 0)}
 
-    def summarized_items(self, limit: int = 30) -> list[dict[str, Any]]:
+    def summarized_items(self, limit: int = 30, offset: int = 0) -> list[dict[str, Any]]:
         """最近生成过 AI 总结的条目，右栏「AI 总结」那一页用。
 
         总结表只存 payload，标题 / 平台 / 封面都在 items 里，所以这里 join 回来；
@@ -1364,8 +1364,8 @@ class Store:
             "FROM summaries s JOIN items i ON i.id = s.item_id "
             "WHERE s.rowid = (SELECT x.rowid FROM summaries x WHERE x.item_id = s.item_id "
             "                 ORDER BY x.fetched_at DESC LIMIT 1) "
-            "ORDER BY s.fetched_at DESC LIMIT ?",
-            (max(1, min(int(limit), 100)),)).fetchall()
+            "ORDER BY s.fetched_at DESC LIMIT ? OFFSET ?",
+            (max(1, min(int(limit), 100)), max(0, int(offset)))).fetchall()
         out: list[dict[str, Any]] = []
         for raw in rows:
             row = dict(raw)

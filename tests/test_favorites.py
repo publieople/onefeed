@@ -161,10 +161,45 @@ def test_api() -> None:
     check(missing.status_code == 404, "不存在的条目不能收藏")
 
 
+def test_paging() -> None:
+    """右栏列表不能只看到第一页：偏移量要继续往下翻，且不能重复。"""
+    store = fresh_store()
+    now = int(time.time())
+    store.upsert_items([
+        {"id": f"v2ex:topic:{i}", "platform": "v2ex", "kind": "article",
+         "title": f"分页条目 {i}", "text": "正文", "author": "a", "cover": "",
+         "url": f"https://example.com/page/{i}", "published_at": now - i * 60,
+         "like": 0, "comment": 0, "share": 0, "view": 0, "tags": [], "extra": {},
+         "fetched_at": now}
+        for i in (3, 4, 5, 6)
+    ])
+    for i in range(1, 7):
+        store.favorite_item(f"v2ex:topic:{i}", f"第 {i} 条备注")
+        store.save_summary(f"v2ex:topic:{i}", {"tldr": f"第 {i} 条总结"})
+
+    client = TestClient(create_app(store))
+    first = client.get("/api/favorites?limit=2&offset=0").json()
+    second = client.get("/api/favorites?limit=2&offset=2").json()
+    check(len(first["items"]) == 2 and first["has_more"] is True, "收藏夹第一页带 has_more")
+    check(len(second["items"]) == 2, "收藏夹第二页也是两条")
+    check({row["id"] for row in first["items"]}.isdisjoint(
+        {row["id"] for row in second["items"]}), "两页不重复")
+    tail = client.get("/api/favorites?limit=2&offset=4").json()
+    check(len(tail["items"]) == 2, "收藏夹最后一页取到剩下的两条")
+    check(tail["has_more"] is False, "取完以后 has_more 变 false")
+    check(client.get("/api/favorites?limit=2&offset=6").json()["items"] == [], "超出范围返回空")
+
+    summaries = client.get("/api/agent/summaries?limit=3&offset=0").json()
+    check(len(summaries["items"]) == 3 and summaries["has_more"] is True, "总结第一页带 has_more")
+    rest = client.get("/api/agent/summaries?limit=3&offset=3").json()
+    check(len(rest["items"]) == 3 and rest["has_more"] is False, "总结第二页取完")
+
+
 def main() -> int:
     test_store_separation()
     test_prune_keeps_saved_and_favorites()
     test_api()
+    test_paging()
     print(f"✅ test_favorites.py 通过：{CHECKS} 项检查")
     return 0
 

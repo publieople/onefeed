@@ -879,10 +879,12 @@ def agent_saved(request: Request, limit: int = Query(50, ge=1, le=200)) -> dict:
 
 
 @router.get("/agent/summaries")
-def agent_summaries(request: Request, limit: int = Query(30, ge=1, le=100)) -> dict:
+def agent_summaries(request: Request, limit: int = Query(30, ge=1, le=100),
+                    offset: int = Query(0, ge=0)) -> dict:
     """最近生成过 AI 总结的条目，右栏「AI 总结」页用。"""
-    items = _store(request).summarized_items(limit=limit)
-    return {"items": items, "count": len(items)}
+    rows = _store(request).summarized_items(limit=limit + 1, offset=offset)
+    items = rows[:limit]
+    return {"items": items, "count": len(items), "has_more": len(rows) > limit}
 
 
 @router.post("/agent/mark")
@@ -904,10 +906,12 @@ def agent_mark(request: Request, payload: dict[str, Any] = Body(default={})) -> 
 
 
 @router.get("/favorites")
-def favorite_list(request: Request, limit: int = Query(50, ge=1, le=200)) -> dict:
+def favorite_list(request: Request, limit: int = Query(50, ge=1, le=200),
+                  offset: int = Query(0, ge=0)) -> dict:
     """收藏夹列表：与「稍后再看」分开，按加入收藏夹的时间倒序。"""
-    items = _store(request).favorite_items(limit=limit)
-    return {"items": items, "count": len(items)}
+    rows = _store(request).favorite_items(limit=limit + 1, offset=offset)
+    items = rows[:limit]
+    return {"items": items, "count": len(items), "has_more": len(rows) > limit}
 
 
 @router.get("/favorites/{item_id}")

@@ -170,6 +170,13 @@ export interface FeedResponse {
   parsed: ParsedQuery | null;
 }
 
+/** 偏移量分页的列表：has_more 由后端多取一条判断，不靠 count 猜。 */
+export interface PagedList<T> {
+  items: T[];
+  count: number;
+  has_more: boolean;
+}
+
 export interface Summary {
   text: string;
   total: number;
@@ -616,8 +623,8 @@ export interface FavoriteState {
   updated_at: number;
 }
 
-export function listFavorites(limit = 50): Promise<{ items: FeedItem[]; count: number }> {
-  return getJSON("/api/favorites?limit=" + limit);
+export function listFavorites(limit = 50, offset = 0): Promise<PagedList<FeedItem>> {
+  return getJSON("/api/favorites?limit=" + limit + "&offset=" + offset);
 }
 
 export function favoriteStatus(id: string): Promise<FavoriteState> {
@@ -640,8 +647,8 @@ export interface SummarizedItem extends FeedItem {
   summary_points?: number;
 }
 
-export function agentSummaries(limit = 30): Promise<{ items: SummarizedItem[]; count: number }> {
-  return getJSON("/api/agent/summaries?limit=" + limit);
+export function agentSummaries(limit = 30, offset = 0): Promise<PagedList<SummarizedItem>> {
+  return getJSON("/api/agent/summaries?limit=" + limit + "&offset=" + offset);
 }
 
 export function agentUndo(token: string): Promise<Record<string, unknown>> {

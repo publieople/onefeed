@@ -16,13 +16,18 @@ import { timeAgo } from "../format";
 export default function FavoritesList({ onOpen }: { onOpen?: () => void }) {
   const { openItem } = useAgentActions();
   const [items, setItems] = useState<FeedItem[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const data = await listFavorites(50);
+      const data = await listFavorites(50, 0);
       setItems(data.items ?? []);
+      setOffset(data.count ?? 0);
+      setHasMore(Boolean(data.has_more));
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "取不到收藏夹");
@@ -30,6 +35,23 @@ export default function FavoritesList({ onOpen }: { onOpen?: () => void }) {
       setLoading(false);
     }
   }, []);
+
+  const more = useCallback(async () => {
+    if (!hasMore || moreLoading) return;
+    setMoreLoading(true);
+    try {
+      const data = await listFavorites(50, offset);
+      const seen = new Set(items.map((row) => row.id));
+      setItems((prev) => [...prev, ...(data.items ?? []).filter((row) => !seen.has(row.id))]);
+      setOffset((prev) => prev + (data.count ?? 0));
+      setHasMore(Boolean(data.has_more));
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取不到更早的收藏");
+    } finally {
+      setMoreLoading(false);
+    }
+  }, [hasMore, items, moreLoading, offset]);
 
   useEffect(() => {
     void load();
@@ -52,6 +74,8 @@ export default function FavoritesList({ onOpen }: { onOpen?: () => void }) {
     try {
       await removeFavorite(item.id);
       setItems((prev) => prev.filter((row) => row.id !== item.id));
+      // 服务端那一页少了一行，下一次 offset 要跟着减一，否则会跳过一个
+      setOffset((prev) => Math.max(0, prev - 1));
     } catch {
       void load();
     }
@@ -91,7 +115,7 @@ export default function FavoritesList({ onOpen }: { onOpen?: () => void }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-1.5 px-3.5 pb-2 pt-1 text-[11.5px] text-fade">
         <Heart size={11} />
-        {items.length} 条
+        {items.length} 条{hasMore ? " · 还有更早的" : ""}
         <span className="ml-auto">按加入收藏夹倒序</span>
       </div>
       <ul data-smooth-scroll className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2">
@@ -137,6 +161,18 @@ export default function FavoritesList({ onOpen }: { onOpen?: () => void }) {
             </li>
           );
         })}
+        {hasMore ? (
+          <li className="px-1.5 pb-1 pt-2">
+            <button
+              onClick={() => void more()}
+              disabled={moreLoading}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-line px-3 py-2 text-[12px] text-muted transition hover:border-ink/25 hover:text-ink disabled:opacity-60"
+            >
+              {moreLoading ? <Loader2 size={12} className="animate-spin" /> : null}
+              {moreLoading ? "正在翻…" : "加载更早的"}
+            </button>
+          </li>
+        ) : null}
       </ul>
     </div>
   );
