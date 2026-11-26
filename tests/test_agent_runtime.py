@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -175,6 +176,48 @@ def main() -> int:
         raise AssertionError("L3 没确认就该拦下来")
     except act_mod.ConfirmRequired as need:
         check(need.action == "refresh_feed", "L3 未确认抛 ConfirmRequired")
+
+    # 2a) 用户点「允许」后，原动作必须真的再执行一次，而不是把允许当成没允许
+    class _Writer:
+        def __init__(self):
+            self.state = rt.RunState("probe-b1")
+
+        def emit(self, *args, **kwargs):
+            return 0
+
+    deps = rt.Deps(ctx=ctx, store=store)
+    writer = _Writer()
+    calls: list[str] = []
+    confirmed_on_retry: list[bool] = []
+
+    def fake_call(ctx_, name_, args_):
+        calls.append(name_)
+        if len(calls) == 1:
+            raise act_mod.ConfirmRequired("refresh_feed", "刷新", "")
+        confirmed_on_retry.append("refresh_feed" in ctx_.confirmed)
+        return {"ok": True, "added": 1}
+
+    def allow(*args, **kwargs):
+        ctx.confirmed.add("refresh_feed")
+        return True
+
+    with patch.object(act_mod, "call", fake_call), patch.object(rt, "_await_confirm", allow):
+        got = rt._run_action(deps, writer, "refresh_feed", {})
+    check(len(calls) == 2 and got.get("ok") is True and got.get("added") == 1,
+          "用户允许后 L3 动作被重试并返回真实结果")
+    check(confirmed_on_retry == [True], "重试时 ctx.confirmed 已包含该动作")
+
+    class _NoWaitEvent:
+        def wait(self, timeout):
+            return False
+
+        def set(self):
+            return None
+
+    with patch.object(rt.threading, "Event", _NoWaitEvent):
+        allowed = rt._await_confirm(deps, writer, act_mod.ConfirmRequired("refresh_feed", "刷新", ""),
+                                    timeout=0.01)
+    check(allowed is False, "拒绝或超时返回 False")
 
     class FakeRunner:
         def __init__(self, store):

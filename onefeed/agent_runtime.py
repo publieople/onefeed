@@ -297,14 +297,29 @@ def _run_action(deps: Deps, writer: EventWriter, name: str,
     preview = json.dumps(args, ensure_ascii=False)[:300]
     writer.emit("step", name, {"title": _title_for(name, args), "kind": "tool",
                                "detail": preview})
-    try:
+
+    def _invoke() -> dict[str, Any]:
         if name == "ask_user":
-            result = _await_answer(deps, writer, args)
-        else:
-            result = act_mod.call(deps.ctx, name, args)
-    except act_mod.ConfirmRequired as need:
-        _await_confirm(deps, writer, need)
-        return {"ok": False, "error": f"用户没允许 {need.action}，用现有数据继续"}
+            return _await_answer(deps, writer, args)
+        return act_mod.call(deps.ctx, name, args)
+
+    try:
+        try:
+            result = _invoke()
+        except act_mod.ConfirmRequired as need:
+            # 用户点「允许」只是把动作写进 confirmed，原动作并没有执行过。
+            # 这里必须重试一次；否则前端显示已允许，模型却被告知「没允许」。
+            if not _await_confirm(deps, writer, need):
+                return {"ok": False, "error": f"用户没允许 {need.action}，用现有数据继续"}
+            try:
+                result = _invoke()
+            except act_mod.ConfirmRequired:
+                writer.emit("tool", name, {"ok": False,
+                                           "ms": int((time.time() - started) * 1000),
+                                           "args": preview,
+                                           "result": f"确认后仍被拦住：{need.action}"})
+                return {"ok": False,
+                        "error": f"{need.action} 的确认状态没有生效，动作没执行，用现有数据继续"}
     except act_mod.ActionError as exc:
         writer.emit("tool", name, {"ok": False, "ms": int((time.time() - started) * 1000),
                                    "args": preview, "result": str(exc)[:300]})
@@ -426,8 +441,8 @@ def _await_answer(deps: Deps, writer: EventWriter, args: dict[str, Any],
 
 
 def _await_confirm(deps: Deps, writer: EventWriter, need: act_mod.ConfirmRequired,
-                   timeout: float = 60.0) -> str:
-    """L3 动作：发 need_confirm，等前端点允许/拒绝。超时按拒绝处理。"""
+                   timeout: float = 60.0) -> bool:
+    """L3 动作：发 need_confirm，等前端点允许/拒绝。超时按拒绝处理。允许返回 True。"""
     state = writer.state
     if state.cancel:
         raise Cancelled("cancelled")
@@ -454,7 +469,8 @@ def _await_confirm(deps: Deps, writer: EventWriter, need: act_mod.ConfirmRequire
             state.confirmed = set()
         state.confirmed.add(need.action)
         deps.ctx.confirmed.add(need.action)
-    return confirm_id
+        return True
+    return False
 
 
 # ---------------------------------------------------------------- 模型接线
