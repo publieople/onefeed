@@ -1305,6 +1305,12 @@ def media(request: Request, item_id: str, slot: str,
         try:
             status, headers, resp = media_mod.open_stream(
                 target["url"], referer=target["referer"], cookie=cookie, range_header=range_header)
+        except media_mod.MediaBlocked:
+            sem.release()
+            raise HTTPException(status_code=400, detail={
+                "code": "media_blocked",
+                "message": "这条媒体地址指向本机或内网，服务端不会去取。",
+                "hint": "去原帖看，或者换一条内容"})
         except Exception as exc:  # 网络层失败：别把半截流当成功
             sem.release()
             raise HTTPException(status_code=502, detail={

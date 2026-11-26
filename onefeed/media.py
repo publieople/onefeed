@@ -10,8 +10,10 @@
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
+import socket
 import threading
 import urllib.error
 import urllib.parse
@@ -29,6 +31,57 @@ MAX_BYTES = 240 * 1024 * 1024
 SEMAPHORE = threading.BoundedSemaphore(4)   # 并发上限：一台机器刷六路，别把上行打满
 # 图片和视频分开排队：一条 240MB 的视频占着名额时，一屏 30 张封面不该跟着干等。
 IMAGE_SEMAPHORE = threading.BoundedSemaphore(8)
+
+
+class MediaBlocked(ValueError):
+    """媒体地址不让服务端取：不是公网 http(s)，或跳到了内网。"""
+
+
+def _ensure_public_http(url: str) -> None:
+    """只在发起请求前放行公网 http(s)。
+
+    详情和插件给的是不可信输入：如果这里不拦，一个 http://127.0.0.1:8765
+    就能让宿主替它扫内网（SSRF）。每一次重定向也要重新过一遍——302 到
+    127.0.0.1 是同一类绕过。
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError as exc:
+        raise MediaBlocked("媒体地址不合法") from exc
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise MediaBlocked("媒体地址不是 http(s)")
+    if parsed.username or parsed.password:
+        raise MediaBlocked("媒体地址不能带账号密码")
+
+    host = parsed.hostname.strip().lower()
+    if host == "localhost" or host.endswith(".local") or host.endswith(".localhost"):
+        raise MediaBlocked("媒体地址指向本机")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise MediaBlocked("媒体地址端口不合法") from exc
+    if port == 0:
+        raise MediaBlocked("媒体地址端口不合法")
+
+    try:
+        infos = socket.getaddrinfo(
+            host, port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise MediaBlocked("媒体域名解析失败") from exc
+    if not infos:
+        raise MediaBlocked("媒体域名没有可用地址")
+
+    for info in infos:
+        addr = str(info[4][0]).split("%", 1)[0]   # 去掉 IPv6 的 scope id
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError as exc:
+            raise MediaBlocked("媒体域名解析出了非法地址") from exc
+        # is_global 覆盖私网、环回、链路本地、保留和未指定地址；组播要单独判，
+        # 旧版 Python 的 is_global 对 224.0.0.0/4 仍会返回 True。
+        if not ip.is_global or ip.is_multicast:
+            raise MediaBlocked("媒体地址解析到非公网 IP")
 
 
 def semaphore_for(slot: str):
@@ -142,7 +195,10 @@ def fetch_image(url: str, referer: str = "", plugin_id: str = "",
         return cached
     cookie = cookie_header(plugin_id) if plugin_id else ""
     for attempt in range(2):
-        status, _headers, resp = open_stream(url, referer=referer, cookie=cookie)
+        try:
+            status, _headers, resp = open_stream(url, referer=referer, cookie=cookie)
+        except MediaBlocked:
+            return None   # 图取自不可信输入：拦住内网地址，别让整条总结因此失败
         try:
             raw = resp.read(IMAGE_MAX_BYTES)
         except Exception:  # noqa: BLE001 - 网络抖动按失败处理
@@ -194,14 +250,20 @@ def cookie_header(plugin_id: str) -> str:
 
 
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
-    """跨域跳转时把 Cookie / Referer 丢掉，别把登录态送到 CDN 之外的域。"""
+    """跨域跳转时把 Cookie / Referer 丢掉，别把登录态送到 CDN 之外的域。
+
+    跳转目标同样过 _ensure_public_http：公网 302 到 127.0.0.1 是 SSRF 的
+    标准绕过，只校验初始 URL 不够。
+    """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
-        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        target = urllib.parse.urljoin(req.full_url, newurl or "")
+        _ensure_public_http(target)
+        new = super().redirect_request(req, fp, code, msg, headers, target)
         if new is None:
             return None
         old_host = (urllib.parse.urlparse(req.full_url).hostname or "").lower()
-        new_host = (urllib.parse.urlparse(newurl).hostname or "").lower()
+        new_host = (urllib.parse.urlparse(target).hostname or "").lower()
         if old_host != new_host:
             for key in ("Cookie", "Referer"):
                 try:
@@ -214,6 +276,7 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
 def open_stream(url: str, referer: str = "", cookie: str = "",
                 range_header: str | None = None) -> tuple[int, dict[str, str], Any]:
     """发起一次媒体请求，返回 (status, headers, response)。调用方负责 close。"""
+    _ensure_public_http(url)
     headers = {"User-Agent": UA, "Accept": "*/*"}
     if referer:
         headers["Referer"] = referer

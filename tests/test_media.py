@@ -18,7 +18,8 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from onefeed.media import resolve_slot  # noqa: E402
+from onefeed.media import (MediaBlocked, _SafeRedirect, _ensure_public_http,  # noqa: E402
+                           fetch_image, resolve_slot)
 from plugin_runtime.host import PluginHost  # noqa: E402
 
 VERBOSE = "--verbose" in sys.argv
@@ -90,6 +91,89 @@ def test_normalize_detail() -> None:
     })
     check(out["media"]["fallbackUrl"] == "https://v26-web.douyinvod.com/x.mp4", "详情白名单里保留兜底直链")
     check("unknown" not in out, "白名单外字段被丢掉")
+
+
+def test_media_blocks_private_targets() -> None:
+    """媒体边车只取公网 http(s)：内网/环回/文件协议和跨跳转都要拦住。"""
+    import urllib.request
+
+    blocked = [
+        "http://127.0.0.1:8765/api/health",
+        "http://localhost/secret",
+        "http://10.0.0.1/secret",
+        "http://192.168.1.1/secret",
+        "http://169.254.169.254/latest/meta-data",
+        "http://224.0.0.1/secret",
+        "http://[::1]/secret",
+        "file:///etc/passwd",
+        "ftp://example.com/x",
+    ]
+    for url in blocked:
+        try:
+            _ensure_public_http(url)
+        except MediaBlocked:
+            pass
+        else:
+            raise AssertionError(f"应当拦住：{url}")
+
+    _ensure_public_http("https://1.1.1.1/x")   # 公网 IP 字面量，不依赖 DNS/网络
+
+    # 图取自不可信输入：撞到内网地址时返回 None，不让总结整个失败
+    check(fetch_image("http://127.0.0.1/secret.jpg") is None,
+          "fetch_image 对拦截地址返回 None")
+
+    # 302 跳到内网同样要拦，不能只校验第一跳
+    req = urllib.request.Request("https://1.1.1.1/a")
+    try:
+        _SafeRedirect().redirect_request(req, None, 302, "Found", {},
+                                         "http://127.0.0.1/secret")
+    except MediaBlocked:
+        pass
+    else:
+        raise AssertionError("跨跳转到 127.0.0.1 没有被拦住")
+
+
+def test_media_route_blocks_private_url() -> None:
+    """整条路由的映射：拦下来的地址回 400 media_blocked，不是 502。"""
+    import os
+    import tempfile
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from onefeed.app import create_app
+    from onefeed.store import Store
+
+    state = tempfile.mkdtemp(prefix="onefeed-media-ssrf-")
+    old_home = os.environ.get("ONEFEED_HOME")
+    os.environ["ONEFEED_HOME"] = state
+    store = None
+    try:
+        store = Store(Path(state) / "media-ssrf.db")
+        now = int(time.time())
+        store.upsert_items([{
+            "id": "xiaohongshu:blocked:1", "platform": "xiaohongshu", "kind": "video",
+            "title": "指向内网的媒体", "text": "", "author": "作者", "cover": "",
+            "url": "https://www.xiaohongshu.com/explore/1", "published_at": now,
+            "like": 0, "comment": 0, "share": 0, "view": 0,
+            "tags": [], "extra": {}, "fetched_at": now,
+        }])
+        store.save_detail("xiaohongshu:blocked:1", {
+            "media": {"type": "file", "url": "http://127.0.0.1:8765/api/health",
+                      "referer": "https://www.xiaohongshu.com/"},
+        })
+
+        client = TestClient(create_app(store))
+        resp = client.get("/api/media/xiaohongshu%3Ablocked%3A1/video")
+        check(resp.status_code == 400, "指向内网的媒体回 400")
+        check(resp.json()["error"]["code"] == "media_blocked", "错误码是 media_blocked")
+    finally:
+        if store is not None:
+            store.close()
+        if old_home is None:
+            os.environ.pop("ONEFEED_HOME", None)
+        else:
+            os.environ["ONEFEED_HOME"] = old_home
 
 
 def test_route_refreshes_expired_link() -> None:
@@ -228,6 +312,8 @@ def main() -> int:
     test_other_slots()
     test_normalize_keeps_fallback()
     test_normalize_detail()
+    test_media_blocks_private_targets()
+    test_media_route_blocks_private_url()
     test_route_refreshes_expired_link()
     print(f"✅ test_media.py  T47 通过：{CHECKS} 项检查")
     return 0
