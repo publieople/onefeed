@@ -141,6 +141,19 @@ def main() -> int:
         demo_rows = [r for r in page_all if r["platform"] == "demo"]
         check(demo_rows[0]["id"] == "demo:noTime", "缺 time 的条目按采集时间排在本平台最前，刚抓的不会沉底")
 
+        # 关键词里的 % / _ 是 LIKE 通配符，必须当字面量搜；以前搜 "%" 会把整库都捞出来
+        store.upsert_items([
+            {"id": "kw:pct", "platform": "kw", "kind": "list", "title": "限时 100% 返现"},
+            {"id": "kw:under", "platform": "kw", "kind": "list", "title": "a_b 命名规范"},
+            {"id": "kw:plain", "platform": "kw", "kind": "list", "title": "普通条目"},
+        ])
+        pct, _ = store.page(platforms=["kw"], keyword="%", limit=10)
+        check([r["id"] for r in pct] == ["kw:pct"], "搜 % 只命中标题里真有 % 的条目")
+        under, _ = store.page(platforms=["kw"], keyword="_", limit=10)
+        check([r["id"] for r in under] == ["kw:under"], "搜 _ 只命中标题里真有下划线的条目")
+        literal, _ = store.page(platforms=["kw"], keyword="100%", limit=10)
+        check([r["id"] for r in literal] == ["kw:pct"], "带 % 的完整关键词仍按字面量搜到")
+
         # runs
         run_id = store.start_run("demo")
         store.finish_run(run_id, ok=True, count=5)

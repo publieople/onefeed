@@ -141,6 +141,12 @@ SORTS = {"freshness": f"{FRESH_KEY} DESC, i.id DESC",
 SORT_KEYS = {"freshness": FRESH_KEY, "engagement": ENGAGE_KEY, "saved": SAVED_AT}
 
 
+def _like_pattern(text: str) -> str:
+    """把用户输入变成 LIKE 字面量：% 和 _ 是通配符，不转义的话搜 "%" 会命中全部。"""
+    escaped = str(text).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 AGENT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_threads (
     id            TEXT PRIMARY KEY,
@@ -553,8 +559,10 @@ class Store:
             where.append("i.kind = ?")
             params.append(kind)
         if keyword:
-            kw = f"%{keyword.strip()}%"
-            where.append("(i.title LIKE ? OR i.text LIKE ? OR i.author LIKE ?)")
+            kw = _like_pattern(keyword.strip())
+            # 转义过的 %/_ 要带 ESCAPE 才按字面量匹配
+            where.append("(i.title LIKE ? ESCAPE '\\' OR i.text LIKE ? ESCAPE '\\' "
+                         "OR i.author LIKE ? ESCAPE '\\')")
             params.extend([kw, kw, kw])
         if since:
             where.append(f"{FRESH_KEY} >= ?")
