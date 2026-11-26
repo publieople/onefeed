@@ -256,7 +256,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
       prev ? { ...prev, installed: prev.installed.map((p) => (p.id === id ? { ...p, enabled: enabled ? 1 : 0 } : p)) } : prev,
     );
     try {
-      const resp = await fetch("/api/plugins/" + id, {
+      const resp = await fetch("/api/plugins/" + encodeURIComponent(id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),

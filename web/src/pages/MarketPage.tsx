@@ -66,7 +66,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
 
   const install = async (id: string) => {
     const res = await batch.run(id, async () => {
-      await postJSON("/api/plugins/" + id + "/install");
+      await postJSON("/api/plugins/" + encodeURIComponent(id) + "/install");
       flash("装好了：" + id + "，刷新一轮就有新来源");
       setReload((n) => n + 1);
       ctx.bump();
@@ -76,7 +76,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
 
   const update = async (entry: MarketEntry) => {
     const res = await batch.run(entry.id, async () => {
-      const resp = await postJSON<{ result: UpdateResult }>("/api/plugins/" + entry.id + "/update");
+      const resp = await postJSON<{ result: UpdateResult }>("/api/plugins/" + encodeURIComponent(entry.id) + "/update");
       const r = resp.result ?? {};
       flash(r.changed === false ? entry.id + " 已经是最新版" : entry.id + " 升到 v" + (r.to ?? "?"));
       setReload((n) => n + 1);
@@ -116,7 +116,7 @@ export default function MarketPage({ ctx }: { ctx: OutletCtx }) {
     });
     if (!ok) return;
     const res = await batch.run(id, async () => {
-      await deleteJSON("/api/plugins/" + id);
+      await deleteJSON("/api/plugins/" + encodeURIComponent(id));
       flash("已卸载：" + id);
       armUndo(id);
       setReload((n) => n + 1);
