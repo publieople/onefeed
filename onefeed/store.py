@@ -280,7 +280,9 @@ def sort_value(row: dict[str, Any], sort: str) -> int:
         return int(row.get("engage_score") or 0)
     if sort == "saved":
         return int(row.get("saved_at") or 0) or int(row.get("updated_at") or 0)
-    return int(row.get("published_at") or 0) or max(0, int(row.get("fetched_at") or 0) - 86400)
+    # 必须与 SQL 的 FRESH_KEY 完全一致：没有发布时间就用采集时间，不额外减一天。
+    # 以前这里减 86400，导致无时间条目的游标比排序键小一天，翻页会重复或漏条。
+    return int(row.get("published_at") or 0) or int(row.get("fetched_at") or 0)
 
 
 def encode_cursor(row: dict[str, Any], sort: str = "freshness") -> str:

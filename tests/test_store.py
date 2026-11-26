@@ -141,6 +141,23 @@ def main() -> int:
         demo_rows = [r for r in page_all if r["platform"] == "demo"]
         check(demo_rows[0]["id"] == "demo:noTime", "缺 time 的条目按采集时间排在本平台最前，刚抓的不会沉底")
 
+        # 无发布时间条目的游标必须与 SQL 的排序键一致：以前游标减了 86400，
+        # 第一页之后的条目全部落在游标下方，翻页直接到底。
+        store.upsert_items([
+            {"id": "nt:a", "platform": "nt", "kind": "list", "title": "无时间 A",
+             "fetched_at": 1000},
+            {"id": "nt:b", "platform": "nt", "kind": "list", "title": "无时间 B",
+             "fetched_at": 2000},
+            {"id": "nt:c", "platform": "nt", "kind": "list", "title": "无时间 C",
+             "fetched_at": 3000},
+        ])
+        nt_first, nt_cur = store.page(platforms=["nt"], limit=1)
+        nt_second, nt_cur2 = store.page(platforms=["nt"], limit=1, cursor=nt_cur)
+        nt_third, nt_cur3 = store.page(platforms=["nt"], limit=1, cursor=nt_cur2)
+        check([r["id"] for r in nt_first + nt_second + nt_third] == ["nt:c", "nt:b", "nt:a"],
+              "无发布时间条目按采集时间翻页不重不漏")
+        check(nt_cur3 is None, "无发布时间条目翻到最后一页时结束")
+
         # 关键词里的 % / _ 是 LIKE 通配符，必须当字面量搜；以前搜 "%" 会把整库都捞出来
         store.upsert_items([
             {"id": "kw:pct", "platform": "kw", "kind": "list", "title": "限时 100% 返现"},
