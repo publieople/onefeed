@@ -1124,19 +1124,37 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
     [query.platforms.join(","), query.kind, query.sort, query.q, query.since ?? 0, query.saved ? 1 : 0],
   );
 
+  const mergeRef = useRef<(() => Promise<void>) | null>(null);
+  // 自动检查撞上首屏/翻页请求时先记一笔，等这轮结束再合并；直接 return 会把这次新增永久吞掉。
+  const mergeQueued = useRef(false);
+
   const load = useCallback(
     async (cursor: string | null, append: boolean) => {
-      if (flight.current) return;
-      flight.current = true;
-      // 追加时不能 abort：那是把正在飞的那一页丢掉再要一次，尾巴会被截断
-      if (!append) abortRef.current?.abort();
+      // 追加保持单飞（滚动传感器会重复触发）；首屏/换筛选则必须抢断旧请求：
+      // 否则旧响应会晚一步回来，把新筛选的结果覆盖掉。
+      if (append && flight.current) return;
+      if (!append) {
+        abortRef.current?.abort();
+        // 换筛选后，上一屏排队中的自动合并已经不属于这一屏
+        mergeQueued.current = false;
+        setMerging(false);
+      }
       const controller = new AbortController();
       abortRef.current = controller;
+      flight.current = true;
+      const requestKey = reloadKey;
       if (append) setMoreLoading(true);
-      else setLoading(true);
+      else {
+        setLoading(true);
+        setMoreLoading(false);
+      }
       setError("");
       try {
         const data = await getJSON<FeedResponse>(build(cursor), controller.signal);
+        // 旧请求即使没被 abort 挡下（fetch 竞态），也不能再把结果盖到新一屏上
+        if (controller.signal.aborted || abortRef.current !== controller) return;
+        // reloadKey 已经换了一轮时，这批数据属于上一屏，不能冒充新一轮的结果
+        if (!append && requestKey !== keyRef.current) return;
         if (!append) {
           feedCache.set(cacheKey, data);
           // 筛选条件一路换下去，这张表会长得没有边；留最近 20 种组合足够。
@@ -1149,26 +1167,36 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
         // 星标是 per-item 的外部仓库：列表数据一到就把它灌进去，
         // 否则第一次点星标会按「没存过」算，把已存的条目又存一遍
         seedSaved(data.items);
-        setItems((prev) => {
-          if (!append) return data.items;
-          // 游标是稳定的，但刷新一轮后条目可能移位；按 id 去重，
-          // 免得同一张卡在列表里出现两次（React key 重了会直接报错）
-          const seen = new Set(prev.map((entry) => entry.id));
-          return [...prev, ...data.items.filter((entry) => !seen.has(entry.id))];
-        });
+        const prevItems = itemsRef.current;
+        const seen = new Set(prevItems.map((entry) => entry.id));
+        // 游标是稳定的，但刷新一轮后条目可能移位；按 id 去重，
+        // 免得同一张卡在列表里出现两次（React key 重了会直接报错）
+        const nextItems = append
+          ? [...prevItems, ...data.items.filter((entry) => !seen.has(entry.id))]
+          : data.items;
+        // 同步更新 ref：排队中的 merge 必须看到这一轮刚写入的列表，不能等 effect
+        itemsRef.current = nextItems;
+        setItems(nextItems);
         setNext(data.next);
         setCount(data.count);
         setParsed(data.parsed);
       } catch (err) {
-        if ((err as Error).name !== "AbortError") setError((err as Error).message);
+        if ((err as Error).name === "AbortError" || abortRef.current !== controller) return;
+        setError((err as Error).message);
       } finally {
-        flight.current = false;
-        if (!append) setLoadedKey(keyRef.current);
-        setMoreLoading(false);
-        setLoading(false);
+        if (abortRef.current === controller) {
+          flight.current = false;
+          if (!append) setLoadedKey(requestKey);
+          setMoreLoading(false);
+          setLoading(false);
+          if (mergeQueued.current) {
+            mergeQueued.current = false;
+            void mergeRef.current?.();
+          }
+        }
       }
     },
-    [build, cacheKey],
+    [build, cacheKey, reloadKey],
   );
 
   const mergedAutoKey = useRef(0);
@@ -1181,7 +1209,13 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
    * 底部却写着「看看新增的 53 条」。现在按旧列表的 id 边界翻页，把整段新增都接住。
    */
   const merge = useCallback(async () => {
-    if (flight.current) return;
+    if (flight.current) {
+      // 自动检查撞上首屏/翻页时排队，不能直接丢掉这次新增
+      mergeQueued.current = true;
+      return;
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
     flight.current = true;
     setMerging(true);
     setError("");
@@ -1197,27 +1231,37 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
       for (let page = 0; page < MAX_MERGE_PAGES && !hitOld; page += 1) {
         let data: FeedResponse;
         try {
-          data = await getJSON<FeedResponse>(build(cursor));
+          data = await getJSON<FeedResponse>(build(cursor), controller.signal);
         } catch (err) {
+          if (controller.signal.aborted || abortRef.current !== controller) return;
           if (page === 0) throw err;
           // 后面某页失败时，已经拿到的前几页仍然有用，不能整段丢掉。
           if ((err as Error).name !== "AbortError") setError((err as Error).message);
           break;
         }
+        if (controller.signal.aborted || abortRef.current !== controller) return;
         first ??= data;
         for (const entry of data.items) {
+          // 一旦碰到合并前就有的条目，它后面的都属于旧列表，不能整页都算新块
+          if (oldIds.has(entry.id)) {
+            hitOld = true;
+            break;
+          }
           if (seen.has(entry.id)) continue;
           seen.add(entry.id);
           collected.push(entry);
         }
-        hitOld = data.items.some((entry) => oldIds.has(entry.id));
         cursor = data.next;
-        if (!cursor) break;
+        if (!cursor || hitOld) break;
       }
       if (!collected.length) return;
       seedSaved(collected);
       const fresh = new Set(collected.map((entry) => entry.id));
-      setItems((prev) => [...collected, ...prev.filter((entry) => !fresh.has(entry.id))]);
+      const prev = itemsRef.current;
+      const nextItems = [...collected, ...prev.filter((entry) => !fresh.has(entry.id))];
+      // 同步更新 ref：紧接着的 setItems 还没提交时，后续请求也能看到新列表
+      itemsRef.current = nextItems;
+      setItems(nextItems);
       if (first) {
         setCount(first.count);
         setParsed(first.parsed);
@@ -1226,12 +1270,20 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
       setMergeShift({ oldHeight, oldY });
       setMergeEpoch((n) => n + 1);
     } catch (err) {
-      if ((err as Error).name !== "AbortError") setError((err as Error).message);
+      if ((err as Error).name === "AbortError" || abortRef.current !== controller) return;
+      setError((err as Error).message);
     } finally {
-      flight.current = false;
-      setMerging(false);
+      if (abortRef.current === controller) {
+        flight.current = false;
+        setMerging(false);
+        if (mergeQueued.current) {
+          mergeQueued.current = false;
+          void mergeRef.current?.();
+        }
+      }
     }
   }, [build]);
+  mergeRef.current = merge;
 
   useEffect(() => {
     if (!autoKey || autoKey === mergedAutoKey.current) return;

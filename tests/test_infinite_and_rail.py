@@ -58,7 +58,9 @@ def test_feed_prefetches_the_next_page_before_reaching_the_bottom():
     assert "正在获取新内容…" in feed
     assert "min-h-[56px]" in feed, "状态条高度固定，切换文案时页面不抖"
     assert "moreLoading" in api, "下一页要有独立状态，不能复用首屏 loading"
-    assert "if (flight.current) return;" in api, "同一次翻页单飞，传感器会重复触发"
+    assert "if (append && flight.current) return;" in api, "翻页单飞；首屏/换筛选必须抢断旧请求"
+    assert "abortRef.current?.abort();" in api, "换筛选不能等旧请求回来才发新请求"
+    assert "abortRef.current !== controller" in api, "旧响应不能覆盖新一屏"
     assert "seen.has(entry.id)" in api, "追加要按 id 去重，重复 key 会直接报错"
 
 

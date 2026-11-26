@@ -148,7 +148,9 @@ def test_scroll_bottom_checks_auto_and_says_so():
     # 新增可能超过一页（18 条）：合并要按旧 id 边界继续翻页，不能只取首屏
     assert "const oldIds = new Set(itemsRef.current.map((entry) => entry.id));" in api
     assert "for (let page = 0; page < MAX_MERGE_PAGES && !hitOld; page += 1)" in api
-    assert "hitOld = data.items.some((entry) => oldIds.has(entry.id));" in api
+    assert "if (oldIds.has(entry.id)) {" in api
+    assert "hitOld = true;" in api
+    assert "hitOld = data.items.some" not in api, "整页命中旧条目会把旧条目也当新块"
     assert "const fresh = new Set(collected.map((entry) => entry.id));" in api
     assert "[...collected, ...prev.filter((entry) => !fresh.has(entry.id))]" in api
     assert "mergeShift" in api and "mergeEpoch" in api
