@@ -34,6 +34,7 @@ DEPS = {
     "uvicorn": "uvicorn",
     "quickjs": "QuickJS（插件沙箱）",
     "playwright": "Playwright（浏览器类插件）",
+    "pydantic_ai": "Pydantic AI（Agent）",
 }
 
 
@@ -59,7 +60,7 @@ def check_python() -> Check:
 def check_deps() -> Check:
     missing = [label for mod, label in DEPS.items() if importlib.util.find_spec(mod) is None]
     if not missing:
-        return Check("依赖", "ok", "fastapi / uvicorn / quickjs / playwright 都在")
+        return Check("依赖", "ok", " / ".join(DEPS) + " 都在")
     return Check("依赖", "fail", "缺：" + "、".join(missing),
                  "在仓库根执行 uv sync（或 uv run python -m onefeed，uv 会自动补齐）")
 

@@ -68,6 +68,7 @@ def test_basic() -> None:
     # 当前环境跑测试的 python 一定 >= 3.12，依赖与前端产物也应该齐
     check(preflight.check_python().status == "ok", "python 版本达标")
     check(preflight.check_deps().status == "ok", "依赖齐全")
+    check("pydantic_ai" in preflight.DEPS, "Agent 依赖也在自检清单里")
     check(preflight.check_web().status == "ok", "前端产物存在")
 
 
