@@ -500,12 +500,13 @@ def uninstall(store, plugin_id: str) -> dict[str, Any]:
     就把目录移回去，避免出现「目录没了、库里还显示已安装」的半截状态。
     """
     target_root = plugins_root()
-    target = target_root / plugin_id
+    safe_id = _safe_plugin_id(plugin_id)
+    target = target_root / safe_id
     if not _path_exists(target):
-        store.delete_plugin(plugin_id)
-        return {"ok": True, "id": plugin_id, "removed": False}
+        store.delete_plugin(safe_id)
+        return {"ok": True, "id": safe_id, "removed": False}
     target_root.mkdir(parents=True, exist_ok=True)
-    work = _work_dir(target_root, plugin_id)
+    work = _work_dir(target_root, safe_id)
     backup = work / "previous"
     keep_work = False
     try:
@@ -513,7 +514,7 @@ def uninstall(store, plugin_id: str) -> dict[str, Any]:
                            "action": "uninstall"})
         _move_path(target, backup)
         try:
-            store.delete_plugin(plugin_id)
+            store.delete_plugin(safe_id)
         except Exception as exc:
             try:
                 _move_path(backup, target)
@@ -523,7 +524,7 @@ def uninstall(store, plugin_id: str) -> dict[str, Any]:
                 raise InstallRollbackError(
                     f"{exc}；卸载回滚失败：{rb}。插件目录备份在 {backup}") from exc
             raise
-        return {"ok": True, "id": plugin_id, "removed": True}
+        return {"ok": True, "id": safe_id, "removed": True}
     finally:
         if not keep_work:
             shutil.rmtree(work, ignore_errors=True)

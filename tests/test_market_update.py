@@ -276,6 +276,12 @@ def main() -> int:
             expect_raise(lambda: market.install(store_path, "../id-escape"),
                          "插件 id 带 ../ 应当拒绝安装")
             check(not (sb_path.root / "id-escape").exists(), "插件 id 没把目录建到 plugins 外")
+
+            victim = sb_path.root / "uninstall-victim"
+            victim.mkdir()
+            expect_raise(lambda: market.uninstall(store_path, "../uninstall-victim"),
+                         "插件 id 带 ../ 应当拒绝卸载")
+            check(victim.exists(), "卸载路径穿越没有删到 plugins 外")
         finally:
             store_path.close()
             restore_market(saved_path)
@@ -470,6 +476,14 @@ def main() -> int:
         store2.upsert_plugin("gamma", "0.2.0", "sha-g", source="registry", enabled=1)
         app = create_app(store=store2, plugins_dir=sb2.plugin_root)
         client = TestClient(app)
+
+        victim = sb2.root / "api-uninstall-victim"
+        victim.mkdir()
+        bad_del = client.delete("/api/plugins/..%5Capi-uninstall-victim")
+        check(bad_del.status_code == 400, "DELETE 插件路径穿越返回 400")
+        check(bad_del.json()["error"]["code"] == "uninstall_failed",
+              "DELETE 插件路径穿越错误码")
+        check(victim.exists(), "DELETE 插件路径穿越没有删到 plugins 外")
 
         updates = client.get("/api/market/updates")
         check(updates.status_code == 200, "GET /api/market/updates 200")
