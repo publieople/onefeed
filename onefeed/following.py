@@ -152,7 +152,8 @@ class FollowingRunner:
             if not self._state["running"]:
                 return False
             current = str(self._state.get("owner") or "")
-            if owner and current and current != owner:
+            # 带 owner 的取消只认自己那一轮；current 为空是用户手点的，不能让 Agent 顺手停掉
+            if owner and current != owner:
                 return False
             self._state["cancel_requested"] = True
             for row in self._state["plugins"].values():
@@ -371,7 +372,8 @@ class AccountsRunner:
             if not self._state["running"]:
                 return False
             current = str(self._state.get("owner") or "")
-            if owner and current and current != owner:
+            # 带 owner 的取消只认自己那一轮；current 为空是用户手点的，不能让 Agent 顺手停掉
+            if owner and current != owner:
                 return False
             self._state["cancel_requested"] = True
             for row in self._state["plugins"].values():

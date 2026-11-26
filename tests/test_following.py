@@ -213,6 +213,14 @@ def test_failure_isolation_and_cancel():
     cancelled = [p for p in snap2["plugins"].values() if p["status"] == "cancelled"]
     assert cancelled, "取消后排队中的平台要标成 cancelled"
 
+    # Agent 停止不能顺手停掉用户手点的一轮：用户轮 owner 为空
+    runner3 = FollowingRunner(make_store(), host=slow, limit=10)
+    assert runner3.trigger(force=True)[0]
+    assert runner3.cancel(owner="run-x") is False, "Agent 不能停用户手点的关注流同步"
+    assert runner3.cancel() is True
+    wait_idle(runner3)
+    assert runner3.snapshot()["phase"] == "cancelled"
+
 
 def test_api_following_and_layout_setting():
     store = make_store()
@@ -279,6 +287,17 @@ def test_accounts_runner_and_api():
     assert runner.trigger(force=True)[0]
     wait_idle(runner)
     assert len(store.following_accounts(platform="bilibili", active=None)) == before
+
+    # 关注名单同步同样不能让 Agent 顺手停掉用户手点的一轮
+    slow = FakeHost({"bilibili": [], "zhihu": []}, delay=0.15,
+                    accounts_by_plugin={"bilibili": [account("up1")],
+                                        "zhihu": [account("z1")]})
+    runner_slow = AccountsRunner(make_store(), host=slow)
+    assert runner_slow.trigger(force=True)[0]
+    assert runner_slow.cancel(owner="run-x") is False, "Agent 不能停用户手点的关注名单同步"
+    assert runner_slow.cancel() is True
+    wait_idle(runner_slow)
+    assert runner_slow.snapshot()["phase"] == "cancelled"
 
     client = TestClient(create_app(store))
     client.app.state.accounts = runner
