@@ -17,11 +17,14 @@ export default function RefreshProgress({
   progress,
   hint,
   onRetry,
+  className = "",
 }: {
   progress: RunState | null;
   /** 每变一次就把卡片重新亮出来（运行中再点刷新 → 告诉人「我看到你了」） */
   hint: number;
   onRetry: (platforms: string[]) => void;
+  /** 顶栏在窄屏要收起这件，避免绝对定位的结果胶囊压住导航 */
+  className?: string;
 }) {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [dismissed, setDismissed] = useState(() => {
@@ -176,7 +179,10 @@ export default function RefreshProgress({
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
       style={{ width: show ? width : 0 }}
-      className="absolute right-full top-1/2 -translate-y-1/2 overflow-hidden transition-[width] duration-300 ease-out"
+      className={
+        "absolute right-full top-1/2 -translate-y-1/2 overflow-hidden transition-[width] duration-300 ease-out " +
+        className
+      }
     >
       <div ref={inner} className="w-max">
         <section

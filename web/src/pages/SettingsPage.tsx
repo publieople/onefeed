@@ -132,6 +132,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
     document.title = "设置 · OneFeed";
   }, []);
   const [health, setHealth] = useState<Health | null>(null);
+  const [healthError, setHealthError] = useState("");
   const [plugins, setPlugins] = useState<PluginsResponse | null>(null);
   const [auth, setAuth] = useState<Record<string, AuthState>>({});
   const [authRows, setAuthRows] = useState<string[]>([]);
@@ -155,14 +156,22 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const guardRef = useRef<(to: string) => void>(() => {});
 
   const load = useCallback(async () => {
+    // health 是最先能返回的一块：单独请求，别等插件/设置/登录全齐才显示；
+    // 更不能用 0 冒充“还没回来”。
+    setHealthError("");
+    getJSON<Health>("/api/health")
+      .then((h) => {
+        setHealth(h);
+      })
+      .catch((err: Error) => {
+        setHealthError(err.message);
+      });
     try {
-      const [h, p, s, rowsResp] = await Promise.all([
-        getJSON<Health>("/api/health"),
+      const [p, s, rowsResp] = await Promise.all([
         getJSON<PluginsResponse>("/api/plugins"),
         getJSON<SettingsResponse>("/api/settings"),
         fetchAuthRows().catch(() => ({ rows: [] as AuthRow[] })),
       ]);
-      setHealth(h);
       setPlugins(p);
       // 先摊平冷却表：默认是空的（= 全用内置默认），用户要看到真实的「B 站 5 分钟」。
       const merged: SettingsValues = {
@@ -582,35 +591,47 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             title="运行状态"
             desc="版本与条目数"
             summary={
-              <>
-                <span>{health?.items ?? 0} 条</span>
-                <span className="text-fade">·</span>
-                <span>{health?.plugins ?? 0} 个插件</span>
-                <span className="text-fade">·</span>
-                <span>v{health?.version ?? "—"}</span>
-              </>
+              health ? (
+                <>
+                  <span>{health.items} 条</span>
+                  <span className="text-fade">·</span>
+                  <span>{health.plugins} 个插件</span>
+                  <span className="text-fade">·</span>
+                  <span>v{health.version}</span>
+                </>
+              ) : (
+                <span className={healthError ? "text-danger" : "text-fade"}>
+                  {healthError ? "状态没取到" : "检查中…"}
+                </span>
+              )
             }
             open={Boolean(open.status)}
             onToggle={() => setOpen((prev) => ({ ...prev, status: !prev.status }))}
           >
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px]">
+            <dl
+              className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px]"
+              aria-busy={!health && !healthError}
+            >
               <div className="flex justify-between">
                 <dt className="text-fade">版本</dt>
-                <dd>{health?.version ?? "—"}</dd>
+                <dd>{health ? health.version : healthError ? "—" : "检查中…"}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-fade">条目</dt>
-                <dd>{health?.items ?? 0}</dd>
+                <dd>{health ? health.items : healthError ? "—" : "检查中…"}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-fade">插件</dt>
-                <dd>{health?.plugins ?? 0}</dd>
+                <dd>{health ? health.plugins : healthError ? "—" : "检查中…"}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-fade">模式</dt>
-                <dd>{health?.demo ? "离线演示" : "联网"}</dd>
+                <dd>{health ? (health.demo ? "离线演示" : "联网") : healthError ? "—" : "检查中…"}</dd>
               </div>
             </dl>
+            {healthError ? (
+              <p className="mt-2 text-[12px] leading-relaxed text-danger">状态没取到：{healthError}</p>
+            ) : null}
             <div className="mt-3 flex gap-2">
               <button onClick={ctx.refresh} className="flex h-9 items-center gap-1.5 rounded-lg bg-solid px-3.5 text-[13px] text-solid-fg">
                 <RefreshCw size={13} />

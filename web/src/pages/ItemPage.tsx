@@ -718,7 +718,7 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
-  const [tab, setTab] = useState<"summary" | "source">("summary");
+  const [tab, setTab] = useState<"summary" | "source" | null>(null);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryError, setSummaryError] = useState("");
@@ -736,6 +736,11 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
    */
   const [favOpen, setFavOpen] = useState(false);
   const [fav, setFav] = useState<{ favorited: boolean; note: string } | null>(null);
+
+  // 换一条内容时回到「按内容类型决定」的默认 Tab，不把上一条的手动选择带过去
+  useEffect(() => {
+    setTab(null);
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -1171,6 +1176,10 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
   const images = payload?.images?.length
     ? payload.images.map((_, index) => mediaBase + "/img-" + index)
     : item.images;
+  // 图文帖子的主体就是图：默认落在「AI 总结」会让首屏只剩标题和一段总结，
+  // 用户得先找到「原文」才看得到内容。视频/文章仍默认总结，图文默认原文。
+  const defaultTab = item.kind === "images" && images.length > 0 ? "source" : "summary";
+  const activeTab = tab ?? defaultTab;
   const p = platform(item.platform);
   const favorited = fav ? fav.favorited : Boolean(item.favorited);
   const favNote = fav ? fav.note : item.favorite_note ?? "";
@@ -1304,10 +1313,10 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
             <button
               key={key}
               onClick={() => setTab(key)}
-              aria-pressed={tab === key}
+              aria-pressed={activeTab === key}
               className={
                 "rounded-full px-3 py-1 transition-colors duration-150 " +
-                (tab === key ? "bg-solid text-solid-fg" : "text-muted hover:text-ink")
+                (activeTab === key ? "bg-solid text-solid-fg" : "text-muted hover:text-ink")
               }
             >
               {label}
@@ -1321,7 +1330,7 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
         </div>
       </div>
 
-      {tab === "summary" ? (
+      {activeTab === "summary" ? (
         <div key="summary" className="rise">
         <SummaryPanel
           data={summary}
@@ -1371,7 +1380,7 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
         </div>
       ) : null}
 
-      {tab === "source" ? (
+      {activeTab === "source" ? (
       <div key="source" className="rise">
       <>
       {detailLoading ? (
