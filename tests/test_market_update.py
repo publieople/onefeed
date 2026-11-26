@@ -231,6 +231,32 @@ def main() -> int:
             restore_market(saved_cache)
             sb_cache.cleanup()
 
+        # ---------------------------------------- 没有 sha256 时不复用缓存：换了包也得重新下
+        sb_nohash = Sandbox()
+        saved_nohash = patch_market(sb_nohash)
+        store_nohash = Store(Path(_TMP_STATE) / "market-nohash.db")
+        try:
+            entry = sb_nohash.add_remote("nohash", "1.0.0")
+            entry.pop("sha256", None)
+            market.install(store_nohash, "nohash")
+            check(json.loads((sb_nohash.plugin_root / "nohash" / "plugin.json")
+                             .read_text(encoding="utf-8"))["version"] == "1.0.0",
+                  "无 sha：第一版装好")
+            entry = sb_nohash.add_remote("nohash", "1.1.0")
+            entry.pop("sha256", None)
+            bumped = market.update(store_nohash, "nohash")
+            check(bumped["changed"] is True and bumped["to"] == "1.1.0",
+                  "无 sha：registry 升版后仍能更新")
+            on_disk = json.loads((sb_nohash.plugin_root / "nohash" / "plugin.json")
+                                 .read_text(encoding="utf-8"))
+            check(on_disk["version"] == "1.1.0", "无 sha：装的是新包而不是缓存里的旧包")
+            check(not list((_cache_dir() / "plugins").glob("nohash-*")),
+                  "无 sha：不写也清掉 nohash 缓存")
+        finally:
+            store_nohash.close()
+            restore_market(saved_nohash)
+            sb_nohash.cleanup()
+
         # ------------------------------------------------------- 批量更新：一个失败不影响另一个
         sb.add_remote("alpha", "1.1.0")
         sb.add_remote("beta", "2.0.0")

@@ -338,6 +338,15 @@ def install(store, plugin_id: str) -> dict[str, Any]:
     cache_root = _cache_dir() / "plugins"
     cache_key = f"{plugin_id}-{(expected or 'nohash')[:12]}"
     cached = cache_root / cache_key
+    # 没有 sha256 时无法判断缓存是不是 registry 上那一版，命中缓存就可能
+    # 把上一版的旧包当成新版装进去，而且以后每次都命中、永远更新不了。
+    # 这种条目干脆不复用缓存，每次都重新下载；顺手清掉旧的 nohash 缓存。
+    use_cache = bool(expected)
+    if not use_cache and _path_exists(cached):
+        try:
+            _remove_path(cached)
+        except OSError:
+            pass
     work = _work_dir(target_root, plugin_id)
     staging = work / "new"
     backup = work / "previous"
@@ -348,7 +357,7 @@ def install(store, plugin_id: str) -> dict[str, Any]:
     try:
         _write_meta(work, {"plugin_id": plugin_id, "target": str(target),
                            "action": "install"})
-        if (cached / "plugin.json").exists():
+        if use_cache and (cached / "plugin.json").exists():
             shutil.copytree(cached, staging)
         else:
             files = _remote_files(plugin_id)
@@ -389,7 +398,8 @@ def install(store, plugin_id: str) -> dict[str, Any]:
         raise
     warning = ""
     try:
-        _refresh_cache(plugin_id, target, cached, cache_root)
+        if use_cache:
+            _refresh_cache(plugin_id, target, cached, cache_root)
     except Exception as exc:  # 缓存失败只降级，不影响已经装好的插件
         warning = f"缓存没更新成功：{type(exc).__name__}: {exc}"[:200]
     try:
