@@ -25,6 +25,32 @@ ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 HOST_RE = re.compile(r"^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 
+# 清单只描述"要读哪个插件自己的文件"，不能拿它当任意文件读/命令执行的入口。
+STATE_TOKEN = "${state}"
+APP_TOKEN = "${appdata}"
+LOCALAPP_TOKEN = "${localappdata}"
+HOME_TOKEN = "${home}"
+SEED_TO_PREFIX = STATE_TOKEN + "/"
+SEED_FROM_PREFIXES = (STATE_TOKEN + "/", APP_TOKEN + "/", LOCALAPP_TOKEN + "/", HOME_TOKEN + "/")
+
+CLI_BANNED_COMMANDS = re.compile(
+    r"^(?:python|pythonw|pypy|py|node|nodejs|deno|bun|powershell|pwsh|cmd|bash|sh|zsh|fish|"
+    r"perl|ruby|php|wscript|cscript|mshta|rundll32|regsvr32|curl|wget|certutil|bitsadmin|"
+    r"schtasks|wmic|reg|sc|netsh|taskkill)(?:[\d.]*)?(?:\.exe)?$",
+    re.I,
+)
+CLI_ENV_DENY = {
+    "PATH", "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONEXECUTABLE",
+    "NODE_OPTIONS", "NODE_PATH", "LD_PRELOAD", "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "COMSPEC", "PATHEXT", "SHELL",
+    "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
+    "SYSTEMROOT", "WINDIR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+}
+
+
+def _has_parent_ref(value: str) -> bool:
+    return ".." in re.split(r"[\\/]+", value)
+
 
 class ManifestError(ValueError):
     """清单不合法；消息面向插件作者，带上具体字段名。"""
@@ -150,6 +176,8 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
             errors.append("cli.allow 必须是字符串数组的数组，例如 [[\"bili\"]]")
         elif any(not a or "/" in a[0] or "\\" in a[0] for a in allow):
             errors.append("cli.allow 每项第一段必须是不带路径的裸命令名（如 bili）")
+        elif any(CLI_BANNED_COMMANDS.match(a[0]) for a in allow):
+            errors.append("cli.allow 不允许解释器/下载器（python/node/powershell/cmd/curl 等）")
 
     cli_env = data.get("cli", {}).get("env")
     if cli_env is not None:
@@ -157,6 +185,16 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
             isinstance(k, str) and isinstance(v, str) for k, v in cli_env.items()
         ):
             errors.append("cli.env 必须是 \"变量名 -> 值\" 的对象，值只能是字符串")
+        else:
+            bad_keys = sorted(k for k in cli_env if k.upper() in CLI_ENV_DENY)
+            if bad_keys:
+                errors.append(f"cli.env 不允许覆盖这些环境变量：{bad_keys}")
+            if any(
+                _has_parent_ref(v)
+                and any(v.startswith(p) for p in SEED_FROM_PREFIXES)
+                for v in cli_env.values()
+            ):
+                errors.append("cli.env 里以占位符开头的路径不允许包含 ..")
 
     cli_seed = data.get("cli", {}).get("seed")
     if cli_seed is not None:
@@ -165,9 +203,18 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
             for s in cli_seed
         ):
             errors.append("cli.seed 必须是 [{\"from\": \"…\", \"to\": \"…\"}] 数组")
-        elif any(not s["to"].startswith("${state}") for s in cli_seed):
-            # 只允许把文件复制到宿主的私有状态目录里，不能往系统任意位置写
-            errors.append("cli.seed 的 to 必须以 ${state}/ 开头（只能写宿主的私有状态目录）")
+        else:
+            for s in cli_seed:
+                # 源只允许宿主的私有目录/用户目录；目标只允许宿主状态目录。
+                if not any(s["from"].startswith(p) for p in SEED_FROM_PREFIXES):
+                    errors.append(f"cli.seed.from 必须以 {STATE_TOKEN}/、{APP_TOKEN}/、{LOCALAPP_TOKEN}/ 或 {HOME_TOKEN}/ 开头：{s['from']!r}")
+                elif _has_parent_ref(s["from"]):
+                    errors.append(f"cli.seed.from 不允许包含 ..：{s['from']!r}")
+                if not s["to"].startswith(SEED_TO_PREFIX):
+                    # 只允许把文件复制到宿主的私有状态目录里，不能往系统任意位置写
+                    errors.append(f"cli.seed 的 to 必须以 {STATE_TOKEN}/ 开头（只能写宿主的私有状态目录）")
+                elif _has_parent_ref(s["to"]):
+                    errors.append(f"cli.seed.to 不允许包含 ..：{s['to']!r}")
 
     kinds = data.get("kinds")
     if not isinstance(kinds, list) or not kinds:
@@ -224,6 +271,11 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
         for s in settings:
             if not isinstance(s, dict) or not s.get("key"):
                 errors.append(f"settings 每项必须有 key：{s!r}")
+                continue
+            default = s.get("default")
+            if s.get("key") in {"cookieFile", "browserProfile"} and isinstance(default, str) and default:
+                if not default.startswith(SEED_TO_PREFIX) or _has_parent_ref(default):
+                    errors.append(f"settings.{s['key']} 默认值必须落在 {STATE_TOKEN}/ 下且不能包含 ..")
 
     return errors
 

@@ -246,6 +246,44 @@ def _expand(value: str, plugin_id: str) -> str:
     return out
 
 
+_STATE_TOKEN = "${state}"
+
+
+def _has_parent_ref(value: str) -> bool:
+    return ".." in re.split(r"[\\/]+", value)
+
+
+def _state_path(value: str, plugin_id: str, field: str) -> Path:
+    """只允许落在 state_root() 内的路径；解析后还要再查一次，防 ../ 和符号链接。"""
+    raw = _expand(str(value), plugin_id)
+    root = state_root().resolve()
+    path = Path(raw).expanduser()
+    try:
+        resolved = path.resolve()
+    except OSError as exc:
+        raise PermissionError(f"{field} 不是可解析的路径：{value!r}") from exc
+    if resolved == root or not resolved.is_relative_to(root):
+        raise PermissionError(f"{field} 必须落在插件状态目录内：{value!r}")
+    return resolved
+
+
+def _seed_source_path(value: str, plugin_id: str) -> Path:
+    """seed 的源只允许来自状态目录、AppData、LocalAppData 或用户主目录。"""
+    roots = [state_root().resolve(), Path.home().resolve()]
+    for key in ("APPDATA", "LOCALAPPDATA"):
+        raw = os.environ.get(key, "")
+        if raw:
+            roots.append(Path(raw).resolve())
+    path = Path(_expand(str(value), plugin_id)).expanduser()
+    try:
+        resolved = path.resolve()
+    except OSError as exc:
+        raise PermissionError(f"cli.seed.from 不是可解析的路径：{value!r}") from exc
+    if not any(resolved.is_relative_to(root) for root in roots):
+        raise PermissionError(f"cli.seed.from 不在允许的目录内：{value!r}")
+    return resolved
+
+
 def seed_cli_files(manifest: Manifest) -> list[str]:
     """把本机的 CLI 配置（登录凭证之类）复制进宿主的私有目录。
 
@@ -255,8 +293,11 @@ def seed_cli_files(manifest: Manifest) -> list[str]:
     """
     copied: list[str] = []
     for entry in manifest.cli_seed:
-        src = Path(_expand(entry["from"], manifest.id))
-        dst = Path(_expand(entry["to"], manifest.id))
+        try:
+            src = _seed_source_path(entry["from"], manifest.id)
+            dst = _state_path(entry["to"], manifest.id, "cli.seed.to")
+        except PermissionError:
+            continue
         if not src.is_file():
             continue
         try:
@@ -465,7 +506,7 @@ class Capabilities:
         cookie_file = self.settings.get("cookieFile")
         if not cookie_file:
             return
-        path = Path(_expand(str(cookie_file), self.manifest.id))
+        path = _state_path(str(cookie_file), self.manifest.id, "cookieFile")
         if not path.is_file():
             return
         try:
@@ -500,12 +541,13 @@ class Capabilities:
         exe = argv[0]
         resolved = _which(exe) or exe
         env = clean_env()
-        state = str(state_root())
         for key, raw in self.manifest.cli_env.items():
-            value = _expand(raw, self.manifest.id)
-            env[key] = value
-            if value.startswith(state):
+            if raw.startswith(_STATE_TOKEN):
+                value = str(_state_path(raw, self.manifest.id, f"cli.env.{key}"))
                 Path(value).mkdir(parents=True, exist_ok=True)
+            else:
+                value = _expand(raw, self.manifest.id)
+            env[key] = value
         seeded = seed_cli_files(self.manifest)
         if seeded:
             self.log("info", "cli 初始化 " + ",".join(seeded))
@@ -536,6 +578,12 @@ class Capabilities:
         with BROWSER_LOCK:
             return self._browser_locked(req)
 
+    def _browser_profile_path(self) -> str:
+        raw = self.settings.get("browserProfile")
+        if raw:
+            return str(_state_path(str(raw), self.manifest.id, "browserProfile"))
+        return str(browser_profile(self.manifest.id))
+
     def _browser_locked(self, req: dict[str, Any]) -> dict[str, Any]:
         """粗粒度抓取：打开一个页面、等指定响应、滚几屏、把 JSON body 交回去。
 
@@ -558,8 +606,7 @@ class Capabilities:
         settle_ms = min(int(req.get("settleMs") or 2500), 15000)
         want_html = bool(req.get("html"))
 
-        profile = self.settings.get("browserProfile") or str(
-            browser_profile(self.manifest.id))
+        profile = self._browser_profile_path()
         Path(profile).mkdir(parents=True, exist_ok=True)
 
         bodies: list[dict[str, Any]] = []
@@ -695,7 +742,7 @@ class Capabilities:
 
         timeout_ms = min(int(req.get("timeoutMs") or 45000), 90000)
         settle_ms = min(int(req.get("settleMs") or spec.get("settleMs") or 3000), 15000)
-        profile = self.settings.get("browserProfile") or str(browser_profile(self.manifest.id))
+        profile = self._browser_profile_path()
         Path(profile).mkdir(parents=True, exist_ok=True)
 
         ensure_temp_env()
@@ -727,7 +774,7 @@ class Capabilities:
         """
         raw = self.settings.get("cookieFile")
         if raw:
-            path = Path(_expand(str(raw), self.manifest.id))
+            path = _state_path(str(raw), self.manifest.id, "cookieFile")
             if path.is_file():
                 return path
         fallback = state_root() / "cookies" / f"{self.manifest.id}.json"

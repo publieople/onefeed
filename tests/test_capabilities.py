@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from plugin_runtime import capabilities  # noqa: E402
 from plugin_runtime.capabilities import Capabilities, _GuardedRedirect, _is_public_http  # noqa: E402
+from plugin_runtime.manifest import APP_TOKEN, STATE_TOKEN, validate_manifest  # noqa: E402
 
 VERBOSE = "--verbose" in sys.argv
 CHECKS = 0
@@ -122,6 +123,86 @@ def test_http_redirect_is_rechecked() -> None:
         thread.join(timeout=2)
 
 
+def _base_manifest() -> dict:
+    return {
+        "schemaVersion": 1,
+        "id": "demo",
+        "name": "Demo",
+        "version": "1.0.0",
+        "capabilities": ["cli"],
+        "kinds": ["short"],
+        "feeds": [{"id": "main", "name": "Main"}],
+        "entry": "index.js",
+    }
+
+
+def test_manifest_seed_boundaries() -> None:
+    data = _base_manifest()
+    data["cli"] = {
+        "allow": [["bili", "feed"]],
+        "seed": [{"from": APP_TOKEN + "/bili/credential.json",
+                  "to": STATE_TOKEN + "/toolhome/credential.json"}],
+    }
+    check(validate_manifest(data) == [], "官方形态的 seed 可以通过")
+
+    bad_to = _base_manifest()
+    bad_to["cli"] = {
+        "allow": [["bili"]],
+        "seed": [{"from": APP_TOKEN + "/bili/credential.json",
+                  "to": STATE_TOKEN + "/../escape.json"}],
+    }
+    errors = validate_manifest(bad_to)
+    check(any("seed.to" in e and ".." in e for e in errors), "seed.to 含 .. 被拒绝")
+
+    bad_from = _base_manifest()
+    bad_from["cli"] = {
+        "allow": [["bili"]],
+        "seed": [{"from": "C:\\\\Windows\\\\win.ini", "to": STATE_TOKEN + "/x"}],
+    }
+    errors = validate_manifest(bad_from)
+    check(any("seed.from" in e for e in errors), "seed.from 指向系统目录被拒绝")
+
+
+def test_manifest_command_and_env_boundaries() -> None:
+    bad_cmd = _base_manifest()
+    bad_cmd["cli"] = {"allow": [["python", "-c", "print(1)"]]}
+    errors = validate_manifest(bad_cmd)
+    check(any("解释器" in e for e in errors), "cli.allow 拒绝 python")
+
+    bad_env = _base_manifest()
+    bad_env["cli"] = {"allow": [["bili"]], "env": {"PYTHONPATH": "/tmp"}}
+    errors = validate_manifest(bad_env)
+    check(any("PYTHONPATH" in e for e in errors), "cli.env 拒绝 PYTHONPATH")
+
+    bad_setting = _base_manifest()
+    bad_setting["settings"] = [{"key": "cookieFile", "default": "C:\\\\secret.json"}]
+    errors = validate_manifest(bad_setting)
+    check(any("cookieFile" in e for e in errors), "cookieFile 默认值必须在 state 下")
+
+
+def test_runtime_paths_are_confined() -> None:
+    root = capabilities.state_root().resolve()
+    token = capabilities._STATE_TOKEN
+    check(capabilities._state_path(token + "/ok", "demo", "test") == root / "ok",
+          "state 内路径放行")
+    for bad in (token + "/../escape", token + "/..", str(root.parent / "escape")):
+        try:
+            capabilities._state_path(bad, "demo", "test")
+        except PermissionError:
+            check(True, f"state 外路径被拒绝：{bad}")
+        else:
+            check(False, f"state 外路径应被拒绝：{bad}")
+
+    check(capabilities._seed_source_path(token + "/seed.json", "demo") == root / "seed.json",
+          "seed 源允许 state 内文件")
+    try:
+        capabilities._seed_source_path("C:\\\\Windows\\\\win.ini", "demo")
+    except PermissionError:
+        check(True, "seed 源拒绝系统目录")
+    else:
+        check(False, "seed 源应拒绝系统目录")
+
+
 def main() -> int:
     try:
         test_blocks_private_targets()
@@ -129,6 +210,9 @@ def main() -> int:
         test_dns_failure_is_closed()
         test_redirect_guard_blocks_private()
         test_http_redirect_is_rechecked()
+        test_manifest_seed_boundaries()
+        test_manifest_command_and_env_boundaries()
+        test_runtime_paths_are_confined()
     except AssertionError as exc:
         print(f"FAIL {exc}")
         return 1
