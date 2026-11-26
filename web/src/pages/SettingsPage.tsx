@@ -145,6 +145,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const [runs, setRuns] = useState<AgentRunRow[]>([]);
   const reduce = useReducedMotion();
   const copyTimer = useRef(0);
+  const formRef = useRef<SettingsValues | null>(null);
   const navigate = useNavigate();
   // 没保存就站内离开时的三道拦截：链接点击、浏览器返回、关标签页（beforeunload 在下面）
   const dirtyRef = useRef(false);
@@ -163,17 +164,17 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
       ]);
       setHealth(h);
       setPlugins(p);
-      setForm((prev) => {
-        if (prev) return prev;
-        // 冷却表默认是空的（= 全用内置默认），这里把生效值摊平出来，
-        // 用户看到的是真实的「B 站 5 分钟」，而不是一片空白。
-        const merged: SettingsValues = {
-          ...s.settings,
-          platform_intervals: { ...(s.intervals ?? {}), ...(s.settings.platform_intervals ?? {}) },
-        };
+      // 先摊平冷却表：默认是空的（= 全用内置默认），用户要看到真实的「B 站 5 分钟」。
+      const merged: SettingsValues = {
+        ...s.settings,
+        platform_intervals: { ...(s.intervals ?? {}), ...(s.settings.platform_intervals ?? {}) },
+      };
+      // 没有未保存改动时才跟随外部设置刷新；有改动就以用户正在编辑的值为准。
+      if (!formRef.current || !dirtyRef.current) {
+        formRef.current = merged;
+        setForm(merged);
         setBaseline(JSON.stringify(merged));
-        return merged;
-      });
+      }
       // 行清单以后端 /api/auth 为准：有登录流程的平台由后端登记，前端别再抄一份名单。
       // 老后端没有该接口时退回已装插件，至少不会把整个登录区弄没。
       const candidates = rowsResp.rows.length ? rowsResp.rows.map((r) => r.plugin) : p.installed.map((i) => i.id);
@@ -190,6 +191,10 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
       setNote((err as Error).message);
     }
   }, []);
+
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
 
   useEffect(() => {
     void load();
