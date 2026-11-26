@@ -169,6 +169,25 @@ def _remote_files(plugin_id: str) -> list[tuple[str, str]]:
     return files
 
 
+def _safe_plugin_id(plugin_id: str) -> str:
+    """插件 id 只当单层目录名用；带分隔符/盘符的 id 不许拼进安装路径。"""
+    pid = str(plugin_id or "").strip()
+    if not pid or pid in (".", "..") or any(ch in pid for ch in ("/", "\\", ":", "\x00")):
+        raise RuntimeError(f"插件 id 不是合法目录名：{plugin_id!r}")
+    return pid
+
+
+def _safe_rel_path(name: str) -> Path:
+    """远端包里的文件只能是包内相对路径；反斜杠在 Windows 上也当分隔符。"""
+    raw = str(name or "").replace("\\", "/").strip()
+    parts = [part for part in raw.split("/") if part not in ("", ".")]
+    if (not raw or raw.startswith("/") or re.match(r"^[A-Za-z]:", raw)
+            or not parts or ".." in parts
+            or any(":" in part or "\x00" in part for part in parts)):
+        raise RuntimeError(f"插件包里的文件路径不安全：{name!r}")
+    return Path(*parts)
+
+
 def plugins_root() -> Path:
     """安装目标目录跟随设置；设置里留空就用宿主默认查找顺序。"""
     try:
@@ -327,7 +346,8 @@ def install(store, plugin_id: str) -> dict[str, Any]:
         raise RuntimeError(f"registry 里没有 {plugin_id}")
     target_root = plugins_root()
     target_root.mkdir(parents=True, exist_ok=True)
-    target = target_root / plugin_id
+    safe_id = _safe_plugin_id(plugin_id)
+    target = target_root / safe_id
     expected = str(entry.get("sha256") or "")
     # 更新不能把用户关掉的插件又打开：先记住现有 enabled，写库时带回去
     previous = next((p for p in store.list_plugins() if p["id"] == plugin_id), None)
@@ -362,8 +382,9 @@ def install(store, plugin_id: str) -> dict[str, Any]:
         else:
             files = _remote_files(plugin_id)
             for name, url in files:
-                (staging / name).parent.mkdir(parents=True, exist_ok=True)
-                (staging / name).write_bytes(_http_bytes(url))
+                dest = staging / _safe_rel_path(name)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(_http_bytes(url))
         if not (staging / "plugin.json").exists():
             raise RuntimeError("下载到的内容里没有 plugin.json")
         actual = dir_hash(staging)

@@ -256,6 +256,30 @@ def main() -> int:
             store_nohash.close()
             restore_market(saved_nohash)
             sb_nohash.cleanup()
+        # ------------------------------------ 远端文件名/插件 id 不能带路径穿越
+        sb_path = Sandbox()
+        saved_path = patch_market(sb_path)
+        store_path = Store(Path(_TMP_STATE) / "market-path.db")
+        try:
+            entry = sb_path.add_remote("evil", "1.0.0")
+            entry.pop("sha256", None)
+            sb_path.remote["evil"]["../../escape.txt"] = b"escape"
+            expect_raise(lambda: market.install(store_path, "evil"),
+                         "包内 ../ 路径应当拒绝安装")
+            check(not (sb_path.root / "escape.txt").exists(), "包内 ../ 没把文件写到包外")
+
+            sb_path.registry_entries.append({
+                "id": "../id-escape", "name": "evil", "version": "1.0.0",
+                "description": "", "author": "", "kinds": [], "capabilities": [],
+                "features": [], "feeds": [], "sha256": "",
+            })
+            expect_raise(lambda: market.install(store_path, "../id-escape"),
+                         "插件 id 带 ../ 应当拒绝安装")
+            check(not (sb_path.root / "id-escape").exists(), "插件 id 没把目录建到 plugins 外")
+        finally:
+            store_path.close()
+            restore_market(saved_path)
+            sb_path.cleanup()
 
         # ------------------------------------------------------- 批量更新：一个失败不影响另一个
         sb.add_remote("alpha", "1.1.0")
