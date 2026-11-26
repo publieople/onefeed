@@ -290,28 +290,52 @@ def clamp(value: Any) -> int:
 
 
 def _is_public_http(url: str) -> bool:
-    """只允许 http(s)，且不允许指向本机/内网（插件不该能扫宿主内网）。"""
+    """只允许 http(s)，且不允许指向本机/内网（插件不该能扫宿主内网）。
+
+    解析失败按拒绝处理：交给请求阶段报错时，请求已经发出去了，等于没拦。
+    """
     try:
         parsed = urllib.parse.urlparse(url)
     except ValueError:
         return False
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return False
-    host = parsed.hostname
-    if host in ("localhost",) or host.endswith(".local"):
+    if parsed.username or parsed.password:
+        return False
+    host = parsed.hostname.strip().lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith(".local") or host.endswith(".localhost"):
         return False
     try:
-        infos = socket.getaddrinfo(host, None)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return False
+    if port == 0:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError:
-        return True  # 解析不了就交给请求阶段报错
+        return False
+    if not infos:
+        return False
     for info in infos:
         try:
-            ip = ipaddress.ip_address(info[4][0])
+            ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
         except ValueError:
-            continue
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+        # is_global 对 224.0.0.1 也是 True，组播必须单独拦。
+        if not ip.is_global or ip.is_multicast:
             return False
     return True
+
+
+class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """urllib 默认替我们跟随 302；每一跳都得重新过公网校验。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urljoin(req.full_url, newurl or "")
+        if not _is_public_http(target):
+            raise PermissionError(f"拒绝跳转到非公网地址: {target[:120]}")
+        return super().redirect_request(req, fp, code, msg, headers, target)
 
 
 class Capabilities:
@@ -403,7 +427,8 @@ class Capabilities:
         # 直连优先；失败再试本机常见代理（Clash 7890 / v2ray 10809）
         for proxy in PROXY_CANDIDATES:
             handlers = {"http": proxy, "https": proxy} if proxy else {}
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler(handlers))
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler(handlers), _GuardedRedirect)
             request = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
                 with opener.open(request, timeout=timeout) as resp:
@@ -413,6 +438,9 @@ class Capabilities:
                         raise ValueError("响应体超过 5MB，已截断拒绝")
                     return {"status": resp.status, "text": text,
                             "headers": {k.lower(): v for k, v in resp.headers.items()}}
+            except PermissionError:
+                # 重定向被公网校验拦下：不要再换代理重试，直接告诉插件。
+                raise
             except urllib.error.HTTPError as exc:
                 text = exc.read()[:MAX_BODY_BYTES].decode("utf-8", "replace")
                 return {"status": exc.code, "text": text,
@@ -519,8 +547,8 @@ class Capabilities:
         if not patterns:
             raise ValueError("browser.capture 需要至少一个 patterns（正则）")
         url = str(req.get("url") or "")
-        if not url.startswith(("http://", "https://")):
-            raise ValueError("browser.capture 需要 http(s) url")
+        if not _is_public_http(url):
+            raise PermissionError(f"拒绝打开非公网地址: {url[:120]}")
 
         scroll = req.get("scroll") or {}
         scroll_times = min(int(scroll.get("times") or 0), 10)
