@@ -171,6 +171,13 @@ def test_runner_syncs_marks_and_respects_cooldown():
     again, cooled = runner.trigger()
     assert again is False and "冷却" in cooled["error"]
 
+    # 没请求的平台冷却更短时，不能拿它来缩短提示：只同步 bilibili 就该按 bilibili 的剩余时间说
+    store.conn.execute("UPDATE following_runs SET finished_at = ? WHERE plugin = 'zhihu'",
+                       (now - 240,))
+    store.conn.commit()
+    again, cooled = runner.trigger(platforms=["bilibili"])
+    assert again is False and "5 分钟" in cooled["error"], cooled.get("error")
+
 
 def test_failure_isolation_and_cancel():
     store = make_store()

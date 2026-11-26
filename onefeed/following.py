@@ -119,7 +119,8 @@ class FollowingRunner:
                         cooling.append(pid)
                 active = [pid for pid in active if pid not in cooling]
             if not active:
-                left = min(self.cooldown_left(pid) for pid in supported) if supported else 0
+                # 只按这次真正要同步的平台算，别把没请求的平台的剩余冷却也算进来
+                left = min(self.cooldown_left(pid) for pid in cooling) if cooling else 0
                 self._state.update({
                     "running": False, "phase": "empty", "started_at": 0,
                     "finished_at": int(time.time()), "done": 0, "total": 0,
@@ -338,7 +339,8 @@ class AccountsRunner:
                         cooling.append(pid)
                 active = [pid for pid in active if pid not in cooling]
             if not active:
-                left = min(self.cooldown_left(pid) for pid in supported) if supported else 0
+                # 只按这次真正要同步的平台算，别把没请求的平台的剩余冷却也算进来
+                left = min(self.cooldown_left(pid) for pid in cooling) if cooling else 0
                 self._state.update({
                     "running": False, "phase": "empty", "started_at": 0,
                     "finished_at": int(time.time()), "done": 0, "total": 0,
