@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * 交互质量门禁（静态）：规则都对应真实故障，不是审美偏好。
@@ -8,8 +9,9 @@ import path from "node:path";
  *   3. motion-token：时长必须走 DUR.*，否则全站动效节奏会各写各的。
  * 例外：同一行或上一行写 ui-lint-ignore 即可豁免（图片、平台色底上的白字属于例外）。
  */
-// 从脚本位置推 web/ 根，这样在仓库根或 web/ 里执行都行
-const web = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..");
+// 从脚本位置推 web/ 根，这样在仓库根或 web/ 里执行都行。
+// 不能用 URL.pathname：仓库路径带空格时它会把空格编码成 %20，Windows 上直接 ENOENT。
+const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = path.join(web, "src");
 const walk = (d) =>
   fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
