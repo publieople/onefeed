@@ -179,6 +179,32 @@ def main() -> int:
         finally:
             shutil.rmtree(victim, ignore_errors=True)
 
+        # 评论缓存必须有上限：键按 item_id/limit/cursor 增长，无限加就是内存泄漏。
+        from onefeed import api as api_mod  # noqa: PLC0415
+
+        old_max = api_mod.COMMENT_CACHE_MAX
+        old_cache = dict(api_mod._COMMENT_CACHE)
+        try:
+            api_mod.COMMENT_CACHE_MAX = 3
+            api_mod._COMMENT_CACHE.clear()
+            for i in range(5):
+                api_mod._remember_comment((f"cap{i}", 20, ""), 1000.0 + i, {"i": i})
+            check(len(api_mod._COMMENT_CACHE) == 3, "评论缓存超上限后只留 3 条")
+            check({k[0] for k in api_mod._COMMENT_CACHE} == {"cap2", "cap3", "cap4"},
+                  "评论缓存淘汰最旧的键")
+
+            api_mod._COMMENT_CACHE.clear()
+            api_mod.COMMENT_CACHE_MAX = 2
+            api_mod._COMMENT_CACHE[("stale", 20, "")] = (1000.0 - api_mod.COMMENT_TTL - 1, {})
+            api_mod._COMMENT_CACHE[("fresh", 20, "")] = (1000.0, {})
+            api_mod._remember_comment(("new", 20, ""), 1000.0, {})
+            check("stale" not in {k[0] for k in api_mod._COMMENT_CACHE}, "评论缓存超限时先清过期")
+            check(len(api_mod._COMMENT_CACHE) == 2, "清过期后缓存仍在容量内")
+        finally:
+            api_mod.COMMENT_CACHE_MAX = old_max
+            api_mod._COMMENT_CACHE.clear()
+            api_mod._COMMENT_CACHE.update(old_cache)
+
         # 前端未构建时的根路径
         if not WEB_DIST.is_dir():
             root = client.get("/")

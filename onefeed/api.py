@@ -28,6 +28,23 @@ router = APIRouter(prefix="/api")
 # 评论不像信息流那样每分钟在变，缓存十分钟，省掉反复起子进程的开销。
 _COMMENT_CACHE: dict[tuple[str, int, str], tuple[float, dict[str, Any]]] = {}
 COMMENT_TTL = 600
+# 缓存按条目的 item_id/limit/cursor 分键，翻得越多键越多；用户可能连着刷几百条。
+# 不设上限就是内存泄漏，因此超过上限时先清过期，再按写入时间淘汰最旧的。
+COMMENT_CACHE_MAX = 256
+_COMMENT_LOCK = threading.Lock()
+
+
+def _remember_comment(key: tuple[str, int, str], now: float, payload: dict[str, Any]) -> None:
+    with _COMMENT_LOCK:
+        _COMMENT_CACHE[key] = (now, payload)
+        if len(_COMMENT_CACHE) <= COMMENT_CACHE_MAX:
+            return
+        for stale_key in [k for k, (ts, _) in _COMMENT_CACHE.items() if now - ts >= COMMENT_TTL]:
+            _COMMENT_CACHE.pop(stale_key, None)
+        while len(_COMMENT_CACHE) > COMMENT_CACHE_MAX:
+            oldest = min(_COMMENT_CACHE, key=lambda k: _COMMENT_CACHE[k][0])
+            _COMMENT_CACHE.pop(oldest, None)
+
 
 # 详情比评论变得还慢；6 小时足够，刷新按钮会显式 refresh=1 绕过。
 DETAIL_TTL = 6 * 3600
@@ -1044,7 +1061,7 @@ def item_comments(request: Request, item_id: str, limit: int = Query(20, ge=1, l
     items = page["items"]
     payload = {"supported": True, "items": items, "count": len(items),
                "limit": limit, "next": page["next"]}
-    _COMMENT_CACHE[key] = (now, payload)
+    _remember_comment(key, now, payload)
     return payload
 
 
