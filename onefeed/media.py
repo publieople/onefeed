@@ -135,6 +135,8 @@ def _host_allowed(host: str, patterns: list[str]) -> bool:
 
 IMAGE_CACHE_TTL = 6 * 3600      # 图片字节缓存 6 小时：签名直链会过期，重取一次比整条总结失败划算
 IMAGE_MAX_BYTES = 8 * 1024 * 1024
+# 图片缓存只增不减会占满状态目录；每轮采集结束顺手清理：过期全删，再按数量上限淘汰最旧。
+IMAGE_CACHE_MAX_FILES = 512
 
 
 def _image_cache_dir() -> Path:
@@ -170,6 +172,44 @@ def _write_cached_image(key: str, raw: bytes) -> None:
         (_image_cache_dir() / (digest + ".bin")).write_bytes(raw)
     except OSError:
         pass
+
+
+def prune_image_cache(max_files: int = IMAGE_CACHE_MAX_FILES,
+                      ttl: int = IMAGE_CACHE_TTL) -> int:
+    """清理图片缓存：先删过期文件，超过数量上限再按 mtime 淘汰最旧的。
+
+    缓存目录只靠读的时候判断过期，过期文件本身一直留在盘上；不清理的话，
+    每天几百张封面会无声涨到几 GB。返回删除数量，调用方不关心结果也不会出错。
+    """
+    import time
+
+    target = _image_cache_dir()
+    now = time.time()
+    fresh: list[tuple[float, Path]] = []
+    removed = 0
+    for path in target.iterdir():
+        if not path.is_file() or path.suffix != ".bin":
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if ttl and now - mtime > ttl:
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+            continue
+        fresh.append((mtime, path))
+    if max_files > 0 and len(fresh) > max_files:
+        for _, path in sorted(fresh)[:len(fresh) - max_files]:
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 def _sniff_mime(raw: bytes) -> str:

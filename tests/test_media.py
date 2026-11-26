@@ -307,6 +307,42 @@ def test_route_refreshes_expired_link() -> None:
             os.environ["ONEFEED_HOME"] = old_home
 
 
+def test_image_cache_prune() -> None:
+    import os
+    import tempfile
+    import time
+
+    import onefeed.media as media_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        now = time.time()
+        stale = root / "stale.bin"
+        stale.write_bytes(b"x")
+        os.utime(stale, (now - media_mod.IMAGE_CACHE_TTL - 60,) * 2)
+        oldest = root / "oldest.bin"
+        oldest.write_bytes(b"x")
+        os.utime(oldest, (now - 300,) * 2)
+        newer = root / "newer.bin"
+        newer.write_bytes(b"x")
+        os.utime(newer, (now - 200,) * 2)
+        newest = root / "newest.bin"
+        newest.write_bytes(b"x")
+        os.utime(newest, (now - 100,) * 2)
+
+        original = media_mod._image_cache_dir
+        media_mod._image_cache_dir = lambda: root
+        try:
+            removed = media_mod.prune_image_cache(max_files=2)
+        finally:
+            media_mod._image_cache_dir = original
+
+        check(removed == 2, "图片缓存清理删掉 2 个（过期 + 超上限）")
+        check(not stale.exists(), "过期图片缓存被删除")
+        check(not oldest.exists(), "超过数量上限时先删最旧的")
+        check(newer.exists() and newest.exists(), "保留最新的两个图片缓存")
+
+
 def main() -> int:
     test_video_slot()
     test_other_slots()
@@ -315,6 +351,7 @@ def main() -> int:
     test_media_blocks_private_targets()
     test_media_route_blocks_private_url()
     test_route_refreshes_expired_link()
+    test_image_cache_prune()
     print(f"✅ test_media.py  T47 通过：{CHECKS} 项检查")
     return 0
 

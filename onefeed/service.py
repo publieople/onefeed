@@ -15,7 +15,7 @@ from typing import Any, Iterable
 
 from plugin_runtime.host import PluginHost, default_plugins_dir
 
-from . import market, settings as settings_mod, smart
+from . import market, media as media_mod, settings as settings_mod, smart
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = ROOT / "fixtures"
@@ -287,6 +287,7 @@ class RefreshRunner:
             if not cancelled:
                 try:
                     self.store.prune(keep_days=self.prune_days)
+                    media_mod.prune_image_cache()
                     smart.cluster(self.store)
                 except Exception:
                     pass
