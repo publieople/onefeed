@@ -203,6 +203,75 @@ def test_runtime_paths_are_confined() -> None:
         check(False, "seed 源应拒绝系统目录")
 
 
+def test_plugin_state_limits() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        original_dir = capabilities.plugin_dir
+        capabilities.plugin_dir = lambda _pid: root
+        try:
+            cap = Capabilities(SimpleNamespace(id="demo", setting_defaults=lambda: {}))
+        finally:
+            capabilities.plugin_dir = original_dir
+
+        cap._storage({"op": "set", "key": "token", "value": "abc"})
+        check(cap._storage({"op": "get", "key": "token"})["value"] == "abc",
+              "插件存储可写入并读回")
+        check(not list(root.glob(".*.tmp")), "插件存储写完后不留下临时文件")
+
+        original_keys = capabilities.STORAGE_MAX_KEYS
+        original_bytes = capabilities.STORAGE_MAX_BYTES
+        try:
+            capabilities.STORAGE_MAX_KEYS = 2
+            cap._storage({"op": "set", "key": "k2", "value": 2})
+            try:
+                cap._storage({"op": "set", "key": "k3", "value": 3})
+            except ValueError:
+                check(True, "插件存储键数超限时报错")
+            else:
+                check(False, "插件存储键数超限应报错")
+            check(set(cap._storage({"op": "keys"})["value"]) == {"token", "k2"},
+                  "超限失败不会写进半成品")
+
+            capabilities.STORAGE_MAX_KEYS = 500
+            capabilities.STORAGE_MAX_BYTES = 10
+            try:
+                cap._storage({"op": "set", "key": "big", "value": "x" * 100})
+            except ValueError:
+                check(True, "插件存储字节数超限时报错")
+            else:
+                check(False, "插件存储字节数超限应报错")
+        finally:
+            capabilities.STORAGE_MAX_KEYS = original_keys
+            capabilities.STORAGE_MAX_BYTES = original_bytes
+
+        original_cache_keys = capabilities.CACHE_MAX_KEYS
+        original_cache_bytes = capabilities.CACHE_MAX_BYTES
+        try:
+            capabilities.CACHE_MAX_KEYS = 2
+            cap._cache({"op": "set", "key": "c1", "value": 1, "ttlSec": 60})
+            cap._cache({"op": "set", "key": "c2", "value": 2, "ttlSec": 60})
+            cap._cache({"op": "set", "key": "c3", "value": 3, "ttlSec": 60})
+            keys = set(cap._read_state("cache.json"))
+            check(len(keys) == 2 and "c3" in keys, "缓存超上限时淘汰最旧的键")
+
+            cap._cache({"op": "set", "key": "expired", "value": 0, "ttlSec": -10})
+            cap._cache({"op": "set", "key": "fresh", "value": 1, "ttlSec": 60})
+            check("expired" not in cap._read_state("cache.json"), "写缓存时清掉过期条目")
+
+            capabilities.CACHE_MAX_BYTES = 10
+            try:
+                cap._cache({"op": "set", "key": "big", "value": "x" * 100, "ttlSec": 60})
+            except ValueError:
+                check(True, "缓存字节数超限时报错")
+            else:
+                check(False, "缓存字节数超限应报错")
+        finally:
+            capabilities.CACHE_MAX_KEYS = original_cache_keys
+            capabilities.CACHE_MAX_BYTES = original_cache_bytes
+
+
 def main() -> int:
     try:
         test_blocks_private_targets()
@@ -213,6 +282,7 @@ def main() -> int:
         test_manifest_seed_boundaries()
         test_manifest_command_and_env_boundaries()
         test_runtime_paths_are_confined()
+        test_plugin_state_limits()
     except AssertionError as exc:
         print(f"FAIL {exc}")
         return 1

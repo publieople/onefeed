@@ -27,6 +27,10 @@ from .manifest import Manifest
 from .paths import browser_profile, ensure_temp_env, plugin_dir, state_root
 
 MAX_BODY_BYTES = 5 * 1024 * 1024     # http 响应体上限 5MB
+STORAGE_MAX_BYTES = 2 * 1024 * 1024  # 插件长期存储上限 2MB
+STORAGE_MAX_KEYS = 500
+CACHE_MAX_BYTES = 4 * 1024 * 1024    # 插件缓存上限 4MB；写之前先清过期条目
+CACHE_MAX_KEYS = 500
 MAX_HTML_CHARS = 2_000_000
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
@@ -826,8 +830,29 @@ class Capabilities:
             return {}
 
     def _write_state(self, name: str, data: dict[str, Any]) -> None:
+        """原子写：先写同目录临时文件再 replace。
+
+        直接 write_text 会先截断目标；写到一半进程被杀（插件有超时）就留下
+        半截 JSON，_read_state 只能当空对象处理，等于整个插件的存储一次全丢。
+        """
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        (self.state_dir / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        path = self.state_dir / name
+        tmp = path.with_name(f".{name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as fh:
+                fh.write(json.dumps(data, ensure_ascii=False))
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _state_bytes(data: dict[str, Any]) -> int:
+        return len(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
     def _storage(self, req: dict[str, Any]) -> dict[str, Any]:
         op = req.get("op")
@@ -836,8 +861,14 @@ class Capabilities:
         if op == "get":
             return {"value": store.get(key)}
         if op == "set":
-            store[key] = req.get("value")
-            self._write_state("storage.json", store)
+            # 插件存储是长期数据，超限时报错而不是悄悄丢；写失败也不改变文件。
+            candidate = dict(store)
+            candidate[key] = req.get("value")
+            if len(candidate) > STORAGE_MAX_KEYS:
+                raise ValueError(f"storage 超过 {STORAGE_MAX_KEYS} 个键的上限")
+            if self._state_bytes(candidate) > STORAGE_MAX_BYTES:
+                raise ValueError(f"storage 超过 {STORAGE_MAX_BYTES // 1024} KB 上限")
+            self._write_state("storage.json", candidate)
             return {"value": True}
         if op == "delete":
             store.pop(key, None)
@@ -859,7 +890,20 @@ class Capabilities:
             return {"value": row.get("value")}
         if op == "set":
             ttl = int(req.get("ttlSec") or 300)
+            # 过期条目没人读就一直留在文件里；每次写之前先清掉，避免缓存无限长。
+            store = {k: v for k, v in store.items()
+                     if isinstance(v, dict) and int(v.get("exp") or 0) >= now}
             store[key] = {"value": req.get("value"), "exp": now + ttl}
+            while len(store) > CACHE_MAX_KEYS and key in store:
+                oldest = min((k for k in store if k != key),
+                             key=lambda k: int(store[k].get("exp") or 0), default=None)
+                if oldest is None:
+                    break
+                store.pop(oldest, None)
+            if len(store) > CACHE_MAX_KEYS:
+                raise ValueError(f"cache 超过 {CACHE_MAX_KEYS} 个键的上限")
+            if self._state_bytes(store) > CACHE_MAX_BYTES:
+                raise ValueError(f"cache 超过 {CACHE_MAX_BYTES // 1024} KB 上限")
             self._write_state("cache.json", store)
             return {"value": True}
         raise ValueError(f"未知 cache 操作: {op}")
