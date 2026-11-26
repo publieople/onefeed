@@ -65,6 +65,19 @@ _SESSIONS: dict[str, "_Session"] = {}
 _LOCK = threading.Lock()
 
 
+def _safe_plugin_id(plugin_id: str) -> str:
+    """插件 id 只当单层目录名用；带分隔符/盘符的 id 不许拼进状态路径。
+
+    logout 会按 id 删目录，认证接口又直接吃 URL 里的 plugin_id。
+    少了这一层，/api/auth/..%5C..%5Cvictim/logout 就能把状态根外的目录删掉。
+    """
+    pid = str(plugin_id or "").strip()
+    if (not pid or pid in (".", "..")
+            or any(ch in pid for ch in ("/", "\\", ":", "\x00"))):
+        raise ValueError(f"插件 id 不是合法目录名：{plugin_id!r}")
+    return pid
+
+
 def _login_dir() -> Path:
     path = state_root() / "login"
     path.mkdir(parents=True, exist_ok=True)
@@ -72,11 +85,11 @@ def _login_dir() -> Path:
 
 
 def _cookie_path(plugin_id: str) -> Path:
-    return state_root() / "cookies" / f"{plugin_id}.json"
+    return state_root() / "cookies" / f"{_safe_plugin_id(plugin_id)}.json"
 
 
 def _profile_dir(plugin_id: str) -> Path:
-    return _login_dir() / plugin_id
+    return _login_dir() / _safe_plugin_id(plugin_id)
 
 
 def _write_cookie_file(plugin_id: str, cookies: list[dict[str, Any]]) -> Path:
@@ -304,6 +317,7 @@ def session_state(plugin_id: str) -> str | None:
 
 
 def logout(plugin_id: str) -> dict[str, Any]:
+    plugin_id = _safe_plugin_id(plugin_id)
     removed = []
     with _LOCK:
         session = _SESSIONS.pop(plugin_id, None)

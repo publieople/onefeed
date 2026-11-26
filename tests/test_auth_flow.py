@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -131,9 +133,40 @@ def case_cookie_names_reads_file():
     print("case_cookie_names_reads_file ok")
 
 
+def case_logout_rejects_traversal():
+    """logout 的 plugin_id 来自 URL，不能靠 ../.. 删到状态根外。"""
+    victim = Path(tempfile.mkdtemp(prefix="onefeed-victim-", dir=str(state_root().parent)))
+    try:
+        try:
+            auth.logout(f"..\\..\\{victim.name}")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("带 ../ 的 plugin_id 应当被拒绝")
+        assert victim.exists(), "受害目录被删掉了"
+
+        try:
+            auth._cookie_path("../escape")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("_cookie_path 应当拒绝带分隔符的 id")
+
+        try:
+            auth._profile_dir("C:\\escape")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("_profile_dir 应当拒绝带盘符的 id")
+    finally:
+        shutil.rmtree(victim, ignore_errors=True)
+    print("case_logout_rejects_traversal ok")
+
+
 def main() -> int:
     cases = [case_wait_then_ok, case_scoped_by_domain, case_window_closed,
-             case_stop_flag, case_cookie_names_reads_file]
+             case_stop_flag, case_cookie_names_reads_file,
+             case_logout_rejects_traversal]
     for case in cases:
         case()
     print(f"test_auth_flow: {len(cases)} cases passed")

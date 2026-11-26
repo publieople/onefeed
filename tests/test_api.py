@@ -5,7 +5,9 @@
 """
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from onefeed.app import WEB_DIST, create_app  # noqa: E402
 from onefeed.store import Store  # noqa: E402
+from plugin_runtime.paths import state_root  # noqa: E402
 
 CHECKS = 0
 
@@ -149,6 +152,17 @@ def main() -> int:
         check("bilibili" in ids and row["version"] == expect, "插件列表用磁盘上的 manifest 版本")
         r = client.get("/api/runs").json()["runs"]
         check(len(r) == 1 and r[0]["ok"] == 1, "轮次列表")
+
+        # logout 的 plugin_id 走 URL，不能带 ../ 删到状态根外
+        victim = Path(tempfile.mkdtemp(prefix="onefeed-api-victim-",
+                                       dir=str(state_root().parent)))
+        try:
+            bad = client.post(f"/api/auth/..%5C..%5C{victim.name}/logout")
+            check(bad.status_code == 400, "logout 路径穿越返回 400")
+            check(bad.json()["error"]["code"] == "bad_plugin_id", "logout 路径穿越错误码")
+            check(victim.exists(), "logout 路径穿越没有删到状态根外")
+        finally:
+            shutil.rmtree(victim, ignore_errors=True)
 
         # 前端未构建时的根路径
         if not WEB_DIST.is_dir():

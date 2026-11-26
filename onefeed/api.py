@@ -1595,6 +1595,10 @@ def auth_login_status(plugin_id: str) -> dict:
 def auth_logout(plugin_id: str) -> dict:
     try:
         result = auth_mod.logout(plugin_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={
+            "code": "bad_plugin_id", "message": str(exc)[:200],
+            "hint": "插件 id 只能是单层目录名，不能带路径分隔符、盘符或 NUL"})
     except KeyError:
         raise HTTPException(status_code=400, detail={
             "code": "no_login_flow", "message": f"{plugin_id} 没有内置登录流程",
