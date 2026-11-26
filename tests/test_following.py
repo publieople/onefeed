@@ -304,6 +304,32 @@ def test_accounts_runner_and_api():
     body = client.get("/api/following/accounts", params={"platform": "bilibili"}).json()
     assert body["total"] == 1 and body["accounts"][0]["account_id"] == "up2"
     assert body["counts"] and body["platforms"]
+
+    # 名单超过 1000 人时 total 不能停在 1000，翻页必须能继续往后走
+    now = int(time.time())
+    store.conn.executemany(
+        "INSERT OR REPLACE INTO following_accounts "
+        "(platform, account_id, name, avatar, url, bio, relation, active, "
+        " followed_at, first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        [("bilibili", f"bulk{i}", f"批量{i}", "", "", "", "following", 1,
+          now, now, now - i) for i in range(1001)])
+    store.conn.commit()
+    expected = int(store.conn.execute(
+        "SELECT COUNT(*) FROM following_accounts WHERE platform='bilibili' AND active=1"
+    ).fetchone()[0])
+    big = client.get("/api/following/accounts",
+                     params={"platform": "bilibili", "limit": 10}).json()
+    assert expected > 1000 and big["total"] == expected, "名单总数不再被 1000 截断"
+    assert big["next"] == 10 and len(big["accounts"]) == 10
+    big2 = client.get("/api/following/accounts",
+                      params={"platform": "bilibili", "limit": 10, "offset": 10}).json()
+    assert {r["account_id"] for r in big["accounts"]}.isdisjoint(
+        {r["account_id"] for r in big2["accounts"]}), "第二页不重复第一页"
+    tail = client.get("/api/following/accounts",
+                      params={"platform": "bilibili", "limit": 10,
+                              "offset": expected - 1}).json()
+    assert len(tail["accounts"]) == 1 and tail["next"] is None, "最后一页只有 1 条且没有下一页"
+
     found = client.get("/api/following/accounts", params={"q": "账号 up2"}).json()
     assert found["total"] == 1
     started = client.post("/api/following/accounts/refresh", json={"force": True})

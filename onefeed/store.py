@@ -842,14 +842,30 @@ class Store:
             self.conn.commit()
         return len(rows)
 
-    def following_accounts(self, platform: str | None = None, active: bool | None = True,
-                           query: str | None = None, limit: int = 500,
-                           offset: int = 0) -> list[dict[str, Any]]:
+    @staticmethod
+    def _decode_account_row(raw: Any) -> dict[str, Any]:
+        row = dict(raw)
+        row["active"] = bool(row.get("active"))
+        try:
+            row["extra"] = json.loads(row.get("extra") or "{}")
+        except json.JSONDecodeError:
+            row["extra"] = {}
+        return row
+
+    def following_accounts_page(self, platforms: Sequence[str] | None = None,
+                                active: bool | None = True, query: str | None = None,
+                                limit: int = 500, offset: int = 0
+                                ) -> tuple[list[dict[str, Any]], int]:
+        """关注名单分页：返回 (本页, 符合条件的总数)。
+
+        以前 API 先取 1000 条再在内存里过滤/切片，名单超过 1000 人时 total
+        永远停在 1000，翻页也翻不到后面的人。过滤和分页都应当在 SQL 里做。
+        """
         where: list[str] = []
         params: list[Any] = []
-        if platform:
-            where.append("platform = ?")
-            params.append(platform)
+        if platforms:
+            where.append(f"platform IN ({', '.join('?' for _ in platforms)})")
+            params.extend(platforms)
         if active is not None:
             where.append("active = ?")
             params.append(1 if active else 0)
@@ -858,21 +874,21 @@ class Store:
             like = "%" + str(query).strip() + "%"
             params.extend([like, like, like])
         clause = ("WHERE " + " AND ".join(where)) if where else ""
-        params.extend([max(1, min(int(limit), 1000)), max(0, int(offset))])
+        total = int(self.conn.execute(
+            f"SELECT COUNT(*) FROM following_accounts {clause}", params).fetchone()[0])
         rows = self.conn.execute(
             f"SELECT * FROM following_accounts {clause} "
             f"ORDER BY active DESC, last_seen_at DESC, name COLLATE NOCASE LIMIT ? OFFSET ?",
-            params).fetchall()
-        out = []
-        for raw in rows:
-            row = dict(raw)
-            row["active"] = bool(row.get("active"))
-            try:
-                row["extra"] = json.loads(row.get("extra") or "{}")
-            except json.JSONDecodeError:
-                row["extra"] = {}
-            out.append(row)
-        return out
+            params + [max(1, min(int(limit), 1000)), max(0, int(offset))]).fetchall()
+        return [self._decode_account_row(raw) for raw in rows], total
+
+    def following_accounts(self, platform: str | None = None, active: bool | None = True,
+                           query: str | None = None, limit: int = 500,
+                           offset: int = 0) -> list[dict[str, Any]]:
+        rows, _ = self.following_accounts_page(
+            platforms=[platform] if platform else None, active=active,
+            query=query, limit=limit, offset=offset)
+        return rows
 
     def following_account_counts(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(

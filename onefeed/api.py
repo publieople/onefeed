@@ -247,14 +247,10 @@ def following_accounts_list(
     """关注名单：只读「我关注了谁」，和关注流的内容是两件事。"""
     store = _store(request)
     wanted = [p.strip() for p in platform.split(",") if p.strip()] if platform else []
-    single = wanted[0] if len(wanted) == 1 else None
-    rows = store.following_accounts(platform=single, active=True, query=q, limit=1000)
-    if len(wanted) > 1:
-        rows = [r for r in rows if str(r.get("platform")) in wanted]
-    elif not wanted:
-        rows = [r for r in rows if str(r.get("platform")) in FOLLOWING_PLATFORMS]
-    total = len(rows)
-    page = rows[offset:offset + limit]
+    # 不传平台时只看关注流支持的平台；过滤和分页都交给 SQL，别先取 1000 条再切。
+    platforms = wanted or list(FOLLOWING_PLATFORMS)
+    page, total = store.following_accounts_page(
+        platforms=platforms, active=True, query=q, limit=limit, offset=offset)
     meta = _account_platforms(request)
     return {"accounts": page, "next": (offset + limit) if offset + limit < total else None,
             "count": len(page), "total": total, "platforms": meta["platforms"],
