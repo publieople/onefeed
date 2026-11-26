@@ -18,6 +18,7 @@ from plugin_runtime.host import PluginHost
 from . import __version__, market, settings as settings_mod
 from .api import router
 from .following import AccountsRunner, FollowingRunner
+from .security import install_local_guard
 from .service import RefreshRunner, sync_installed
 from .store import Store
 
@@ -27,6 +28,7 @@ WEB_DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
 def create_app(store: Store | None = None, plugins_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="OneFeed", version=__version__, docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
+    install_local_guard(app)
     app.state.store = store or Store()
     conf = settings_mod.load()
     app.state.settings = conf

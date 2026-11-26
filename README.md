@@ -111,6 +111,10 @@ uv run python tests/run_all.py --offline  # 跳过联网用例
 抖音插件用系统 Chrome 跑 headless 回放，首次会建持久档案；
 状态目录默认 `~/.onefeed`，不可写时自动退回仓库内 `.onefeed/`（已 gitignore），也可用 `ONEFEED_HOME` 指定。
 
+本地接口默认只接受 `localhost` / `127.0.0.1` / IP 字面量的 Host；写操作（POST/PUT/PATCH/DELETE）
+如果带 `Origin` / `Referer`，必须和当前页面同源，`Origin: null` 与 `Sec-Fetch-Site: cross-site` 会被拒绝。
+用自定义域名或反向代理访问时，把主机名加进 `ONEFEED_ALLOWED_HOSTS`（逗号分隔）。
+
 ## 在线演示（GitHub Pages）
 
 只读演示站：<https://publieople.github.io/onefeed/>。打开就是真实前端 + 一份抓取快照（当前 65 条 / 6 个平台），不联网、不登录、不写任何东西。

@@ -67,6 +67,21 @@ def main() -> int:
         store.finish_run(store.start_run("bilibili"), ok=True, count=3)
         client = TestClient(create_app(store))
 
+        # Host / CSRF 闸门：本机页面放行，跨站写操作与外域 Host 拒绝
+        bad_host = client.get("/api/health", headers={"Host": "evil.example"})
+        check(bad_host.status_code == 403, "外域 Host 返回 403")
+        check(bad_host.json()["error"]["code"] == "forbidden_host", "外域 Host 错误码")
+        cross = client.post("/api/auth/bilibili/logout",
+                            headers={"Origin": "https://evil.example"})
+        check(cross.status_code == 403, "跨站 Origin 的写操作返回 403")
+        check(cross.json()["error"]["code"] == "forbidden_origin", "跨站 Origin 错误码")
+        cross_site = client.post("/api/auth/bilibili/logout",
+                                 headers={"Sec-Fetch-Site": "cross-site"})
+        check(cross_site.status_code == 403, "Sec-Fetch-Site: cross-site 返回 403")
+        same = client.post("/api/auth/bilibili/logout",
+                           headers={"Origin": "http://testserver"})
+        check(same.status_code == 200, "同源写操作放行")
+
         # health
         h = client.get("/api/health")
         check(h.status_code == 200, "health 200")
