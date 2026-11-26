@@ -79,6 +79,53 @@ def test_store_separation() -> None:
     check(store.unfavorite_item("v2ex:topic:1") is False, "重复移出返回 False")
 
 
+def test_prune_keeps_saved_and_favorites() -> None:
+    """收藏和稍后再看不能被保留期清掉；被删条目的从表行不能留孤儿。"""
+    store = fresh_store()
+    old = int(time.time()) - 40 * 86400
+    store.upsert_items([
+        {"id": "v2ex:old-saved", "platform": "v2ex", "kind": "article",
+         "title": "旧的稍后再看", "text": "", "author": "a", "cover": "",
+         "url": "https://example.com/old-saved", "published_at": old,
+         "fetched_at": old, "like": 0, "comment": 0, "share": 0,
+         "view": 0, "tags": [], "extra": {}},
+        {"id": "v2ex:old-fav", "platform": "v2ex", "kind": "article",
+         "title": "旧的收藏", "text": "", "author": "a", "cover": "",
+         "url": "https://example.com/old-fav", "published_at": old,
+         "fetched_at": old, "like": 0, "comment": 0, "share": 0,
+         "view": 0, "tags": [], "extra": {}},
+        {"id": "v2ex:old-plain", "platform": "v2ex", "kind": "article",
+         "title": "旧的普通条目", "text": "", "author": "a", "cover": "",
+         "url": "https://example.com/old-plain", "published_at": old,
+         "fetched_at": old, "like": 0, "comment": 0, "share": 0,
+         "view": 0, "tags": [], "extra": {}},
+    ])
+    store.mark_item("v2ex:old-saved", saved=True)
+    store.favorite_item("v2ex:old-fav", "留着")
+    store.mark_item("v2ex:old-plain", read=True)
+    store.save_detail("v2ex:old-saved", {"marker": "saved"})
+    store.save_detail("v2ex:old-plain", {"marker": "plain"})
+    store.save_summary("v2ex:old-plain", {"tldr": "plain"})
+
+    removed = store.prune(keep_days=14)
+
+    check(removed == 1, f"只删普通旧条目（实际 {removed}）")
+    check(store.get_item("v2ex:old-saved") is not None, "稍后再看的条目保留")
+    check(store.get_item("v2ex:old-fav") is not None, "收藏的条目保留")
+    check(store.get_item("v2ex:old-plain") is None, "普通旧条目被清掉")
+    check(store.get_detail("v2ex:old-saved") is not None, "保留条目的详情跟着保留")
+    check(store.get_detail("v2ex:old-plain") is None, "被删条目的详情清掉")
+    check(store.get_summary("v2ex:old-plain") is None, "被删条目的总结清掉")
+    check([r["id"] for r in store.saved_items()] == ["v2ex:old-saved"],
+          "稍后再看列表仍能查到")
+    check([r["id"] for r in store.favorite_items()] == ["v2ex:old-fav"],
+          "收藏夹列表仍能查到")
+    orphan_marks = store.conn.execute(
+        "SELECT COUNT(*) FROM item_marks WHERE item_id = ?",
+        ("v2ex:old-plain",)).fetchone()[0]
+    check(orphan_marks == 0, "被删条目的标记行一起清掉")
+
+
 def test_api() -> None:
     store = fresh_store()
     client = TestClient(create_app(store))
@@ -116,6 +163,7 @@ def test_api() -> None:
 
 def main() -> int:
     test_store_separation()
+    test_prune_keeps_saved_and_favorites()
     test_api()
     print(f"✅ test_favorites.py 通过：{CHECKS} 项检查")
     return 0

@@ -1455,17 +1455,28 @@ class Store:
         return [{"platform": r["platform"], "count": r["n"], "last_fetched_at": r["last"]} for r in rows]
 
     def prune(self, keep_days: int = 14) -> int:
-        """清掉太久以前的条目，避免库无限长。"""
+        """清掉太久以前的条目，避免库无限长。
+
+        收藏夹和「稍后再看」是用户明确留下的东西，不能因为超过保留期就删；
+        条目被保留时，它的详情和总结缓存也一并保留。其余被删条目的从表行
+        （详情、总结、标记、收藏夹）在这里一起清掉，避免留下一堆孤儿。
+        """
         cutoff = int(time.time()) - keep_days * 86400
         with self._write_lock:
             cur = self.conn.execute(
-                "DELETE FROM items WHERE fetched_at < ? AND published_at < ?", (cutoff, cutoff))
-            # item_feeds 跟着 items 走：内容被清掉后，关注流里也不能留孤儿行，
-            # 否则「N 条」会越算越大，点进去却全是空。
-            self.conn.execute(
-                "DELETE FROM item_feeds WHERE item_id NOT IN (SELECT id FROM items)")
+                "DELETE FROM items WHERE fetched_at < ? AND published_at < ? "
+                "AND id NOT IN (SELECT item_id FROM item_marks WHERE saved = 1) "
+                "AND id NOT IN (SELECT item_id FROM item_favorites)",
+                (cutoff, cutoff))
+            removed = cur.rowcount
+            # 关注流、详情、总结、标记、收藏夹都跟着 items 走；条目已删的从表行
+            # 留在这里只会让「N 条」虚高或点进去 404。
+            for table in ("item_feeds", "details", "summaries",
+                          "item_marks", "item_favorites"):
+                self.conn.execute(
+                    f"DELETE FROM {table} WHERE item_id NOT IN (SELECT id FROM items)")
             self.conn.commit()
-        return cur.rowcount
+        return removed
 
     # ------------------------------------------------------------ runs
     def start_run(self, plugin: str, demo: bool = False) -> int:
