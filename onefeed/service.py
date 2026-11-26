@@ -287,6 +287,7 @@ class RefreshRunner:
             if not cancelled:
                 try:
                     self.store.prune(keep_days=self.prune_days)
+                    self.store.prune_activity()
                     media_mod.prune_image_cache()
                     smart.cluster(self.store)
                 except Exception:

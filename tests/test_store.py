@@ -180,6 +180,44 @@ def main() -> int:
         store.finish_run(bad, ok=False, count=0, error="timeout")
         check(store.recent_runs(1)[0]["error"] == "timeout", "runs 记录失败原因")
 
+        # 运行记录保留期：太老的 runs / 关注流 / 已结束 Agent 轮次要清，正在跑的不动
+        keep_now = int(time.time())
+        old_run = store.start_run("aged")
+        store.finish_run(old_run, ok=True, count=1)
+        store.conn.execute("UPDATE runs SET started_at=? WHERE id=?",
+                           (keep_now - 31 * 86400, old_run))
+        old_following = store.start_following_run("demo")
+        store.finish_following_run(old_following, ok=True, count=2)
+        store.conn.execute("UPDATE following_runs SET started_at=? WHERE id=?",
+                           (keep_now - 31 * 86400, old_following))
+
+        store.start_agent_run("aged-agent", "aged-thread", "旧问题", "demo")
+        store.add_agent_step("aged-agent", 1, "tool", "refresh_feed")
+        store.finish_agent_run("aged-agent", status="done", reply="旧回答")
+        store.conn.execute(
+            "UPDATE agent_runs SET created_at=?, finished_at=? WHERE id=?",
+            (keep_now - 31 * 86400, keep_now - 31 * 86400, "aged-agent"))
+        store.start_agent_run("live-agent", "live-thread", "还在跑", "demo")
+        store.conn.execute(
+            "UPDATE agent_runs SET created_at=? WHERE id=?",
+            (keep_now - 31 * 86400, "live-agent"))
+
+        store.start_agent_run("fresh-agent", "fresh-thread", "新问题", "demo")
+        store.finish_agent_run("fresh-agent", status="done", reply="新回答")
+
+        removed_activity = store.prune_activity(keep_days=30)
+        check(removed_activity == 3, "运行记录清理掉 3 条过期轮次")
+        check(store.conn.execute("SELECT COUNT(*) FROM runs WHERE id=?",
+                                 (old_run,)).fetchone()[0] == 0, "过期 runs 被清理")
+        check(store.conn.execute("SELECT COUNT(*) FROM following_runs WHERE id=?",
+                                 (old_following,)).fetchone()[0] == 0,
+              "过期关注流轮次被清理")
+        check(store.get_agent_run("aged-agent") is None, "过期 Agent 轮次被清理")
+        check(store.conn.execute("SELECT COUNT(*) FROM agent_steps WHERE run_id='aged-agent'")
+              .fetchone()[0] == 0, "过期 Agent 轮次的步骤一并清理")
+        check(store.get_agent_run("live-agent") is not None, "仍在跑的 Agent 轮次不被清理")
+        check(store.get_agent_run("fresh-agent") is not None, "未过期的 Agent 轮次保留")
+
         # plugins
         store.upsert_plugin("demo", "0.1.0", sha256="abc", source="registry")
         store.set_enabled("demo", False)

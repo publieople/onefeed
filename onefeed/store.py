@@ -1488,6 +1488,32 @@ class Store:
             self.conn.commit()
         return removed
 
+    def prune_activity(self, keep_days: int = 30) -> int:
+        """清掉太久以前的运行记录，避免 runs / 关注流 / Agent 历史无限增长。
+
+        只删已经结束的：状态还是 running 的 Agent 轮次可能正在跑，不能按时间误删。
+        Agent 步骤是事件流水，跟着 agent_runs 走；孤儿步骤一并清掉，否则删了轮次
+        仍然占着盘。
+        """
+        cutoff = int(time.time()) - max(1, int(keep_days)) * 86400
+        with self._write_lock:
+            removed = 0
+            removed += self.conn.execute(
+                "DELETE FROM runs WHERE started_at < ?", (cutoff,)).rowcount
+            removed += self.conn.execute(
+                "DELETE FROM following_runs WHERE started_at < ?", (cutoff,)).rowcount
+            removed += self.conn.execute(
+                "DELETE FROM agent_runs WHERE status != 'running' AND "
+                "COALESCE(NULLIF(finished_at, 0), created_at) < ?", (cutoff,)).rowcount
+            self.conn.execute(
+                "DELETE FROM agent_steps WHERE run_id NOT IN (SELECT id FROM agent_runs)")
+            # 线程只是侧栏的分组；没有任何轮次的空线程也顺手清掉（正在跑的线程有 run 引用）。
+            self.conn.execute(
+                "DELETE FROM agent_threads WHERE updated_at < ? AND id NOT IN "
+                "(SELECT thread_id FROM agent_runs)", (cutoff,))
+            self.conn.commit()
+        return int(removed)
+
     # ------------------------------------------------------------ runs
     def start_run(self, plugin: str, demo: bool = False) -> int:
         with self._write_lock:
