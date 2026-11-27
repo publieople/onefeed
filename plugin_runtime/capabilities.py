@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from . import browser_cdp
 from .manifest import Manifest
 from .paths import browser_profile, ensure_temp_env, plugin_dir, state_root
 
@@ -31,11 +32,15 @@ MAX_HTML_CHARS = 2_000_000
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
 
-# 只保留与网络/编码相关的变量：本机 NO_PROXY 含 [::1]，任何读环境代理的库都会崩
+# 只保留与网络/编码相关的变量：本机 NO_PROXY 含 [::1]，任何读环境代理的库都会崩。
+# ONEFEED_* 是宿主自己的运行配置：不带下去，worker 会退回 ~/.onefeed 和自建 headless
+# Chromium，而不是当前实例的状态目录与正在登录的 sidecar Chrome。
 SAFE_ENV_KEYS = ("PATH", "PATHEXT", "SystemRoot", "windir", "COMSPEC", "USERPROFILE",
                  "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMDATA",
                  "TEMP", "TMP", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
-                 "PROCESSOR_ARCHITECTURE", "PYTHONUTF8", "PYTHONIOENCODING")
+                 "PROCESSOR_ARCHITECTURE", "PYTHONUTF8", "PYTHONIOENCODING",
+                 "ONEFEED_HOME", "ONEFEED_BROWSER_CDP", "ONEFEED_BROWSER_PROFILE",
+                 "ONEFEED_CHROME_EXE", "ONEFEED_BROWSER_PROXY")
 PROXY_CANDIDATES = ("", "http://127.0.0.1:7890", "http://127.0.0.1:10809")
 
 # Chrome 的 user-data-dir 一个进程独占：详情和评论并发时会互相把对方顶掉，
@@ -530,9 +535,11 @@ class Capabilities:
         settle_ms = min(int(req.get("settleMs") or 2500), 15000)
         want_html = bool(req.get("html"))
 
+        cdp_mode = browser_cdp.enabled()
         profile = self.settings.get("browserProfile") or str(
             browser_profile(self.manifest.id))
-        Path(profile).mkdir(parents=True, exist_ok=True)
+        if not cdp_mode:
+            Path(profile).mkdir(parents=True, exist_ok=True)
 
         bodies: list[dict[str, Any]] = []
 
@@ -552,22 +559,29 @@ class Capabilities:
         ensure_temp_env()
 
         self.log("info", f"browser {url[:120]}")
-        guard = _ProfileGuard(profile)
+        guard = None
         pw = sync_playwright().start()
         ctx = None
+        page = None
         try:
-            guard.acquire()
-            ctx = pw.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
-                executable_path=_find_chrome(),
-                headless=bool(req.get("headless", True)),
-                locale="zh-CN",
-                viewport={"width": 1440, "height": 900},
-                user_agent=UA,
-                args=["--disable-blink-features=AutomationControlled", "--window-size=1440,900"],
-            )
-            self._inject_browser_cookies(ctx)
-            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            if cdp_mode:
+                browser_cdp.ensure()
+                _browser, ctx = browser_cdp.connect(pw)
+                page = ctx.new_page()
+            else:
+                guard = _ProfileGuard(profile)
+                guard.acquire()
+                ctx = pw.chromium.launch_persistent_context(
+                    user_data_dir=str(profile),
+                    executable_path=_find_chrome(),
+                    headless=bool(req.get("headless", True)),
+                    locale="zh-CN",
+                    viewport={"width": 1440, "height": 900},
+                    user_agent=UA,
+                    args=["--disable-blink-features=AutomationControlled", "--window-size=1440,900"],
+                )
+                self._inject_browser_cookies(ctx)
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.on("response", on_response)
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
 
@@ -623,11 +637,16 @@ class Capabilities:
             return out
         finally:
             try:
-                if ctx is not None:
-                    ctx.close()
+                if cdp_mode and page is not None:
+                    page.close()
             finally:
-                pw.stop()
-                guard.release()
+                try:
+                    if not cdp_mode and ctx is not None:
+                        ctx.close()
+                finally:
+                    pw.stop()
+                    if guard is not None:
+                        guard.release()
 
     # ------------------------------------------------------------ extract
     def _new_context(self, pw, profile: str, headless: bool):
@@ -667,30 +686,44 @@ class Capabilities:
 
         timeout_ms = min(int(req.get("timeoutMs") or 45000), 90000)
         settle_ms = min(int(req.get("settleMs") or spec.get("settleMs") or 3000), 15000)
+        cdp_mode = browser_cdp.enabled()
         profile = self.settings.get("browserProfile") or str(browser_profile(self.manifest.id))
-        Path(profile).mkdir(parents=True, exist_ok=True)
+        if not cdp_mode:
+            Path(profile).mkdir(parents=True, exist_ok=True)
 
         ensure_temp_env()
         self.log("info", "extract " + name + " " + url[:120])
-        guard = _ProfileGuard(profile)
+        guard = None
         pw = sync_playwright().start()
         ctx = None
+        page = None
         try:
-            guard.acquire()
-            ctx = self._new_context(pw, profile, bool(req.get("headless", True)))
-            self._inject_browser_cookies(ctx)
-            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            if cdp_mode:
+                browser_cdp.ensure()
+                _browser, ctx = browser_cdp.connect(pw)
+                page = ctx.new_page()
+            else:
+                guard = _ProfileGuard(profile)
+                guard.acquire()
+                ctx = self._new_context(pw, profile, bool(req.get("headless", True)))
+                self._inject_browser_cookies(ctx)
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             page.wait_for_timeout(settle_ms)
             value = page.evaluate(spec["js"])
             return {"url": page.url, "name": name, "value": value}
         finally:
             try:
-                if ctx is not None:
-                    ctx.close()
+                if cdp_mode and page is not None:
+                    page.close()
             finally:
-                pw.stop()
-                guard.release()
+                try:
+                    if not cdp_mode and ctx is not None:
+                        ctx.close()
+                finally:
+                    pw.stop()
+                    if guard is not None:
+                        guard.release()
 
     def _cookie_path(self) -> Path | None:
         """cookie 文件查找顺序：settings.cookieFile → 状态目录 cookies/<plugin_id>.json。

@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from plugin_runtime import browser_cdp
 from plugin_runtime.paths import state_root
 
 # 每个平台的登录页 + cookie 判据。判据只认"登录后才出现"的 cookie，
@@ -27,7 +28,8 @@ from plugin_runtime.paths import state_root
 SPECS: dict[str, dict[str, Any]] = {
     "xiaohongshu": {
         "label": "小红书",
-        "url": "https://www.xiaohongshu.com/explore",
+        # 直接开登录页：/explore 是游客 feed，看不到二维码，用户没法扫码。
+        "url": "https://www.xiaohongshu.com/login",
         "domain": ".xiaohongshu.com",
         "cookies": ("id_token",),
         "impact": "小红书首页推荐需要登录，未登录只能拿到公开页。",
@@ -46,13 +48,21 @@ SPECS: dict[str, dict[str, Any]] = {
         "cookies": ("z_c0",),
         "impact": "知乎首页 2026 年起对游客直接跳登录页，推荐流和关注流都要求登录态。",
     },
+    "bilibili": {
+        "label": "B 站",
+        # 统一走宿主 Chrome 扫码；拿到 SESSDATA 后同时写给 bili CLI。
+        "url": "https://passport.bilibili.com/login",
+        "domain": ".bilibili.com",
+        "cookies": ("SESSDATA",),
+        "impact": "B 站关注流和个性化推荐需要登录；扫码后凭据会同步给本机 bili CLI，不用再去终端。",
+    },
 }
 
 # 登录态由外部 CLI 管理的平台，宿主不开窗口，只负责说清楚怎么弄。
 CLI_SPECS: dict[str, dict[str, str]] = {
     "bilibili": {
         "label": "B 站",
-        "hint": "B 站登录由本机 bili CLI 管理：终端执行 bili login 扫码，凭证 CLI 自己保存。",
+        "hint": "B 站登录已改走设置页的 Chrome 扫码；这里保留命令给排障用。",
         "command": "bili login",
     },
 }
@@ -77,6 +87,74 @@ def _cookie_path(plugin_id: str) -> Path:
 
 def _profile_dir(plugin_id: str) -> Path:
     return _login_dir() / plugin_id
+
+
+# bili CLI 的凭证字段（小写）；Chrome cookie 是大写，落盘前映射。
+_BILI_COOKIE_MAP = {
+    "sessdata": "SESSDATA",
+    "bili_jct": "bili_jct",
+    "buvid3": "buvid3",
+    "buvid4": "buvid4",
+    "dedeuserid": "DedeUserID",
+}
+
+
+def _bili_credential_path() -> Path:
+    return state_root() / "toolhome" / "bili-cli" / "credential.json"
+
+
+def bili_credential_ready() -> bool:
+    """bili CLI 是否已有可用的 SESSDATA；只读文件，不启动插件。"""
+    path = _bili_credential_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(str(data.get("sessdata") or "").strip())
+
+
+def _sync_bili_credential(cookies: list[dict[str, Any]]) -> Path | None:
+    """把 Chrome 的 B 站 cookie 写成 bili CLI 的 credential.json。
+
+    B 站插件所有 feed 都经 bili CLI，宿主只写 cookie 文件插件并不会用；
+    这一步是把「浏览器登录态」翻译成 CLI 能读的格式。
+    """
+    values: dict[str, str] = {}
+    for cookie in cookies:
+        name = str(cookie.get("name") or "").casefold()
+        value = str(cookie.get("value") or "")
+        if name in _BILI_COOKIE_MAP and value:
+            values[name] = value
+    sessdata = values.get("sessdata", "")
+    if not sessdata:
+        return None
+
+    path = _bili_credential_path()
+    existing: dict[str, Any] = {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            existing = loaded
+    except (OSError, json.JSONDecodeError):
+        pass
+    payload = {
+        "sessdata": sessdata,
+        "bili_jct": values.get("bili_jct") or str(existing.get("bili_jct") or ""),
+        "buvid3": values.get("buvid3") or str(existing.get("buvid3") or ""),
+        "buvid4": values.get("buvid4") or str(existing.get("buvid4") or ""),
+        "dedeuserid": values.get("dedeuserid") or str(existing.get("dedeuserid") or ""),
+        # ac_time_value 不在 cookie 里；已有就保留，没有就写 null（CLI 接受）。
+        "ac_time_value": existing.get("ac_time_value"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    try:
+        tmp.chmod(0o600)
+    except OSError:
+        pass
+    tmp.replace(path)
+    return path
 
 
 def _write_cookie_file(plugin_id: str, cookies: list[dict[str, Any]]) -> Path:
@@ -135,7 +213,8 @@ class _Session:
     def __init__(self, plugin_id: str, spec: dict[str, Any]) -> None:
         self.plugin_id = plugin_id
         self.spec = spec
-        self.profile = _profile_dir(plugin_id)
+        # CDP 模式下 profile 属于专用 Chrome，不再是每个插件自己的登录窗口目录。
+        self.profile = browser_cdp.profile_dir() if browser_cdp.enabled() else _profile_dir(plugin_id)
         self.state = "opened"
         self.message = "正在打开登录窗口…"
         self.cookies = 0
@@ -150,6 +229,10 @@ class _Session:
 
     # ---- 线程内 ----
     def _run(self) -> None:
+        if browser_cdp.enabled():
+            self._run_cdp()
+            return
+
         from plugin_runtime.paths import ensure_temp_env
         ensure_temp_env()          # Playwright 的临时目录必须可写
         try:
@@ -190,10 +273,63 @@ class _Session:
         finally:
             self.ready.set()
 
-    def _poll(self, ctx) -> None:
+    def _run_cdp(self) -> None:
+        """方案 B：连接专用 Chrome，登录窗口就是它自己的一个标签页。
+
+        登录态留在 sidecar 的 user-data-dir 里；这里不启动新浏览器、不复制 cookie，
+        拿到目标 cookie 后仍写一份状态文件，供设置页显示登录状态和兼容旧逻辑。
+        """
+        from plugin_runtime.paths import ensure_temp_env
+        ensure_temp_env()
         page = None
         try:
-            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as pw:
+                try:
+                    browser_cdp.ensure()
+                    _browser, ctx = browser_cdp.connect(pw)
+                except Exception as exc:
+                    self.state = "error"
+                    self.error = f"{type(exc).__name__}: {exc}"[:300]
+                    self.message = browser_cdp.launch_hint(self.error)
+                    self.ready.set()
+                    return
+
+                self.state = "waiting"
+                label = str(self.spec["label"])
+                self.message = f"请在专用 Chrome 里登录{label}（登录态会留在该浏览器）"
+                self.ready.set()
+                try:
+                    page = ctx.new_page()
+                    try:
+                        page.bring_to_front()
+                    except Exception:
+                        pass
+                    self._poll(ctx, page)
+                finally:
+                    if page is not None:
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
+        except Exception as exc:
+            if self.state not in ("ok", "closed"):
+                self.state = "error"
+                self.error = f"{type(exc).__name__}: {exc}"[:300]
+                self.message = "登录窗口出错：" + self.error
+        finally:
+            self.ready.set()
+
+    def _poll(self, ctx, page=None) -> None:
+        if page is None:
+            try:
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            except Exception:
+                page = None
+        try:
+            if page is None:
+                page = ctx.new_page()
             try:
                 page.bring_to_front()
                 page.goto(str(self.spec["url"]), wait_until="domcontentloaded", timeout=30000)
@@ -233,7 +369,24 @@ class _Session:
                 self.cookie = str(probe.get("name"))
                 self.state = "ok"
                 self.message = f"已拿到 {len(scoped)} 个 cookie（含 {probe.get('name')}），窗口已关闭"
+                if self.plugin_id == "bilibili":
+                    try:
+                        cred = _sync_bili_credential(scoped)
+                        if cred is not None:
+                            self.message += "；B 站凭证已同步给 bili CLI"
+                    except OSError as exc:
+                        self.message += "；B 站凭证同步失败：" + str(exc)[:120]
                 return
+            # CDP 模式下关掉的是标签页，context 还活着，ctx.cookies() 不会抛错；
+            # 只看 cookie 会把一个已经关掉的登录页当成还开着，一直守满 10 分钟。
+            # 先探 cookie：用户登录成功后立刻关页，也可能在关页前已经拿到 sessionid。
+            try:
+                if page is not None and page.is_closed():
+                    self.state = "closed"
+                    self.message = "登录窗口被关掉了；重新打开一次就行"
+                    return
+            except Exception:
+                pass
             time.sleep(POLL_SEC)
 
 
@@ -290,6 +443,37 @@ def check(plugin_id: str) -> dict[str, Any]:
                 data["message"] = "登录窗口已经关了；重新打开一次就行"
         return data
 
+    if plugin_id == "bilibili":
+        # 先看 CLI 凭证；没有再看专用 Chrome 里是否已经有登录 cookie。
+        # 后者是「用户自己在 sidecar 里登录过、但还没走过 OneFeed 登录按钮」的情况。
+        if bili_credential_ready():
+            return {"plugin": plugin_id, "state": "ok", "cookies": 0,
+                    "path": str(_bili_credential_path()),
+                    "message": "已登录（B 站凭证已同步给 bili CLI）"}
+        if browser_cdp.enabled():
+            try:
+                scoped = [c for c in browser_cdp.cookies()
+                          if str(c.get("domain") or "").endswith(".bilibili.com")]
+                cred = _sync_bili_credential(scoped)
+                if cred is not None:
+                    return {"plugin": plugin_id, "state": "ok", "cookies": len(scoped),
+                            "path": str(cred),
+                            "message": f"已登录（从专用 Chrome 同步了 {len(scoped)} 个 cookie）"}
+            except Exception:
+                pass
+
+    if browser_cdp.enabled():
+        names = browser_cdp.cookie_names(str(spec["domain"]))
+        if any(n in set(spec["cookies"]) for n in names):
+            return {"plugin": plugin_id, "state": "ok", "cookies": len(names),
+                    "path": str(_cookie_path(plugin_id)),
+                    "message": f"已登录（专用 Chrome 里有 {len(names)} 个 cookie）"}
+        if not browser_cdp.alive():
+            return {"plugin": plugin_id, "state": "idle", "cookies": len(names),
+                    "message": "专用 Chrome 没在运行；打开登录窗口会沿用已保存的 profile"}
+        return {"plugin": plugin_id, "state": "idle", "cookies": len(names),
+                "message": "专用 Chrome 里还没登录；打开登录窗口扫码"}
+
     names = _cookie_names(plugin_id)
     if any(n in set(spec["cookies"]) for n in names):
         return {"plugin": plugin_id, "state": "ok", "cookies": len(names),
@@ -317,17 +501,63 @@ def logout(plugin_id: str) -> dict[str, Any]:
         cookie_path.unlink()
         removed.append("cookie")
 
+    if plugin_id == "bilibili":
+        cred_path = _bili_credential_path()
+        if cred_path.exists():
+            cred_path.unlink()
+            removed.append("bili CLI 凭证")
+
+    if browser_cdp.enabled():
+        spec = SPECS.get(plugin_id)
+        result = browser_cdp.clear_cookies(str(spec["domain"])) if spec else False
+        cleared = result is True
+        clear_failed = result is None
+        if cleared:
+            removed.append("专用 Chrome cookie")
+
+        # 别用 removed 判断“都清了”：sidecar 没运行时 clear_cookies() 会直接
+        # 返回 False，但状态文件可能已经删掉，这时要说清楚 profile 里的登录态还在。
+        running = browser_cdp.alive()
+        parts: list[str] = []
+        if "登录窗口" in removed:
+            parts.append("登录窗口已关")
+        if "cookie" in removed:
+            parts.append("状态文件已删")
+        if cleared:
+            parts.append("专用 Chrome 的登录 cookie 已清")
+        if clear_failed:
+            parts.append("专用 Chrome 清理时出错，登录态可能还在")
+        elif not running and browser_cdp.profile_dir().exists():
+            parts.append("专用 Chrome 没在运行，profile 里的登录态还在")
+        elif running and not cleared:
+            parts.append("专用 Chrome 里没有清到该站点的 cookie（可能本来就没登录）")
+        return {"plugin": plugin_id, "removed": removed,
+                "message": "已退出：" + "；".join(parts) if parts else "本来就没有登录态"}
+
     profile = _profile_dir(plugin_id)
+    profile_removed = False
     if profile.exists():
         for attempt in range(5):        # 窗口刚关时文件还被占着，等一下重试
             try:
                 shutil.rmtree(profile)
                 removed.append("登录 profile")
+                profile_removed = True
                 break
             except OSError:
                 time.sleep(0.4)
+
+    # 和 CDP 分支一样按实际结果说话：只删了 cookie 文件就别宣称 profile 也删了。
+    parts: list[str] = []
+    if "登录窗口" in removed:
+        parts.append("登录窗口已关")
+    if "cookie" in removed:
+        parts.append("状态文件已删")
+    if profile_removed:
+        parts.append("登录窗口 profile 已删")
+    elif profile.exists():
+        parts.append("登录窗口 profile 没删掉（可能被占用）")
     return {"plugin": plugin_id, "removed": removed,
-            "message": "已退出：cookie 与登录窗口 profile 都删了" if removed else "本来就没有登录态"}
+            "message": "已退出：" + "；".join(parts) if parts else "本来就没有登录态"}
 
 
 def describe(plugin_id: str) -> dict[str, Any]:

@@ -14,6 +14,7 @@ import urllib.parse
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
+from plugin_runtime import browser_cdp
 from plugin_runtime.host import PluginHost
 from plugin_runtime.paths import state_root
 
@@ -98,15 +99,18 @@ def _login_probe(plugin_id: str) -> tuple[bool | None, str]:
     None = 这个平台没有可读的 cookie 文件（B 站由 bili CLI 管），
     不能据此断言「没登录」；真正是否可用由同步结果说话。
     """
+    if plugin_id == "bilibili" and auth_mod.bili_credential_ready():
+        return True, "B 站凭证已同步到 bili CLI"
     spec = auth_mod.SPECS.get(plugin_id)
     if spec is None:
-        if plugin_id == "bilibili":
-            home = state_root() / "toolhome" / "bili-cli" / "credential.json"
-            appdata = Path.home() / "AppData" / "Roaming" / "bili-cli" / "credential.json"
-            if home.is_file() or appdata.is_file():
-                return True, "B 站登录由 bili CLI 管理"
-            return None, "B 站登录由本机 bili CLI 管理，同步失败时会说明"
         return None, ""
+    if browser_cdp.enabled():
+        names = browser_cdp.cookie_names(str(spec["domain"]))
+        if any(n.lower() in {c.lower() for c in spec["cookies"]} for n in names):
+            return True, f"已登录（专用 Chrome 里有 {len(names)} 个 cookie）"
+        if browser_cdp.alive():
+            return False, f"专用 Chrome 里没有 {spec['cookies'][0]}，需要登录"
+        return None, "专用 Chrome 没在运行，启动后验证登录态"
     path = state_root() / "cookies" / f"{plugin_id}.json"
     if path.is_file():
         names = auth_mod._cookie_names(plugin_id)
@@ -597,7 +601,9 @@ def _platform_health(runner: RefreshRunner, store: Store) -> dict[str, Any]:
             if row:
                 out.append(row)
     attention = sum(1 for p in out if p["state"] in ("failed", "stale", "unavailable"))
-    return {"platforms": out, "plugin_errors": errors, "needs_attention": attention}
+    # 顶栏的采集胶囊只看「有内容/跑过」的平台；筛选 chips 还要知道装好但没抓过的平台。
+    return {"platforms": out, "plugin_errors": errors, "needs_attention": attention,
+            "plugin_ids": [m.id for m in manifests]}
 
 
 @router.get("/health")
@@ -608,7 +614,8 @@ def health(request: Request) -> dict:
     return {
         "ok": True, "version": __version__, "items": store.count(),
         "db": str(store.path), "plugins": len(store.list_plugins()),
-        "platforms": health_rows["platforms"], "demo": demo_mode(),
+        "platforms": health_rows["platforms"], "plugin_ids": health_rows["plugin_ids"],
+        "demo": demo_mode(),
         "refreshing": runner.running(),
         "plugin_errors": health_rows["plugin_errors"],
         "needs_attention": health_rows["needs_attention"],
@@ -1401,7 +1408,18 @@ def refresh(request: Request, payload: dict[str, Any] = Body(default={})) -> dic
             "code": "refresh_unavailable",
             "message": str(state.get("error") or "没有可用的插件"),
             "hint": "去设置页看插件目录和已安装插件；目录和清单都正常后再刷新"})
-    return {"ok": True, "state": state}
+
+    following: dict[str, Any] | None = None
+    if isinstance(payload, dict) and payload.get("with_following"):
+        # 顶栏「刷新全部平台」：信息流和关注流是两个库，必须同时触发。
+        # 关注流失败不能把已经启动的信息流回滚成 500，所以只回报状态。
+        try:
+            f_ok, f_state = _following_runner(request).trigger(
+                platforms=platforms, force=force, source=source)
+            following = {"started": bool(f_ok), "state": f_state}
+        except Exception as exc:  # noqa: BLE001 - 返回给前端定位，不影响信息流
+            following = {"started": False, "state": {"error": str(exc)[:200]}}
+    return {"ok": True, "state": state, "following": following}
 
 
 @router.get("/progress")
@@ -1538,7 +1556,14 @@ def _login_flow_hint() -> str:
 @router.get("/auth")
 def auth_rows() -> dict:
     """设置页「登录态」的行清单：后端有哪些登录流程，前端就画哪些行。"""
-    rows = [auth_mod.describe(pid) for pid in (*auth_mod.SPECS, *auth_mod.CLI_SPECS)]
+    # B 站同时出现在 SPECS（扫码）和 CLI_SPECS（二进制/凭证），行清单只能出现一次。
+    seen: set[str] = set()
+    rows = []
+    for pid in (*auth_mod.SPECS, *auth_mod.CLI_SPECS):
+        if pid in seen:
+            continue
+        seen.add(pid)
+        rows.append(auth_mod.describe(pid))
     return {"rows": rows}
 
 
@@ -1548,9 +1573,13 @@ def auth(request: Request, plugin_id: str) -> dict:
     info = auth_mod.describe(plugin_id)
     spec = auth_mod.SPECS.get(plugin_id)
     if spec is None:
-        # CLI 管的（B 站）或根本不需要登录的平台：如实说清楚，不给假按钮
+        # 纯 CLI 管的或根本不需要登录的平台：如实说清楚，不给假按钮
         return {**info, "state": "not_required",
                 "message": auth_mod.CLI_SPECS.get(plugin_id, {}).get("hint", "这个平台不需要登录")}
+
+    if plugin_id == "bilibili" and auth_mod.bili_credential_ready():
+        return {**info, "state": "available", "cookies": 0,
+                "message": "已登录（B 站凭证已同步给 bili CLI）", "hint": ""}
 
     path = state_root() / "cookies" / f"{plugin_id}.json"
     window = auth_mod.session_state(plugin_id)
@@ -1558,6 +1587,20 @@ def auth(request: Request, plugin_id: str) -> dict:
         return {**info, "state": "need_login", "window": window,
                 "message": f"{spec['label']}登录窗口开着，扫完会自动检测",
                 "hint": ""}
+    if browser_cdp.enabled():
+        names = browser_cdp.cookie_names(str(spec["domain"]))
+        ok = any(n.lower() in {c.lower() for c in spec["cookies"]} for n in names)
+        if not browser_cdp.alive():
+            return {**info, "state": "need_login",
+                    "message": f"专用 Chrome 没在运行，{spec['label']}登录态无法确认",
+                    "hint": "点「打开登录窗口」会启动专用 Chrome，并沿用已保存的 profile"}
+        if not ok:
+            return {**info, "state": "need_login",
+                    "message": f"专用 Chrome 里还没有 {spec['label']}登录态",
+                    "hint": "点「打开登录窗口」，在专用 Chrome 里扫码；登录完回到这里点「我已完成登录」"}
+        return {**info, "state": "available",
+                "message": f"已登录（专用 Chrome 里有 {len(names)} 个 cookie）",
+                "hint": "", "cookies": len(names)}
     if not path.exists():
         return {**info, "state": "need_login",
                 "message": f"{spec['label']}还没登录",

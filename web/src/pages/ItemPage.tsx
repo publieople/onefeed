@@ -549,12 +549,38 @@ function SummaryPanel({
     );
   }
 
+  // 规则兜底且没有要点时，真正的内容只有标题；别再把它标成「AI 总结」，否则用户以为 AI 坏了。
+  const rulesOnly = Boolean(s && s.engine === "rules" && !s.provider);
+  if (rulesOnly && s && !s.points.length) {
+    return (
+      <div className="mt-5 rounded-xl border border-line p-5">
+        <p className="text-[13px] leading-relaxed text-muted">
+          还没有配置可用的 AI 模型，这条暂时只能显示标题：
+          <span className="ml-1 text-ink">{s.tldr}</span>
+        </p>
+        <p className="mt-3 flex flex-wrap items-center gap-3 text-[12px]">
+          <Link to="/settings" className="underline underline-offset-2 hover:text-ink">
+            去设置添加模型
+          </Link>
+          <a href={url} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2 hover:text-ink">
+            先去原站看
+          </a>
+        </p>
+      </div>
+    );
+  }
+
   // body 可能来自流式半成品，这时还没有 payload：页脚一律按「有 payload 才渲染」来取值
   const basis = s ? BASIS_LABEL[s.basis] || s.basis_text || "素材" : "";
   const meta = s ? [s.provider, s.model, s.ms ? (s.ms / 1000).toFixed(1) + "s" : ""].filter(Boolean).join(" · ") : "";
 
   return (
     <div className="fade-in mt-5 rounded-xl border border-line p-5">
+      {rulesOnly ? (
+        <p className="mb-3 rounded-lg bg-wash px-2.5 py-1.5 text-[12px] leading-relaxed text-muted">
+          这段要点由本地规则整理，还没有用 AI 模型；配好模型后会按「简洁 / 平衡 / 详细」重写。
+        </p>
+      ) : null}
       {rewriting ? (
         <div
           role="status"
@@ -710,6 +736,7 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
   const [detailLoading, setDetailLoading] = useState(() => !peekItem(id)?.detail);
   const [comments, setComments] = useState<CommentsResponse | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentsRetry, setCommentsRetry] = useState(0);
   const [commentNext, setCommentNext] = useState<string | null>(null);
   const [commentExpanded, setCommentExpanded] = useState(false);
   const [commentLoadingMore, setCommentLoadingMore] = useState(false);
@@ -788,26 +815,34 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
   useEffect(() => {
     if (!id) return;
     let alive = true;
+    const controller = new AbortController();
+    // 有的平台评论要滚动抓十几秒；不设上限会让骨架一直转，先让用户看到「慢」而不是「坏」。
+    const timer = window.setTimeout(() => controller.abort(), 15000);
     setComments(null);
     setCommentsLoading(true);
     setCommentNext(null);
     setCommentExpanded(false);
-    getJSON<CommentsResponse>("/api/item/" + encodeURIComponent(id) + "/comments?limit=20")
+    getJSON<CommentsResponse>("/api/item/" + encodeURIComponent(id) + "/comments?limit=20", controller.signal)
       .then((d) => {
         if (!alive) return;
         setComments(d);
         setCommentNext(d.next ?? null);
       })
       .catch((err: Error) => {
-        if (alive) setComments({ supported: true, items: [], count: 0, next: null, error: err.message });
+        if (!alive) return;
+        const message = err.name === "AbortError" ? "评论加载较慢，已先显示其他内容；稍后可重试。" : err.message;
+        setComments({ supported: true, items: [], count: 0, next: null, error: message });
       })
       .finally(() => {
+        window.clearTimeout(timer);
         if (alive) setCommentsLoading(false);
       });
     return () => {
       alive = false;
+      window.clearTimeout(timer);
+      controller.abort();
     };
-  }, [id]);
+  }, [id, commentsRetry]);
 
   /* 总结走流式：先出 TLDR，再一条条出要点，比干等十几秒好受得多 */
   const summaryAlive = useRef(true);
@@ -1473,9 +1508,16 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
             {comments.reason || "这个平台暂时读不到评论。"}
           </p>
         ) : comments.error ? (
-          <p className="mt-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-700 dark:text-amber-300">
-            评论没取到：{comments.error}
-          </p>
+          <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-700 dark:text-amber-300">
+            <span>评论没取到：{comments.error}</span>
+            <button
+              type="button"
+              onClick={() => setCommentsRetry((n) => n + 1)}
+              className="ml-2 underline underline-offset-2 hover:text-ink"
+            >
+              重试
+            </button>
+          </div>
         ) : comments.items.length === 0 ? (
           <p className="mt-2 text-[12px] text-fade">暂时没取到评论。</p>
         ) : (

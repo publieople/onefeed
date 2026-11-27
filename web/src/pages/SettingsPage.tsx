@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Copy, ExternalLink, LogIn, LogOut, RefreshCw, RotateCcw, Save } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { OutletCtx } from "../App";
 import {
   agentRuns,
@@ -20,7 +20,7 @@ import {
   type SettingsValues,
 } from "../api";
 import { timeAgo } from "../format";
-import { PLATFORMS, platform } from "../platform";
+import { PLATFORMS, platform, platformList } from "../platform";
 import SettingSection from "../components/SettingSection";
 import AiProviders from "../components/AiProviders";
 import { choiceDialog, confirmDialog } from "../components/ui/Confirm";
@@ -144,6 +144,19 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const [active, setActive] = useState("status");
   const [runs, setRuns] = useState<AgentRunRow[]>([]);
   const reduce = useReducedMotion();
+  const [searchParams] = useSearchParams();
+  const sectionParam = searchParams.get("section");
+
+  // 从空态的新手引导点进来时，直接展开目标分区并滚过去，别让人再找一遍。
+  useEffect(() => {
+    if (!sectionParam || !SECTIONS.some((s) => s.id === sectionParam)) return;
+    setOpen((prev) => ({ ...prev, [sectionParam]: true }));
+    const timer = window.setTimeout(() => {
+      // 等折叠区展开、骨架高度落定后再定位；滚动动画会在布局变化时提前结束。
+      document.getElementById(sectionParam)?.scrollIntoView({ behavior: "auto", block: "start" });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [sectionParam, reduce]);
   const copyTimer = useRef(0);
   const navigate = useNavigate();
   // 没保存就站内离开时的三道拦截：链接点击、浏览器返回、关标签页（beforeunload 在下面）
@@ -440,15 +453,15 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const logout = async (id: string) => {
     const ok = await confirmDialog({
       title: "退出这个平台的登录？",
-      body: "本机保存的 cookie 会被删除，之后刷新这个平台要重新扫码。",
+      body: "会尝试删除本机保存的 cookie；如果专用 Chrome 没在运行，Chrome 里的登录态可能还在。之后刷新这个平台要重新扫码。",
       confirmText: "退出登录",
       tone: "danger",
     });
     if (!ok) return;
     try {
-      await postJSON("/api/auth/" + id + "/logout");
+      const data = await postJSON<{ message?: string }>("/api/auth/" + id + "/logout");
       setLogin((prev) => ({ ...prev, [id]: { plugin: id, state: "idle" } }));
-      flash("已退出并删除本机 cookie");
+      flash(data?.message || "已退出登录");
       void load();
       void ctx.bump();
     } catch (err) {
@@ -507,6 +520,8 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const authReady = authRows.filter((id) => auth[id]?.state === "available").length;
   const installed = plugins?.installed ?? [];
   const enabledCount = installed.filter((p) => p.enabled).length;
+  // 设置里的间隔输入跟着后端已装清单走，别让用户看到不存在的平台。
+  const intervalPlatforms = plugins ? platformList(installed.map((p) => p.id)) : PLATFORMS;
 
   const jump = (id: string) => {
     setOpen((prev) => ({ ...prev, [id]: true }));
@@ -728,7 +743,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                     手点刷新也受这个限制；真急着抓，可在刷新完成的提示里点「仍要抓」。
                   </p>
                   <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
-                    {PLATFORMS.map((p) => (
+                    {intervalPlatforms.map((p) => (
                       <label key={p.id} className="block">
                         <span className="text-[12px] text-muted">{p.label}</span>
                         <input
@@ -981,7 +996,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
             open={Boolean(open.auth)}
             onToggle={() => setOpen((prev) => ({ ...prev, auth: !prev.auth }))}
           >
-            <p className="text-[12px] text-fade">登录窗口是独立的 Chrome，登录完会自动关掉。</p>
+            <p className="text-[12px] text-fade">登录窗口是独立的 Chrome；扫码完成后回到这里点「我已完成登录」，窗口可自行关闭。</p>
             <ul className="mt-3 space-y-2">
               {authRows.map((id) => {
                 const state = auth[id];
@@ -1037,6 +1052,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
                     <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
                       {login[id] ? LOGIN_TEXT[login[id].state] + (login[id].message ? " · " + login[id].message : "") : state?.message || "还没检查"}
                     </p>
+                    {state?.impact ? <p className="mt-1 text-[12px] leading-relaxed text-fade">{state.impact}</p> : null}
                     {state?.hint && !login[id] && state.hint !== state.message ? <p className="mt-1 text-[12px] text-fade">{state.hint}</p> : null}
                     {isCli && state?.command ? (
                       <p className="mt-1 font-mono text-[12px] text-fade">

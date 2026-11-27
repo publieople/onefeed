@@ -60,6 +60,8 @@ export interface OutletCtx {
   /** 只重试指定平台（保留冷却语义，不整轮重跑） */
   refreshPlatforms: (platforms: string[]) => void;
   summary: Summary | null;
+  /** health.platforms = 有内容/跑过的平台；plugin_ids 补上已装但还没抓过的插件，筛选 chips 用。 */
+  health: Health | null;
   settings: SettingsResponse | null;
   reloadSettings: () => Promise<void>;
   bump: () => void;
@@ -174,13 +176,15 @@ export default function App() {
   }, [reloadSettings]);
 
   const loadSummary = useCallback(async () => {
-    try {
-      const [s, h] = await Promise.all([getJSON<Summary>("/api/summary"), getJSON<Health>("/api/health")]);
-      setSummary(s);
-      setHealth(h);
-      demoRef.current = Boolean(h.demo);
-    } catch {
-      /* 摘要失败不影响主流程 */
+    // 摘要和健康检查互不依赖：health 挂了不能让首页连条目和计数都空掉。
+    const [summaryRes, healthRes] = await Promise.allSettled([
+      getJSON<Summary>("/api/summary"),
+      getJSON<Health>("/api/health"),
+    ]);
+    if (summaryRes.status === "fulfilled") setSummary(summaryRes.value);
+    if (healthRes.status === "fulfilled") {
+      setHealth(healthRes.value);
+      demoRef.current = Boolean(healthRes.value.demo);
     }
   }, []);
 
@@ -293,7 +297,11 @@ export default function App() {
       return;
     }
     try {
-      const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", { force: bypass });
+      const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", {
+        force: bypass,
+        // 顶栏是「刷新全部平台」：信息流和关注流同时开始，别只刷一半。
+        with_following: true,
+      });
       const state = res?.state;
       // 全部平台都在冷却时后端不会起线程：这一刻就能说清楚，不必等下一轮轮询。
       if (state && !state.running && state.error && state.error.includes("冷却")) {
@@ -373,6 +381,7 @@ export default function App() {
     try {
       const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", {
         source: "auto",
+        with_following: true,
         ...(platforms?.length ? { platforms } : {}),
       });
       const state = res?.state;
@@ -433,7 +442,7 @@ export default function App() {
   const ctx: OutletCtx = {
     progress, reloadKey, refreshSeq, autoKey, autoRunning, autoProgress, autoResult, autoRefresh,
     refresh, refreshPlatforms,
-    summary, settings, reloadSettings, bump,
+    summary, health, settings, reloadSettings, bump,
   };
 
   return (

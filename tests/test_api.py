@@ -71,6 +71,8 @@ def main() -> int:
         check(body["ok"] is True and body["items"] == 6, "health 报条目数")
         check({p["platform"] for p in body["platforms"]} == {"bilibili", "xiaohongshu"},
               "health 报平台统计")
+        check(isinstance(body.get("plugin_ids"), list),
+              "health 带插件 id 列表，chips 才能显示还没抓过内容的平台")
 
         # feed 默认
         f = client.get("/api/feed")

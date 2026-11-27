@@ -155,12 +155,15 @@ def check_web() -> Check:
 
 
 def check_login() -> list[Check]:
-    from onefeed.auth import CLI_SPECS, SPECS
+    from onefeed.auth import CLI_SPECS, SPECS, bili_credential_ready
 
     out: list[Check] = []
     cookies_dir = state_root() / "cookies"
     for plugin_id, spec in SPECS.items():
         label = spec.get("label", plugin_id)
+        if plugin_id == "bilibili" and bili_credential_ready():
+            out.append(Check(f"{label}登录态", "ok", "已登录 · bili CLI 凭证可读"))
+            continue
         path = cookies_dir / f"{plugin_id}.json"
         if not path.is_file():
             out.append(Check(f"{label}登录态", "warn", "未登录 · " + str(spec.get("impact", "")),
