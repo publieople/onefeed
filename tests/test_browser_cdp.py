@@ -16,17 +16,30 @@ from plugin_runtime import browser_cdp, capabilities  # noqa: E402
 
 def case_endpoint_and_enabled():
     old = os.environ.pop("ONEFEED_BROWSER_CDP", None)
+    old_port = os.environ.pop("ONEFEED_CHROME_PORT", None)
     try:
+        # 不设变量 = 默认开启 CDP（9223）；显式空字符串才是关闭。
+        assert browser_cdp.endpoint() == "http://127.0.0.1:9223"
+        assert browser_cdp.enabled() is True
+        os.environ["ONEFEED_CHROME_PORT"] = "9333"
+        assert browser_cdp.endpoint() == "http://127.0.0.1:9333"
+        os.environ["ONEFEED_CHROME_PORT"] = "0"
+        assert browser_cdp.endpoint() == "http://127.0.0.1:9223"
+        os.environ["ONEFEED_BROWSER_CDP"] = "  http://127.0.0.1:9444/  "
+        assert browser_cdp.endpoint() == "http://127.0.0.1:9444"
+        assert browser_cdp.enabled() is True
+        os.environ["ONEFEED_BROWSER_CDP"] = ""
         assert browser_cdp.endpoint() is None
         assert browser_cdp.enabled() is False
-        os.environ["ONEFEED_BROWSER_CDP"] = "  http://127.0.0.1:9333/  "
-        assert browser_cdp.endpoint() == "http://127.0.0.1:9333"
-        assert browser_cdp.enabled() is True
     finally:
         if old is None:
             os.environ.pop("ONEFEED_BROWSER_CDP", None)
         else:
             os.environ["ONEFEED_BROWSER_CDP"] = old
+        if old_port is None:
+            os.environ.pop("ONEFEED_CHROME_PORT", None)
+        else:
+            os.environ["ONEFEED_CHROME_PORT"] = old_port
     print("case_endpoint_and_enabled ok")
 
 

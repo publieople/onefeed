@@ -6,7 +6,8 @@ OneFeed 通过 CDP 接管它做采集和登录。这样设备信任、localStora
 的浏览器态都在同一个真实 profile 里，风控看到的也更接近真实用户。
 
 配置（环境变量）：
-- ONEFEED_BROWSER_CDP：CDP endpoint，例如 http://127.0.0.1:9223。为空表示关闭。
+- ONEFEED_BROWSER_CDP：CDP endpoint，例如 http://127.0.0.1:9223。未设置时默认
+  http://127.0.0.1:9223；显式设为空字符串表示关闭。
 - ONEFEED_BROWSER_PROFILE：sidecar 的 user-data-dir；默认 <状态目录>/chrome-profile。
 - ONEFEED_CHROME_EXE：Chrome 可执行文件；默认自动查找 Windows Chrome/Edge。
 - ONEFEED_CHROME_PORT：sidecar 端口，默认 9223（仅在 endpoint 未给端口时用）。
@@ -27,7 +28,14 @@ DEFAULT_PORT = 9223
 
 
 def endpoint() -> str | None:
-    raw = str(os.environ.get("ONEFEED_BROWSER_CDP") or "").strip()
+    raw = os.environ.get("ONEFEED_BROWSER_CDP")
+    if raw is None:
+        # 默认走 CDP：不设变量时用本机 9223；显式空字符串才关闭。
+        port = str(os.environ.get("ONEFEED_CHROME_PORT") or "").strip()
+        if not port.isdigit() or not (1 <= int(port) <= 65535):
+            port = str(DEFAULT_PORT)
+        return f"http://127.0.0.1:{port}"
+    raw = raw.strip()
     if not raw:
         return None
     return raw.rstrip("/")
@@ -129,7 +137,7 @@ def ensure(timeout: float = 20.0) -> str:
     """确保 sidecar 可达；可达直接返回 endpoint，不可达时尝试拉起并等待。"""
     url = endpoint()
     if not url:
-        raise RuntimeError("ONEFEED_BROWSER_CDP 未配置，专用 Chrome 模式没开")
+        raise RuntimeError("CDP 模式已关闭（ONEFEED_BROWSER_CDP 为空字符串）")
     if _alive(url):
         return url
     _launch(url)
