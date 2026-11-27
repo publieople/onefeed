@@ -1326,6 +1326,11 @@ def media(request: Request, item_id: str, slot: str,
         try:
             status, headers, resp = media_mod.open_stream(
                 target["url"], referer=target["referer"], cookie=cookie, range_header=range_header)
+        except PermissionError as exc:  # OF-03：插件给的地址指向本机/内网，拒绝代取
+            sem.release()
+            raise HTTPException(status_code=400, detail={
+                "code": "media_blocked", "message": str(exc)[:300],
+                "hint": "详情里的媒体地址不在公网，宿主不再代取；点原帖看"})
         except Exception as exc:  # 网络层失败：别把半截流当成功
             sem.release()
             raise HTTPException(status_code=502, detail={

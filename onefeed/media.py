@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterator
 
+from plugin_runtime import capabilities
 from plugin_runtime.capabilities import UA
 from plugin_runtime.paths import state_root
 
@@ -106,7 +107,15 @@ def _read_cached_image(key: str) -> tuple[bytes, str] | None:
         return None
     if not raw:
         return None
-    return raw, _sniff_mime(raw)
+    mime = _sniff_mime(raw)
+    if not mime:
+        # OF-03：旧版本认不出类型时会兜底成 image/jpeg，缓存里可能躺着 JSON/HTML。
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+    return raw, mime
 
 
 def _write_cached_image(key: str, raw: bytes) -> None:
@@ -120,7 +129,11 @@ def _write_cached_image(key: str, raw: bytes) -> None:
 
 
 def _sniff_mime(raw: bytes) -> str:
-    """按文件头判断类型：CDN 返回的 Content-Type 经常是 application/octet-stream。"""
+    """按文件头判断类型：CDN 返回的 Content-Type 经常是 application/octet-stream。
+
+    OF-03：认不出来就回空串。以前兜底成 image/jpeg，于是任何 JSON/HTML 都被当成
+    「图片」写进缓存、再原样返回给前端——媒体边车等于替插件读了一次宿主内网。
+    """
     head = raw[:12]
     if head.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
@@ -130,7 +143,7 @@ def _sniff_mime(raw: bytes) -> str:
         return "image/gif"
     if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
         return "image/webp"
-    return "image/jpeg"
+    return ""
 
 
 def fetch_image(url: str, referer: str = "", plugin_id: str = "",
@@ -142,7 +155,10 @@ def fetch_image(url: str, referer: str = "", plugin_id: str = "",
         return cached
     cookie = cookie_header(plugin_id) if plugin_id else ""
     for attempt in range(2):
-        status, _headers, resp = open_stream(url, referer=referer, cookie=cookie)
+        try:
+            status, _headers, resp = open_stream(url, referer=referer, cookie=cookie)
+        except PermissionError:
+            return None  # OF-03：非公网地址不代取，也别让一条总结因此失败
         try:
             raw = resp.read(IMAGE_MAX_BYTES)
         except Exception:  # noqa: BLE001 - 网络抖动按失败处理
@@ -197,6 +213,9 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
     """跨域跳转时把 Cookie / Referer 丢掉，别把登录态送到 CDN 之外的域。"""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        # OF-03：媒体地址来自插件，一次 302 同样能指向本机；每一跳都要过公网判定。
+        if not capabilities._is_public_http(newurl):
+            raise PermissionError(f"媒体重定向到非公网地址：{newurl}")
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new is None:
             return None
@@ -213,7 +232,13 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
 
 def open_stream(url: str, referer: str = "", cookie: str = "",
                 range_header: str | None = None) -> tuple[int, dict[str, str], Any]:
-    """发起一次媒体请求，返回 (status, headers, response)。调用方负责 close。"""
+    """发起一次媒体请求，返回 (status, headers, response)。调用方负责 close。
+
+    OF-03：媒体 URL 由插件产出，和插件 http 能力一样只允许公网地址——否则插件把
+    media.url 写成 http://127.0.0.1:8795/api/settings，宿主就成了替它读内网的跳板。
+    """
+    if not capabilities._is_public_http(url):
+        raise PermissionError(f"媒体地址不是公网 http(s)：{url}")
     headers = {"User-Agent": UA, "Accept": "*/*"}
     if referer:
         headers["Referer"] = referer
