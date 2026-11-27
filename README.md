@@ -167,16 +167,23 @@ uv run python -m onefeed --preflight
 断网也不慌：离线快照在 [`docs/submission/demo/index.html`](docs/submission/demo/index.html)，双击就能看 63 条真实数据、
 7 个平台、详情抽屉与插件市场说明，不依赖 Python 和网络。真实版本要现场采集，断网时先用快照顶住，网恢复再演实时。
 
-**登录怎么给**：设置页里点「打开登录窗口」，宿主用 Playwright 起一个**独立的 Chrome 窗口**
-（profile 在 `<状态目录>/login/<plugin-id>/`，不碰你日常浏览器），你在窗口里扫码/输密码，
+**登录怎么给**：设置页里点「打开登录窗口」，宿主会连到一个**专用 Chrome sidecar**
+（独立 `user-data-dir`，默认 CDP `http://127.0.0.1:9223`，不碰你日常浏览器），
+在它里面打开该平台的登录页；你在窗口里扫码/输密码，登录态留在 sidecar profile。
 宿主每 2 秒读一次 cookie，看到登录态就落盘并**自动关窗**。四态分别是
 `idle`（没窗口）/ `waiting`（窗口开着，等你登录）/ `ok`（拿到 cookie）/ `closed`（窗口被关掉）。
 判据只认登录后才出现的 cookie（小红书 `id_token`，抖音 `sessionid` / `sessionid_ss`）。
 
-**登录态怎么给插件**：落盘位置是 `<状态目录>/cookies/<plugin-id>.json`
+要启用 sidecar，设置 `ONEFEED_BROWSER_CDP`（默认 `http://127.0.0.1:9223`）、
+`ONEFEED_BROWSER_PROFILE`（独立 profile 目录）；未设置时回退到旧的 Playwright persistent context
+（每个插件一个 `<状态目录>/login/<plugin-id>/` profile）。
+
+**登录态怎么给插件**：CDP 模式下插件直接复用同一个 sidecar profile，不再注入 cookie；
+旧模式仍把登录态写到 `<状态目录>/cookies/<plugin-id>.json`
 （`{"cookies":[{"name","value","domain",...}]}`，也接受 `{name: value}` 的字典形式），
 宿主按插件 `settings.cookieFile` → 该默认路径的顺序找到它，在 `browser` 抓取前注入。
-插件始终读不到 cookie 明文。「退出」会删 cookie 文件和登录 profile，下次登录是全新窗口。
+状态文件在两种模式下都会写，供设置页显示登录状态。「退出」会删状态文件；
+CDP 模式下还会清 sidecar 的登录 cookie，但不删共享 profile。
 
 B 站不弹窗：它的登录态由本机 `bili` CLI 管，设置页只给你一条 `bili login` 命令。
 
@@ -220,7 +227,7 @@ onefeed/
 │   ├── store.py           SQLite（items / runs / plugins，游标分页）
 │   ├── service.py         RefreshRunner（串行采集、进度、剪枝）
 │   ├── settings.py        设置读写（env > settings.json > 默认值）
-│   ├── auth.py            登录窗口（Playwright 持久上下文 + cookie 轮询）
+│   ├── auth.py            登录窗口（CDP / Playwright 持久上下文 + cookie 轮询）
 │   ├── market.py          registry 拉取 / 下载 / sha256 校验 / 安装
 │   ├── smart.py           同题聚类、一句话筛选、推荐理由
 │   ├── preflight.py       现场自检（--preflight：依赖 / 插件 / 登录态 / 端口 / 网络）
