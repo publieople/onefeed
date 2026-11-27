@@ -86,6 +86,15 @@ def case_launch_args_include_proxy():
     print("case_launch_args_include_proxy ok")
 
 
+def case_domain_matches_site_and_subdomains():
+    assert browser_cdp._domain_matches(".zhihu.com", ".zhihu.com")
+    assert browser_cdp._domain_matches("www.zhihu.com", ".zhihu.com")
+    assert browser_cdp._domain_matches("zhihu.com", "zhihu.com")
+    assert not browser_cdp._domain_matches("notzhihu.com", ".zhihu.com")
+    assert not browser_cdp._domain_matches("zhihu.com.evil.test", ".zhihu.com")
+    print("case_domain_matches_site_and_subdomains ok")
+
+
 def case_clear_cookies_does_not_launch():
     old = os.environ.get("ONEFEED_BROWSER_CDP")
     os.environ["ONEFEED_BROWSER_CDP"] = "http://127.0.0.1:9223"
@@ -104,7 +113,8 @@ def case_clear_cookies_does_not_launch():
 
 def main() -> int:
     cases = [case_endpoint_and_enabled, case_profile_dir, case_win_path,
-             case_launch_args_include_proxy, case_clear_cookies_does_not_launch]
+             case_launch_args_include_proxy, case_domain_matches_site_and_subdomains,
+             case_clear_cookies_does_not_launch]
     for case in cases:
         case()
     print(f"test_browser_cdp: {len(cases)} cases passed")

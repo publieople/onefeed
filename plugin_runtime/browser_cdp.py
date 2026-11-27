@@ -154,8 +154,64 @@ def connect(pw) -> tuple[Any, Any]:
     return browser, ctx
 
 
-def clear_cookies() -> bool:
-    """清掉 sidecar 里的登录 cookie；Chrome 没开就返回 False，不主动拉起。"""
+def _domain_matches(domain: str, suffix: str) -> bool:
+    """cookie 的 domain 是否属于某个站点（忽略前导点，匹配子域）。"""
+    left = str(domain or "").strip().lower().lstrip(".")
+    right = str(suffix or "").strip().lower().lstrip(".")
+    if not left or not right:
+        return False
+    return left == right or left.endswith("." + right)
+
+
+_COOKIE_CACHE: tuple[float, tuple[dict[str, Any], ...]] | None = None
+
+
+def alive() -> bool:
+    """sidecar 当前是否可达（不负责拉起）。"""
+    url = endpoint()
+    return bool(url and _alive(url))
+
+
+def cookies(ttl: float = 2.0) -> list[dict[str, Any]]:
+    """读 sidecar 当前 cookie；Chrome 没开就返回空，不主动拉起。"""
+    global _COOKIE_CACHE
+    if not endpoint():
+        return []
+    now = time.time()
+    if _COOKIE_CACHE is not None and now - _COOKIE_CACHE[0] <= ttl:
+        return [dict(c) for c in _COOKIE_CACHE[1]]
+    if not alive():
+        _COOKIE_CACHE = (now, ())
+        return []
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as pw:
+            _browser, ctx = connect(pw)
+            rows = tuple(dict(c) for c in ctx.cookies())
+        _COOKIE_CACHE = (now, rows)
+        return [dict(c) for c in rows]
+    except Exception:
+        return []
+
+
+def cookie_names(domain: str | None = None, ttl: float = 2.0) -> set[str]:
+    """sidecar 里的 cookie 名；domain 非空时只算该站点（含子域）。"""
+    return {str(c.get("name")) for c in cookies(ttl=ttl)
+            if c.get("name") and (not domain or _domain_matches(str(c.get("domain") or ""), domain))}
+
+
+def _invalidate_cookies() -> None:
+    global _COOKIE_CACHE
+    _COOKIE_CACHE = None
+
+
+def clear_cookies(domain: str | None = None) -> bool:
+    """清掉 sidecar 里的登录 cookie；Chrome 没开就返回 False，不主动拉起。
+
+    domain 非空时只清该站点（含子域）的 cookie。sidecar 是四个平台共用的，
+    退出一个平台不能把其他平台的登录态一起清掉。
+    """
     url = endpoint()
     if not url or not _alive(url):
         return False
@@ -164,8 +220,17 @@ def clear_cookies() -> bool:
 
         with sync_playwright() as pw:
             _browser, ctx = connect(pw)
-            ctx.clear_cookies()
-        return True
+            if not domain:
+                ctx.clear_cookies()
+                _invalidate_cookies()
+                return True
+            cookies = [c for c in ctx.cookies()
+                       if _domain_matches(str(c.get("domain") or ""), domain)]
+            scopes = sorted({str(c.get("domain") or "") for c in cookies if c.get("domain")})
+            for scope in scopes:
+                ctx.clear_cookies(domain=scope)
+            _invalidate_cookies()
+            return bool(scopes)
     except Exception:
         return False
 

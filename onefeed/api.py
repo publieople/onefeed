@@ -14,6 +14,7 @@ import urllib.parse
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
+from plugin_runtime import browser_cdp
 from plugin_runtime.host import PluginHost
 from plugin_runtime.paths import state_root
 
@@ -107,6 +108,13 @@ def _login_probe(plugin_id: str) -> tuple[bool | None, str]:
                 return True, "B 站登录由 bili CLI 管理"
             return None, "B 站登录由本机 bili CLI 管理，同步失败时会说明"
         return None, ""
+    if browser_cdp.enabled():
+        names = browser_cdp.cookie_names(str(spec["domain"]))
+        if any(n.lower() in {c.lower() for c in spec["cookies"]} for n in names):
+            return True, f"已登录（专用 Chrome 里有 {len(names)} 个 cookie）"
+        if browser_cdp.alive():
+            return False, f"专用 Chrome 里没有 {spec['cookies'][0]}，需要登录"
+        return None, "专用 Chrome 没在运行，启动后验证登录态"
     path = state_root() / "cookies" / f"{plugin_id}.json"
     if path.is_file():
         names = auth_mod._cookie_names(plugin_id)
@@ -1558,6 +1566,20 @@ def auth(request: Request, plugin_id: str) -> dict:
         return {**info, "state": "need_login", "window": window,
                 "message": f"{spec['label']}登录窗口开着，扫完会自动检测",
                 "hint": ""}
+    if browser_cdp.enabled():
+        names = browser_cdp.cookie_names(str(spec["domain"]))
+        ok = any(n.lower() in {c.lower() for c in spec["cookies"]} for n in names)
+        if not browser_cdp.alive():
+            return {**info, "state": "need_login",
+                    "message": f"专用 Chrome 没在运行，{spec['label']}登录态无法确认",
+                    "hint": "点「打开登录窗口」会启动专用 Chrome，并沿用已保存的 profile"}
+        if not ok:
+            return {**info, "state": "need_login",
+                    "message": f"专用 Chrome 里还没有 {spec['label']}登录态",
+                    "hint": "点「打开登录窗口」，在专用 Chrome 里扫码；登录完回到这里点「我已完成登录」"}
+        return {**info, "state": "available",
+                "message": f"已登录（专用 Chrome 里有 {len(names)} 个 cookie）",
+                "hint": "", "cookies": len(names)}
     if not path.exists():
         return {**info, "state": "need_login",
                 "message": f"{spec['label']}还没登录",

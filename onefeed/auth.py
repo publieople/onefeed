@@ -349,6 +349,18 @@ def check(plugin_id: str) -> dict[str, Any]:
                 data["message"] = "登录窗口已经关了；重新打开一次就行"
         return data
 
+    if browser_cdp.enabled():
+        names = browser_cdp.cookie_names(str(spec["domain"]))
+        if any(n in set(spec["cookies"]) for n in names):
+            return {"plugin": plugin_id, "state": "ok", "cookies": len(names),
+                    "path": str(_cookie_path(plugin_id)),
+                    "message": f"已登录（专用 Chrome 里有 {len(names)} 个 cookie）"}
+        if not browser_cdp.alive():
+            return {"plugin": plugin_id, "state": "idle", "cookies": len(names),
+                    "message": "专用 Chrome 没在运行；打开登录窗口会沿用已保存的 profile"}
+        return {"plugin": plugin_id, "state": "idle", "cookies": len(names),
+                "message": "专用 Chrome 里还没登录；打开登录窗口扫码"}
+
     names = _cookie_names(plugin_id)
     if any(n in set(spec["cookies"]) for n in names):
         return {"plugin": plugin_id, "state": "ok", "cookies": len(names),
@@ -377,7 +389,8 @@ def logout(plugin_id: str) -> dict[str, Any]:
         removed.append("cookie")
 
     if browser_cdp.enabled():
-        if browser_cdp.clear_cookies():
+        spec = SPECS.get(plugin_id)
+        if spec and browser_cdp.clear_cookies(str(spec["domain"])):
             removed.append("专用 Chrome cookie")
         return {"plugin": plugin_id, "removed": removed,
                 "message": "已退出：状态文件与专用 Chrome 的登录 cookie 都清了" if removed else "本来就没有登录态"}
