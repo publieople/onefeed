@@ -432,8 +432,30 @@ def test_platform_chips_follow_installed_plugins() -> None:
     """筛选 chips 要跟已装插件走：只拿 summary 会漏掉已装但还没内容的平台。"""
     assert "health: Health | null;" in APP
     assert "summary, health, settings, reloadSettings, bump," in APP
-    assert "ctx.health?.platforms.map((p) => p.platform)" in FEED
-    assert "?? ctx.summary?.platforms.map((p) => p.platform)" in FEED
+    assert "const chipPlatforms = ctx.health" in FEED
+    assert "ctx.health.plugin_ids ?? []" in FEED
+    assert "platforms={chipPlatforms}" in FEED
+    assert "ctx.health?.platforms.length" not in FEED, "旧写法会把没内容的已装平台漏掉"
+
+
+@case
+def test_health_outage_does_not_blank_the_feed() -> None:
+    """health 只是顶栏附属品，挂了不能连 summary/条目一起清空。"""
+    assert "await Promise.allSettled([" in APP
+    assert 'getJSON<Summary>("/api/summary")' in APP
+    assert 'getJSON<Health>("/api/health")' in APP
+    assert 'if (summaryRes.status === "fulfilled") setSummary(summaryRes.value);' in APP
+    assert 'if (healthRes.status === "fulfilled") {' in APP
+
+
+@case
+def test_logout_uses_backend_message() -> None:
+    """退出登录要把后端真实清理结果告诉用户，不能固定说 cookie 已删。"""
+    settings = read("pages", "SettingsPage.tsx")
+    assert "postJSON<{ message?: string }>" in settings
+    assert '("/api/auth/" + id + "/logout")' in settings
+    assert 'flash(data?.message || "已退出登录");' in settings
+    assert "Chrome 里的登录态可能还在" in settings
 
 
 @case

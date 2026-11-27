@@ -60,7 +60,7 @@ export interface OutletCtx {
   /** 只重试指定平台（保留冷却语义，不整轮重跑） */
   refreshPlatforms: (platforms: string[]) => void;
   summary: Summary | null;
-  /** 健康检查里的平台清单 = 已装插件 + 有旧内容但插件已缺失的平台，筛选 chips 用它。 */
+  /** health.platforms = 有内容/跑过的平台；plugin_ids 补上已装但还没抓过的插件，筛选 chips 用。 */
   health: Health | null;
   settings: SettingsResponse | null;
   reloadSettings: () => Promise<void>;
@@ -176,13 +176,15 @@ export default function App() {
   }, [reloadSettings]);
 
   const loadSummary = useCallback(async () => {
-    try {
-      const [s, h] = await Promise.all([getJSON<Summary>("/api/summary"), getJSON<Health>("/api/health")]);
-      setSummary(s);
-      setHealth(h);
-      demoRef.current = Boolean(h.demo);
-    } catch {
-      /* 摘要失败不影响主流程 */
+    // 摘要和健康检查互不依赖：health 挂了不能让首页连条目和计数都空掉。
+    const [summaryRes, healthRes] = await Promise.allSettled([
+      getJSON<Summary>("/api/summary"),
+      getJSON<Health>("/api/health"),
+    ]);
+    if (summaryRes.status === "fulfilled") setSummary(summaryRes.value);
+    if (healthRes.status === "fulfilled") {
+      setHealth(healthRes.value);
+      demoRef.current = Boolean(healthRes.value.demo);
     }
   }, []);
 

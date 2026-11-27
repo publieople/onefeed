@@ -149,6 +149,13 @@ export default function FeedPage({ ctx }: Props) {
   // 列数按网格实测宽度算（侧栏开合、窗口缩放都走这条），不再用 md:/xl: 视口断点
   const grid = useGridCols();
   const active = selected.length > 0 || q.trim().length > 0 || savedOnly;
+  // 筛选 chips = 有内容的平台（含旧内容）+ 已装但还没抓过的平台；health 失败时回退摘要。
+  const chipPlatforms = ctx.health
+    ? Array.from(new Set([
+        ...ctx.health.platforms.map((p) => p.platform),
+        ...(ctx.health.plugin_ids ?? []),
+      ]))
+    : ctx.summary?.platforms.map((p) => p.platform);
   // 重排动画覆盖「换列数 / 侧栏开合 / 换筛选」三种情况。项数多时逐张滑太拖，
   // 所以 48 张封顶（一屏半的量），再多就直接换 —— 连 motion 节点都不建。
   // 系统里关掉动效的人，换列就直接到位。
@@ -653,7 +660,7 @@ export default function FeedPage({ ctx }: Props) {
           稍后再看
         </button>
         <span className="ml-auto text-[12px] text-fade">
-          {ctx.summary ? ctx.summary.platforms.length + " 个平台" : "加载中"}
+          {chipPlatforms ? chipPlatforms.length + " 个平台" : "加载中"}
           {newest ? " · 最近采集 " + newest : ""}
         </span>
       </section>
@@ -663,10 +670,7 @@ export default function FeedPage({ ctx }: Props) {
           selected={selected}
           counts={counts}
           total={ctx.summary?.total ?? 0}
-          platforms={
-            ctx.health?.platforms.map((p) => p.platform)
-            ?? ctx.summary?.platforms.map((p) => p.platform)
-          }
+          platforms={chipPlatforms}
           onChange={(ids) => patch({ platforms: ids, keyword: "" })}
         />
       </section>

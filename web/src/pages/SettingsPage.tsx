@@ -453,15 +453,15 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const logout = async (id: string) => {
     const ok = await confirmDialog({
       title: "退出这个平台的登录？",
-      body: "本机保存的 cookie 会被删除，之后刷新这个平台要重新扫码。",
+      body: "会尝试删除本机保存的 cookie；如果专用 Chrome 没在运行，Chrome 里的登录态可能还在。之后刷新这个平台要重新扫码。",
       confirmText: "退出登录",
       tone: "danger",
     });
     if (!ok) return;
     try {
-      await postJSON("/api/auth/" + id + "/logout");
+      const data = await postJSON<{ message?: string }>("/api/auth/" + id + "/logout");
       setLogin((prev) => ({ ...prev, [id]: { plugin: id, state: "idle" } }));
-      flash("已退出并删除本机 cookie");
+      flash(data?.message || "已退出登录");
       void load();
       void ctx.bump();
     } catch (err) {

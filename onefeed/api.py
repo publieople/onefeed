@@ -601,7 +601,9 @@ def _platform_health(runner: RefreshRunner, store: Store) -> dict[str, Any]:
             if row:
                 out.append(row)
     attention = sum(1 for p in out if p["state"] in ("failed", "stale", "unavailable"))
-    return {"platforms": out, "plugin_errors": errors, "needs_attention": attention}
+    # 顶栏的采集胶囊只看「有内容/跑过」的平台；筛选 chips 还要知道装好但没抓过的平台。
+    return {"platforms": out, "plugin_errors": errors, "needs_attention": attention,
+            "plugin_ids": [m.id for m in manifests]}
 
 
 @router.get("/health")
@@ -612,7 +614,8 @@ def health(request: Request) -> dict:
     return {
         "ok": True, "version": __version__, "items": store.count(),
         "db": str(store.path), "plugins": len(store.list_plugins()),
-        "platforms": health_rows["platforms"], "demo": demo_mode(),
+        "platforms": health_rows["platforms"], "plugin_ids": health_rows["plugin_ids"],
+        "demo": demo_mode(),
         "refreshing": runner.running(),
         "plugin_errors": health_rows["plugin_errors"],
         "needs_attention": health_rows["needs_attention"],

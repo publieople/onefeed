@@ -209,8 +209,11 @@ def _invalidate_cookies() -> None:
     _COOKIE_CACHE = None
 
 
-def clear_cookies(domain: str | None = None) -> bool:
+def clear_cookies(domain: str | None = None) -> bool | None:
     """清掉 sidecar 里的登录 cookie；Chrome 没开就返回 False，不主动拉起。
+
+    True = 确实清了；False = 没在运行，或没有匹配的 cookie；
+    None = Chrome 连着但清理过程出错 —— 调用方不能把 None 说成「本来就没登录」。
 
     domain 非空时只清该站点（含子域）的 cookie。sidecar 是四个平台共用的，
     退出一个平台不能把其他平台的登录态一起清掉。
@@ -235,7 +238,7 @@ def clear_cookies(domain: str | None = None) -> bool:
             _invalidate_cookies()
             return bool(scopes)
     except Exception:
-        return False
+        return None
 
 
 def launch_hint(error: str) -> str:

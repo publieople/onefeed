@@ -1,17 +1,25 @@
 """登录窗口的 cookie 判据（不真的开浏览器，用假的 context）。"""
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
 import time
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# 登录态文件为测试临时目录，避免跑测试时覆盖/删除本机真实 cookie。
+_TEST_HOME = tempfile.mkdtemp(prefix="onefeed-auth-flow-")
+atexit.register(shutil.rmtree, _TEST_HOME, ignore_errors=True)
+os.environ["ONEFEED_HOME"] = _TEST_HOME
 
 from onefeed import auth  # noqa: E402
 from plugin_runtime.paths import state_root  # noqa: E402
@@ -133,7 +141,8 @@ def case_cdp_tab_closed_while_context_alive():
     session = auth._Session("douyin", auth.SPECS["douyin"])
     session.state = "waiting"
     session.ready.set()
-    session._poll(Ctx(), FakePage(closed=True))
+    with mock.patch.object(auth, "MAX_WAIT_SEC", 1):
+        session._poll(Ctx(), FakePage(closed=True))
     assert session.state == "closed", session.state
     assert "关掉" in session.message, session.message
     print("case_cdp_tab_closed_while_context_alive ok")
@@ -167,6 +176,51 @@ def case_logout_sidecar_down_keeps_profile_message():
                 os.environ["ONEFEED_BROWSER_PROFILE"] = old_profile
             cookie_path.unlink(missing_ok=True)
     print("case_logout_sidecar_down_keeps_profile_message ok")
+
+
+def case_default_logout_does_not_claim_profile_removed():
+    """默认分支 rmtree 失败时，不能把「只删了 cookie 文件」说成 profile 也删了。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    os.environ.pop("ONEFEED_BROWSER_CDP", None)
+    with tempfile.TemporaryDirectory(prefix="onefeed-logout-default-"):
+        # 默认分支看的是 state_root()/login/<plugin>，不是 CDP 的 profile 目录。
+        profile = state_root() / "login" / "douyin"
+        profile.mkdir(parents=True, exist_ok=True)
+        cookie_path = state_root() / "cookies" / "douyin.json"
+        cookie_path.parent.mkdir(parents=True, exist_ok=True)
+        cookie_path.write_text(json.dumps({"cookies": [{"name": "sessionid"}]}), encoding="utf-8")
+        try:
+            with mock.patch.object(auth.shutil, "rmtree", side_effect=OSError("busy")):
+                result = auth.logout("douyin")
+            assert "profile 没删掉" in result["message"], result["message"]
+            assert "都删了" not in result["message"], result["message"]
+        finally:
+            if old_cdp is None:
+                os.environ.pop("ONEFEED_BROWSER_CDP", None)
+            else:
+                os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+            cookie_path.unlink(missing_ok=True)
+    print("case_default_logout_does_not_claim_profile_removed ok")
+
+
+def case_cdp_clear_failure_is_not_no_cookie():
+    """Chrome 还开着、清理抛异常时，不能说成「本来就没登录」。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    with tempfile.TemporaryDirectory(prefix="onefeed-logout-fail-") as td:
+        os.environ["ONEFEED_BROWSER_CDP"] = "http://127.0.0.1:9223"
+        try:
+            with mock.patch.object(auth.browser_cdp, "clear_cookies", return_value=None), \
+                    mock.patch.object(auth.browser_cdp, "alive", return_value=True), \
+                    mock.patch.object(auth.browser_cdp, "profile_dir", return_value=Path(td)):
+                result = auth.logout("douyin")
+            assert "清理时出错" in result["message"], result["message"]
+            assert "本来就没有登录态" not in result["message"], result["message"]
+        finally:
+            if old_cdp is None:
+                os.environ.pop("ONEFEED_BROWSER_CDP", None)
+            else:
+                os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+    print("case_cdp_clear_failure_is_not_no_cookie ok")
 
 
 def case_stop_flag():
@@ -230,7 +284,9 @@ def case_cookie_names_reads_file():
 def main() -> int:
     cases = [case_wait_then_ok, case_scoped_by_domain, case_window_closed,
              case_cdp_tab_closed_while_context_alive, case_logout_sidecar_down_keeps_profile_message,
-             case_stop_flag, case_bili_cookie_syncs_to_cli, case_cookie_names_reads_file]
+             case_default_logout_does_not_claim_profile_removed,
+             case_cdp_clear_failure_is_not_no_cookie, case_stop_flag,
+             case_bili_cookie_syncs_to_cli, case_cookie_names_reads_file]
     for case in cases:
         case()
     print(f"test_auth_flow: {len(cases)} cases passed")

@@ -342,15 +342,6 @@ class _Session:
         wanted = {str(n) for n in self.spec["cookies"]}
         deadline = time.time() + MAX_WAIT_SEC
         while not self.stop.is_set():
-            # CDP 模式下关掉的是标签页，context 还活着，ctx.cookies() 不会抛错；
-            # 只看 cookie 会把一个已经关掉的登录页当成还开着，一直守满 10 分钟。
-            try:
-                if page is not None and page.is_closed():
-                    self.state = "closed"
-                    self.message = "登录窗口被关掉了；重新打开一次就行"
-                    return
-            except Exception:
-                pass
             if time.time() > deadline:
                 self.state = "error"
                 self.message = f"等了 {MAX_WAIT_SEC // 60} 分钟没等到登录 cookie，窗口已关掉，重试一次"
@@ -386,6 +377,16 @@ class _Session:
                     except OSError as exc:
                         self.message += "；B 站凭证同步失败：" + str(exc)[:120]
                 return
+            # CDP 模式下关掉的是标签页，context 还活着，ctx.cookies() 不会抛错；
+            # 只看 cookie 会把一个已经关掉的登录页当成还开着，一直守满 10 分钟。
+            # 先探 cookie：用户登录成功后立刻关页，也可能在关页前已经拿到 sessionid。
+            try:
+                if page is not None and page.is_closed():
+                    self.state = "closed"
+                    self.message = "登录窗口被关掉了；重新打开一次就行"
+                    return
+            except Exception:
+                pass
             time.sleep(POLL_SEC)
 
 
@@ -508,7 +509,9 @@ def logout(plugin_id: str) -> dict[str, Any]:
 
     if browser_cdp.enabled():
         spec = SPECS.get(plugin_id)
-        cleared = bool(spec and browser_cdp.clear_cookies(str(spec["domain"])))
+        result = browser_cdp.clear_cookies(str(spec["domain"])) if spec else False
+        cleared = result is True
+        clear_failed = result is None
         if cleared:
             removed.append("专用 Chrome cookie")
 
@@ -522,7 +525,9 @@ def logout(plugin_id: str) -> dict[str, Any]:
             parts.append("状态文件已删")
         if cleared:
             parts.append("专用 Chrome 的登录 cookie 已清")
-        if not running and browser_cdp.profile_dir().exists():
+        if clear_failed:
+            parts.append("专用 Chrome 清理时出错，登录态可能还在")
+        elif not running and browser_cdp.profile_dir().exists():
             parts.append("专用 Chrome 没在运行，profile 里的登录态还在")
         elif running and not cleared:
             parts.append("专用 Chrome 里没有清到该站点的 cookie（可能本来就没登录）")
@@ -530,16 +535,29 @@ def logout(plugin_id: str) -> dict[str, Any]:
                 "message": "已退出：" + "；".join(parts) if parts else "本来就没有登录态"}
 
     profile = _profile_dir(plugin_id)
+    profile_removed = False
     if profile.exists():
         for attempt in range(5):        # 窗口刚关时文件还被占着，等一下重试
             try:
                 shutil.rmtree(profile)
                 removed.append("登录 profile")
+                profile_removed = True
                 break
             except OSError:
                 time.sleep(0.4)
+
+    # 和 CDP 分支一样按实际结果说话：只删了 cookie 文件就别宣称 profile 也删了。
+    parts: list[str] = []
+    if "登录窗口" in removed:
+        parts.append("登录窗口已关")
+    if "cookie" in removed:
+        parts.append("状态文件已删")
+    if profile_removed:
+        parts.append("登录窗口 profile 已删")
+    elif profile.exists():
+        parts.append("登录窗口 profile 没删掉（可能被占用）")
     return {"plugin": plugin_id, "removed": removed,
-            "message": "已退出：cookie 与登录窗口 profile 都删了" if removed else "本来就没有登录态"}
+            "message": "已退出：" + "；".join(parts) if parts else "本来就没有登录态"}
 
 
 def describe(plugin_id: str) -> dict[str, Any]:

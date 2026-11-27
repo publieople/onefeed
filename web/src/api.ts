@@ -981,6 +981,8 @@ export interface Health {
   db: string;
   plugins: number;
   platforms: PlatformHealth[];
+  /** 已发现的插件 id；包含「装好但还没抓过、库里也没内容」的平台，用于筛选项。 */
+  plugin_ids?: string[];
   demo: boolean;
   refreshing: boolean;
   /** 插件目录读不动之类的全局错误；有内容要原样给用户看 */
