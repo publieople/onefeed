@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from plugin_runtime import browser_cdp
 from plugin_runtime.paths import state_root
 
 # 每个平台的登录页 + cookie 判据。判据只认"登录后才出现"的 cookie，
@@ -135,7 +136,8 @@ class _Session:
     def __init__(self, plugin_id: str, spec: dict[str, Any]) -> None:
         self.plugin_id = plugin_id
         self.spec = spec
-        self.profile = _profile_dir(plugin_id)
+        # CDP 模式下 profile 属于专用 Chrome，不再是每个插件自己的登录窗口目录。
+        self.profile = browser_cdp.profile_dir() if browser_cdp.enabled() else _profile_dir(plugin_id)
         self.state = "opened"
         self.message = "正在打开登录窗口…"
         self.cookies = 0
@@ -150,6 +152,10 @@ class _Session:
 
     # ---- 线程内 ----
     def _run(self) -> None:
+        if browser_cdp.enabled():
+            self._run_cdp()
+            return
+
         from plugin_runtime.paths import ensure_temp_env
         ensure_temp_env()          # Playwright 的临时目录必须可写
         try:
@@ -190,10 +196,63 @@ class _Session:
         finally:
             self.ready.set()
 
-    def _poll(self, ctx) -> None:
+    def _run_cdp(self) -> None:
+        """方案 B：连接专用 Chrome，登录窗口就是它自己的一个标签页。
+
+        登录态留在 sidecar 的 user-data-dir 里；这里不启动新浏览器、不复制 cookie，
+        拿到目标 cookie 后仍写一份状态文件，供设置页显示登录状态和兼容旧逻辑。
+        """
+        from plugin_runtime.paths import ensure_temp_env
+        ensure_temp_env()
         page = None
         try:
-            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as pw:
+                try:
+                    browser_cdp.ensure()
+                    _browser, ctx = browser_cdp.connect(pw)
+                except Exception as exc:
+                    self.state = "error"
+                    self.error = f"{type(exc).__name__}: {exc}"[:300]
+                    self.message = browser_cdp.launch_hint(self.error)
+                    self.ready.set()
+                    return
+
+                self.state = "waiting"
+                label = str(self.spec["label"])
+                self.message = f"请在专用 Chrome 里登录{label}（登录态会留在该浏览器）"
+                self.ready.set()
+                try:
+                    page = ctx.new_page()
+                    try:
+                        page.bring_to_front()
+                    except Exception:
+                        pass
+                    self._poll(ctx, page)
+                finally:
+                    if page is not None:
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
+        except Exception as exc:
+            if self.state not in ("ok", "closed"):
+                self.state = "error"
+                self.error = f"{type(exc).__name__}: {exc}"[:300]
+                self.message = "登录窗口出错：" + self.error
+        finally:
+            self.ready.set()
+
+    def _poll(self, ctx, page=None) -> None:
+        if page is None:
+            try:
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            except Exception:
+                page = None
+        try:
+            if page is None:
+                page = ctx.new_page()
             try:
                 page.bring_to_front()
                 page.goto(str(self.spec["url"]), wait_until="domcontentloaded", timeout=30000)
@@ -316,6 +375,12 @@ def logout(plugin_id: str) -> dict[str, Any]:
     if cookie_path.exists():
         cookie_path.unlink()
         removed.append("cookie")
+
+    if browser_cdp.enabled():
+        if browser_cdp.clear_cookies():
+            removed.append("专用 Chrome cookie")
+        return {"plugin": plugin_id, "removed": removed,
+                "message": "已退出：状态文件与专用 Chrome 的登录 cookie 都清了" if removed else "本来就没有登录态"}
 
     profile = _profile_dir(plugin_id)
     if profile.exists():

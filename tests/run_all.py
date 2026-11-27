@@ -28,6 +28,7 @@ ORDER = [
     "test_api.py",
     "test_settings.py",
     "test_auth_flow.py",
+    "test_browser_cdp.py",
     "test_market_update.py",
     "test_media.py",
     "test_preflight.py",
