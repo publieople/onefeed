@@ -157,8 +157,13 @@ class PluginHost:
             env["ONEFEED_DEMO"] = "1"
 
         started = time.time()
+        # POSIX 上必须给 worker 单独的进程组：_kill_tree 用 killpg 杀整棵子进程树，
+        # 若和宿主同组，插件超时会把宿主自己一起 9 掉（实测：zhihu 超时后 8790 直接消失）。
+        kwargs: dict[str, Any] = {}
+        if os.name != "nt":
+            kwargs["start_new_session"] = True
         proc = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                env=env, text=True, encoding="utf-8", errors="replace")
+                                env=env, text=True, encoding="utf-8", errors="replace", **kwargs)
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
             timed_out = False
