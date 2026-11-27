@@ -100,6 +100,17 @@ def case_public_url_check() -> None:
     with mock.patch.object(capabilities.socket, "getaddrinfo", return_value=private):
         check(capabilities._is_public_http("https://rebind.example/x") is False,
               "解析到内网 IP 拒绝")
+    # F2：100.64.0.0/10（含阿里云 metadata 100.100.100.200）和 198.18.0.0/15
+    # 都不在原来的 private/loopback/link-local/reserved 四类里，却被当成公网。
+    for addr in ("100.100.100.200", "100.64.0.1", "198.18.0.1"):
+        infos = [("", "", "", "", (addr, 0))]
+        with mock.patch.object(capabilities.socket, "getaddrinfo", return_value=infos):
+            check(capabilities._is_public_http("https://metadata.example/latest") is False,
+                  f"is_global=False 的 {addr} 拒绝")
+    public = [("", "", "", "", ("93.184.216.34", 0))]
+    with mock.patch.object(capabilities.socket, "getaddrinfo", return_value=public):
+        check(capabilities._is_public_http("https://cdn.example/x") is True,
+              "真正的公网 IP 仍然放行")
 
 
 def case_host_allowed() -> None:

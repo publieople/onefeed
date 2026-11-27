@@ -314,7 +314,11 @@ def _is_public_http(url: str) -> bool:
             ip = ipaddress.ip_address(info[4][0])
         except ValueError:
             continue
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+        # F2：以前只拒 private / loopback / link-local / reserved 四类，但
+        # 100.64.0.0/10（含阿里云 metadata 100.100.100.200）四类都不沾，
+        # is_global 却是 False，于是被当成公网放行。改用肯定式判定：不是
+        # 全局可路由地址就拒绝，新出现的保留段/共享地址段默认落到拒绝侧。
+        if not ip.is_global:
             return False
     return True
 

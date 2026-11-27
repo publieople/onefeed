@@ -153,6 +153,12 @@ def case_open_stream_blocks() -> None:
         check(headers.get("content-type") == "image/png", "响应头原样带回")
         check(build.called, "用的是带重定向守卫的 opener")
 
+    # F2 的修复会继承到媒体边车：100.64/10 里的地址（含云 metadata）不是公网
+    metadata = [("", "", "", "", ("100.100.100.200", 0))]
+    with mock.patch.object(media.capabilities.socket, "getaddrinfo", return_value=metadata):
+        expect_permission(lambda: media.open_stream("http://metadata.example/latest"),
+                          "F2：解析到 100.100.100.200 也拒绝代取")
+
 
 def case_redirect_guard() -> None:
     handler = media._SafeRedirect()
