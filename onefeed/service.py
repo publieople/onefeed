@@ -52,7 +52,7 @@ def sync_installed(store, root: Path | None = None, prune: bool = False) -> int:
     root = Path(root or default_plugins_dir())
     if not root.is_dir():
         return 0
-    known = {p["id"] for p in store.list_plugins()}
+    known = {p["id"]: p for p in store.list_plugins()}
     seen: set[str] = set()
     added = 0
     for child in sorted(root.iterdir()):
@@ -69,9 +69,20 @@ def sync_installed(store, root: Path | None = None, prune: bool = False) -> int:
             continue
         plugin_id = str(manifest.get("id") or child.name)
         seen.add(plugin_id)
-        if plugin_id in known:
+        version = str(manifest.get("version", ""))
+        row = known.get(plugin_id)
+        if row is not None:
+            # 目录是事实：插件在本地被升级/回退后，库里那行也要跟着改。
+            # 以前这里只增不改，市场页会拿旧版本去比 registry，永远显示「可更新」。
+            if version and version != str(row.get("version") or ""):
+                store.upsert_plugin(
+                    plugin_id, version,
+                    sha256=str(row.get("sha256") or ""),
+                    source=str(row.get("source") or "local"),
+                    enabled=bool(row.get("enabled", 1)),
+                )
             continue
-        store.upsert_plugin(plugin_id, str(manifest.get("version", "")), source="local")
+        store.upsert_plugin(plugin_id, version, source="local")
         added += 1
     if prune:
         for row in store.list_plugins():

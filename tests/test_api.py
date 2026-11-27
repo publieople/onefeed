@@ -147,6 +147,8 @@ def main() -> int:
         except Exception:
             pass
         check("bilibili" in ids and row["version"] == expect, "插件列表用磁盘上的 manifest 版本")
+        db_row = next(p for p in store.list_plugins() if p["id"] == "bilibili")
+        check(db_row["version"] == expect, "插件目录里的版本回写进了库，市场页不再拿旧版本比较")
         r = client.get("/api/runs").json()["runs"]
         check(len(r) == 1 and r[0]["ok"] == 1, "轮次列表")
 
