@@ -179,9 +179,9 @@ def case_logout_sidecar_down_keeps_profile_message():
 
 
 def case_default_logout_does_not_claim_profile_removed():
-    """默认分支 rmtree 失败时，不能把「只删了 cookie 文件」说成 profile 也删了。"""
+    """显式关闭 CDP 的旧分支 rmtree 失败时，不能把「只删了 cookie 文件」说成 profile 也删了。"""
     old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
-    os.environ.pop("ONEFEED_BROWSER_CDP", None)
+    os.environ["ONEFEED_BROWSER_CDP"] = ""
     with tempfile.TemporaryDirectory(prefix="onefeed-logout-default-"):
         # 默认分支看的是 state_root()/login/<plugin>，不是 CDP 的 profile 目录。
         profile = state_root() / "login" / "douyin"

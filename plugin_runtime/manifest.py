@@ -61,6 +61,8 @@ class Manifest:
     features: set[str] = field(default_factory=set)
     embeds: list[str] = field(default_factory=list)        # 允许嵌的播放器：bilibili / douyin
     media_hosts: list[str] = field(default_factory=list)   # 边车可注 Cookie 的域（*.xhscdn.com）
+    http_hosts: list[str] = field(default_factory=list)    # http 能力只允许访问的域（空=不限域，只做公网校验）
+    cookie_hosts: list[str] = field(default_factory=list)  # credential=self 只允许向这些域注 Cookie（空=mediaHosts+httpHosts）
 
     # ---- 便捷属性 ----
     @property
@@ -109,7 +111,8 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
         errors.append(f"schemaVersion 必须是 {SCHEMA_VERSION}，当前是 {data.get('schemaVersion')!r}")
 
     pid = data.get("id")
-    if not isinstance(pid, str) or not ID_RE.match(pid):
+    # fullmatch：match + $ 会放过 "bilibili\n"（$ 也匹配末尾换行前的位置）
+    if not isinstance(pid, str) or not ID_RE.fullmatch(pid):
         errors.append("id 必填：小写字母开头，仅含小写字母/数字/连字符，长度 2–32")
 
     if not isinstance(data.get("name"), str) or not data.get("name", "").strip():
@@ -217,6 +220,15 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
         if bad:
             errors.append(f"mediaHosts 每项必须是不带协议的域名（可带 *. 前缀）：{bad}")
 
+    for key, hint in (("httpHosts", "httpHosts"), ("cookieHosts", "cookieHosts")):
+        hosts = data.get(key, [])
+        if not isinstance(hosts, list) or not all(isinstance(h, str) for h in hosts):
+            errors.append(f"{hint} 必须是字符串数组，例如 [\"*.bilibili.com\"]")
+            continue
+        bad = [h for h in hosts if not HOST_RE.match(h)]
+        if bad:
+            errors.append(f"{hint} 每项必须是不带协议的域名（可带 *. 前缀）：{bad}")
+
     settings = data.get("settings", [])
     if not isinstance(settings, list):
         errors.append("settings 必须是数组")
@@ -270,4 +282,6 @@ def load_manifest(plugin_dir: Path | str, host_version: str = HOST_VERSION) -> M
         features=set(data.get("features") or []),
         embeds=list(data.get("embeds") or []),
         media_hosts=list(data.get("mediaHosts") or []),
+        http_hosts=list(data.get("httpHosts") or []),
+        cookie_hosts=list(data.get("cookieHosts") or []),
     )

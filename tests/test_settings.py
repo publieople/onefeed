@@ -24,6 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # 状态目录指到临时目录，别动真实的 cookie / settings。
 _TMP_STATE = tempfile.mkdtemp(prefix="onefeed-state-")
 os.environ["ONEFEED_HOME"] = _TMP_STATE
+# 这些用例判断的是「cookie 文件/凭证在不在」，别让本机 9223 的 sidecar 混进来。
+os.environ["ONEFEED_BROWSER_CDP"] = ""
 
 
 def _drop_tmp_state() -> None:
