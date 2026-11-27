@@ -12,6 +12,7 @@ import re
 import shutil
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,25 @@ def registry_url() -> str:
         return os.environ.get("ONEFEED_REGISTRY") or FALLBACK_REGISTRY
 
 
+# 本机回环允许 http：本地开发、测试 registry 用；其余地址必须是 https。
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _check_registry_url(url: str) -> str:
+    """registry 地址的传输协议校验（OF-36）：只收 https，本机回环例外。
+
+    插件包和 registry 清单都从这个地址取。明文 http 下同网段的人可以把
+    registry 和包一起换掉，sha256 也是同一个源头给的，校验等于没有。
+    """
+    text = str(url or "").strip()
+    parts = urllib.parse.urlsplit(text)
+    if parts.scheme == "https":
+        return text
+    if parts.scheme == "http" and (parts.hostname or "").lower() in _LOOPBACK_HOSTS:
+        return text
+    raise RuntimeError(f"registry 地址必须是 https：{text or '（空）'}")
+
+
 def _cache_dir() -> Path:
     path = state_root() / "market"
     path.mkdir(parents=True, exist_ok=True)
@@ -57,6 +77,19 @@ def _http_bytes(url: str, timeout: float = 15.0) -> bytes:
 def registry(force: bool = False) -> dict[str, Any]:
     url = registry_url()
     cache = _cache_file(url)
+    try:
+        # OF-36：明文 registry 连缓存都不认（缓存可能来自被降级的地址）。
+        _check_registry_url(url)
+    except RuntimeError as exc:
+        if cache.exists():
+            try:
+                data = json.loads(cache.read_text(encoding="utf-8"))
+                data["from_cache"] = True
+                data["degraded"] = str(exc)[:200]
+                return data
+            except json.JSONDecodeError:
+                pass
+        return {"schemaVersion": 1, "plugins": [], "degraded": str(exc)[:200]}
     if not force and cache.exists():
         age = time.time() - cache.stat().st_mtime
         if age < CACHE_TTL:
@@ -357,13 +390,18 @@ def install(store, plugin_id: str) -> dict[str, Any]:
     rename 失败、缓存复制失败）都会留下空目录或半截包，库里却还是旧记录。
     """
     plugin_id = validate_plugin_id(plugin_id)
+    # OF-36：即使在缓存期内，也不允许从一个明文 registry 的条目安装。
+    _check_registry_url(registry_url())
     entry = next((e for e in merged(store)["entries"] if e.get("id") == plugin_id), None)
     if entry is None:
         raise RuntimeError(f"registry 里没有 {plugin_id}")
     target_root = plugins_root()
     target_root.mkdir(parents=True, exist_ok=True)
     target = plugin_target(target_root, plugin_id)
-    expected = str(entry.get("sha256") or "")
+    expected = str(entry.get("sha256") or "").strip().lower()
+    if not expected:
+        # OF-36：以前空 sha 会让下面的校验全部变成空操作，registry 被替换就能随便换包。
+        raise RuntimeError(f"registry 里的 {plugin_id} 没有 sha256，拒绝安装未经校验的包")
     # 更新不能把用户关掉的插件又打开：先记住现有 enabled，写库时带回去
     previous = next((p for p in store.list_plugins() if p["id"] == plugin_id), None)
     keep_enabled = bool((previous or {}).get("enabled", 1))
@@ -392,8 +430,19 @@ def install(store, plugin_id: str) -> dict[str, Any]:
                 (staging / name).write_bytes(_http_bytes(url))
         if not (staging / "plugin.json").exists():
             raise RuntimeError("下载到的内容里没有 plugin.json")
+        try:
+            staged = json.loads((staging / "plugin.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"plugin.json 读不出来：{type(exc).__name__}: {exc}") from exc
+        if not isinstance(staged, dict):
+            raise RuntimeError("plugin.json 不是 JSON 对象")
+        staged_id = str(staged.get("id") or "")
+        if staged_id != plugin_id:
+            # OF-36：registry 条目的 id 必须和包里的清单一致，写错或换包都别换入。
+            raise RuntimeError(
+                f"下载到的插件清单 id 是 {staged_id!r}，与 registry 条目 {plugin_id!r} 不符，已拒绝安装")
         actual = dir_hash(staging)
-        if expected and actual != expected:
+        if actual != expected:
             raise RuntimeError(f"sha256 不符（期望 {expected[:12]}…，实际 {actual[:12]}…），已拒绝安装")
 
         if had_previous:
@@ -405,7 +454,7 @@ def install(store, plugin_id: str) -> dict[str, Any]:
         # 换入后再校验一遍，防止跨卷/占用导致只搬了一半（DSH 的 post-install check）。
         manifest = json.loads((target / "plugin.json").read_text(encoding="utf-8"))
         actual = dir_hash(target)
-        if expected and actual != expected:
+        if actual != expected:
             raise RuntimeError(f"落盘后 sha256 不符（期望 {expected[:12]}…，实际 {actual[:12]}…）")
         # 数据库最后写：前面任何一步失败，旧记录和旧目录都还在。
         store.upsert_plugin(plugin_id, str(manifest.get("version", entry.get("version", ""))),
