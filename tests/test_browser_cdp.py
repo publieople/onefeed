@@ -136,7 +136,7 @@ def case_clear_cookies_does_not_launch():
 
 def case_clean_env_keeps_runtime_config():
     keys = ["ONEFEED_HOME", "ONEFEED_BROWSER_CDP", "ONEFEED_BROWSER_PROFILE",
-            "ONEFEED_CHROME_EXE", "ONEFEED_BROWSER_PROXY"]
+            "ONEFEED_CHROME_PORT", "ONEFEED_CHROME_EXE", "ONEFEED_BROWSER_PROXY"]
     old = {key: os.environ.get(key) for key in keys}
     try:
         for key in keys:
@@ -154,10 +154,38 @@ def case_clean_env_keeps_runtime_config():
     print("case_clean_env_keeps_runtime_config ok")
 
 
+def case_worker_env_keeps_custom_port():
+    """worker 的 clean_env 必须带上 ONEFEED_CHROME_PORT，否则会回落到 9223。"""
+    old = {key: os.environ.get(key) for key in
+           ("ONEFEED_BROWSER_CDP", "ONEFEED_CHROME_PORT")}
+    try:
+        os.environ.pop("ONEFEED_BROWSER_CDP", None)
+        os.environ["ONEFEED_CHROME_PORT"] = "9333"
+        env = capabilities.clean_env()
+        assert env.get("ONEFEED_CHROME_PORT") == "9333", env
+        with mock.patch.dict(os.environ, env, clear=True):
+            assert browser_cdp.endpoint() == "http://127.0.0.1:9333"
+    finally:
+        for key, value in old.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    print("case_worker_env_keeps_custom_port ok")
+
+
+def case_launch_hint_for_missing_browser():
+    hint = browser_cdp.launch_hint("找不到 Chrome/Edge：C:/Program Files 下没有")
+    assert "ONEFEED_CHROME_EXE" in hint, hint
+    fallback = browser_cdp.launch_hint("chrome/edge crashed unexpectedly")
+    assert "专用浏览器出错" in fallback, fallback
+
+
 def main() -> int:
     cases = [case_endpoint_and_enabled, case_profile_dir, case_win_path,
              case_launch_args_include_proxy, case_domain_matches_site_and_subdomains,
-             case_clear_cookies_does_not_launch, case_clean_env_keeps_runtime_config]
+             case_clear_cookies_does_not_launch, case_clean_env_keeps_runtime_config,
+             case_worker_env_keeps_custom_port, case_launch_hint_for_missing_browser]
     for case in cases:
         case()
     print(f"test_browser_cdp: {len(cases)} cases passed")

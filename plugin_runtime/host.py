@@ -90,9 +90,12 @@ class PluginHost:
         self.demo = demo if demo is not None else os.environ.get("ONEFEED_DEMO") == "1"
         self.host_version = host_version
         self._manifests: dict[str, Manifest] = {}
-        self.errors: list[str] = []
+        # 错误是“这一次 discover 的结果”，不是跨线程共享的公告板：
+        # 刷新线程和 /api/plugins 同时发现插件时，后到的线程不能把先到线程
+        # 刚记下的错误清空。
+        self._local = threading.local()
         # discover() 会被刷新线程、关注流线程和 /api/plugins 同时调用；
-        # 共享的 _manifests/errors 若不加锁，后进来的线程会把先到的清单清掉，
+        # 共享的 _manifests 若不加锁，后进来的线程会把先到的清单清掉，
         # 先到的线程再看到自己的 id 已在表里，就误报「插件 id 重复」。
         self._lock = threading.RLock()
 
@@ -102,13 +105,14 @@ class PluginHost:
         # 后进来的线程会让先到的线程看到「同一个 id 出现两次」，触发假重复报错。
         with self._lock:
             self._manifests.clear()
-            self.errors.clear()
+            errors: list[str] = []
+            self._local.errors = errors
             if not self.plugins_dir.is_dir():
                 # 缺目录是配置问题，不是这一轮采集的致命错误：
                 # 记进 errors 让插件页/健康检查说清楚，发现结果按空处理。
                 # 以前这里直接抛 ManifestError，CI 没有 plugins/ 时连「平台冷却」
                 # 这种不需要真插件的路径都会 500。
-                self.errors.append(f"插件目录不存在: {self.plugins_dir}")
+                errors.append(f"插件目录不存在: {self.plugins_dir}")
                 return []
             found: list[Manifest] = []
             for child in sorted(self.plugins_dir.iterdir()):
@@ -117,18 +121,23 @@ class PluginHost:
                         continue
                     m = load_manifest(child, host_version=self.host_version)
                 except ManifestError as exc:
-                    self.errors.append(str(exc))
+                    errors.append(str(exc))
                     continue
                 except OSError as exc:
                     # 单个插件目录读不动（权限、删到一半、杀软占着）不该拖垮整轮发现
-                    self.errors.append(f"插件目录读不动：{child}（{exc}）")
+                    errors.append(f"插件目录读不动：{child}（{exc}）")
                     continue
                 if m.id in self._manifests:
-                    self.errors.append(f"插件 id 重复：{m.id}（{child}）")
+                    errors.append(f"插件 id 重复：{m.id}（{child}）")
                     continue
                 self._manifests[m.id] = m
                 found.append(m)
             return found
+
+    @property
+    def errors(self) -> list[str]:
+        """当前线程最近一次 discover 的错误；不会串到别的线程。"""
+        return getattr(self._local, "errors", [])
 
     def get(self, plugin_id: str) -> Manifest:
         with self._lock:

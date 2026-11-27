@@ -203,6 +203,167 @@ def case_default_logout_does_not_claim_profile_removed():
     print("case_default_logout_does_not_claim_profile_removed ok")
 
 
+def case_logout_does_not_call_a_live_window_closed():
+    """线程 join 超时后还活着时，文案不能说「登录窗口已关」。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    os.environ["ONEFEED_BROWSER_CDP"] = ""
+
+    class FakeSession:
+        def __init__(self):
+            self.stop = threading.Event()
+            self.thread = mock.Mock()
+            self.thread.is_alive.return_value = True
+
+    profile = state_root() / "login" / "douyin"
+    profile.mkdir(parents=True, exist_ok=True)
+    try:
+        auth._SESSIONS["douyin"] = FakeSession()
+        result = auth.logout("douyin")
+        assert "还在收尾" in result["message"], result["message"]
+        assert "登录窗口已关" not in result["message"], result["message"]
+        assert "douyin" not in auth._SESSIONS
+    finally:
+        auth._SESSIONS.pop("douyin", None)
+        if old_cdp is None:
+            os.environ.pop("ONEFEED_BROWSER_CDP", None)
+        else:
+            os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+        shutil.rmtree(profile, ignore_errors=True)
+    print("case_logout_does_not_call_a_live_window_closed ok")
+
+
+def case_cdp_logout_clears_legacy_profile():
+    """切到专用 Chrome 后，旧 login/<plugin> profile 退出时要顺手清掉。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    os.environ["ONEFEED_BROWSER_CDP"] = "http://127.0.0.1:9223"
+    profile = state_root() / "login" / "douyin"
+    profile.mkdir(parents=True, exist_ok=True)
+    try:
+        with mock.patch.object(auth.browser_cdp, "clear_cookies", return_value=True), \
+                mock.patch.object(auth.browser_cdp, "alive", return_value=True):
+            result = auth.logout("douyin")
+        assert not profile.exists(), "旧 profile 还留着，切 CDP 后不会再被读写"
+        assert "旧登录 profile 已删" in result["message"], result["message"]
+    finally:
+        if old_cdp is None:
+            os.environ.pop("ONEFEED_BROWSER_CDP", None)
+        else:
+            os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+        shutil.rmtree(profile, ignore_errors=True)
+    print("case_cdp_logout_clears_legacy_profile ok")
+
+
+def case_logout_rejects_unknown_plugin_and_keeps_state():
+    """路由里的 plugin_id 不能拼出状态目录之外的路径。"""
+    marker = state_root() / "keep-me-auth.txt"
+    marker.write_text("keep", encoding="utf-8")
+    try:
+        for bad in ("..", "../x", "douyin/..", ""):
+            try:
+                auth.logout(bad)
+            except KeyError:
+                pass
+            else:
+                raise AssertionError(f"{bad!r} 应该被拒绝")
+        assert marker.exists(), "非法 plugin_id 不能动状态目录"
+    finally:
+        marker.unlink(missing_ok=True)
+    print("case_logout_rejects_unknown_plugin_and_keeps_state ok")
+
+
+def case_cdp_logout_keeps_profile_shared_with_sidecar():
+    """ONEFEED_BROWSER_PROFILE 指到旧 login/<plugin> 时，不能把它当废弃物删掉。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    os.environ["ONEFEED_BROWSER_CDP"] = "http://127.0.0.1:9223"
+    profile = state_root() / "login" / "douyin"
+    profile.mkdir(parents=True, exist_ok=True)
+    try:
+        with mock.patch.object(auth.browser_cdp, "profile_dir", return_value=profile), \
+                mock.patch.object(auth.browser_cdp, "clear_cookies", return_value=True), \
+                mock.patch.object(auth.browser_cdp, "alive", return_value=True):
+            result = auth.logout("douyin")
+        assert profile.exists(), "共享的 sidecar profile 不能被删"
+        assert "同一个" in result["message"], result["message"]
+    finally:
+        if old_cdp is None:
+            os.environ.pop("ONEFEED_BROWSER_CDP", None)
+        else:
+            os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+        shutil.rmtree(profile, ignore_errors=True)
+    print("case_cdp_logout_keeps_profile_shared_with_sidecar ok")
+
+
+def case_cdp_logout_keeps_profile_while_window_pending():
+    """登录线程还在收尾时，先别删它可能占着的旧 profile。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    os.environ["ONEFEED_BROWSER_CDP"] = "http://127.0.0.1:9223"
+
+    class FakeSession:
+        def __init__(self):
+            self.stop = threading.Event()
+            self.thread = mock.Mock()
+            self.thread.is_alive.return_value = True
+
+    profile = state_root() / "login" / "douyin"
+    profile.mkdir(parents=True, exist_ok=True)
+    try:
+        auth._SESSIONS["douyin"] = FakeSession()
+        with mock.patch.object(auth.browser_cdp, "clear_cookies", return_value=True), \
+                mock.patch.object(auth.browser_cdp, "alive", return_value=True):
+            result = auth.logout("douyin")
+        assert profile.exists(), "窗口还在收尾时不能删旧 profile"
+        assert "先留着" in result["message"], result["message"]
+    finally:
+        auth._SESSIONS.pop("douyin", None)
+        if old_cdp is None:
+            os.environ.pop("ONEFEED_BROWSER_CDP", None)
+        else:
+            os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+        shutil.rmtree(profile, ignore_errors=True)
+    print("case_cdp_logout_keeps_profile_while_window_pending ok")
+
+
+def case_cdp_logout_rmtree_failure_is_reported():
+    """旧 profile 删不掉时，文案不能写成「已删」。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    os.environ["ONEFEED_BROWSER_CDP"] = "http://127.0.0.1:9223"
+    profile = state_root() / "login" / "douyin"
+    profile.mkdir(parents=True, exist_ok=True)
+    try:
+        with mock.patch.object(auth.shutil, "rmtree", side_effect=OSError("busy")), \
+                mock.patch.object(auth.browser_cdp, "clear_cookies", return_value=True), \
+                mock.patch.object(auth.browser_cdp, "alive", return_value=True):
+            result = auth.logout("douyin")
+        assert "旧登录 profile 没删掉" in result["message"], result["message"]
+        assert "旧登录 profile 已删" not in result["message"], result["message"]
+    finally:
+        if old_cdp is None:
+            os.environ.pop("ONEFEED_BROWSER_CDP", None)
+        else:
+            os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+        shutil.rmtree(profile, ignore_errors=True)
+    print("case_cdp_logout_rmtree_failure_is_reported ok")
+
+
+def case_cdp_logout_does_not_create_login_dir():
+    """没有旧 profile 时，退出不能顺手建一个空 login/ 目录。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    os.environ["ONEFEED_BROWSER_CDP"] = "http://127.0.0.1:9223"
+    with tempfile.TemporaryDirectory(prefix="onefeed-auth-empty-") as td:
+        root = Path(td)
+        with mock.patch.object(auth, "state_root", return_value=root), \
+                mock.patch.object(auth.browser_cdp, "clear_cookies", return_value=True), \
+                mock.patch.object(auth.browser_cdp, "alive", return_value=False), \
+                mock.patch.object(auth.browser_cdp, "profile_dir", return_value=root / "sidecar"):
+            auth.logout("douyin")
+        assert not (root / "login").exists(), "没有旧 profile 时不该创建 login/ 空目录"
+    if old_cdp is None:
+        os.environ.pop("ONEFEED_BROWSER_CDP", None)
+    else:
+        os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+    print("case_cdp_logout_does_not_create_login_dir ok")
+
+
 def case_cdp_clear_failure_is_not_no_cookie():
     """Chrome 还开着、清理抛异常时，不能说成「本来就没登录」。"""
     old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
@@ -285,6 +446,13 @@ def main() -> int:
     cases = [case_wait_then_ok, case_scoped_by_domain, case_window_closed,
              case_cdp_tab_closed_while_context_alive, case_logout_sidecar_down_keeps_profile_message,
              case_default_logout_does_not_claim_profile_removed,
+             case_logout_does_not_call_a_live_window_closed,
+             case_logout_rejects_unknown_plugin_and_keeps_state,
+             case_cdp_logout_clears_legacy_profile,
+             case_cdp_logout_keeps_profile_shared_with_sidecar,
+             case_cdp_logout_keeps_profile_while_window_pending,
+             case_cdp_logout_rmtree_failure_is_reported,
+             case_cdp_logout_does_not_create_login_dir,
              case_cdp_clear_failure_is_not_no_cookie, case_stop_flag,
              case_bili_cookie_syncs_to_cli, case_cookie_names_reads_file]
     for case in cases:

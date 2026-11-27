@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -73,9 +75,33 @@ def test_plugin_discovery_is_thread_safe():
             if len(found) != len(ids):
                 bad.append(("partial", [m.id for m in found], tuple(host.errors)))
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(work, range(8)))
-    assert not bad, bad[:3]
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(work, range(8)))
+        assert not bad, bad[:3]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_discovery_errors_stay_on_the_calling_thread():
+    """一个线程的发现错误不能被另一个线程读到或清掉。"""
+    base = Path(tempfile.mkdtemp(prefix="onefeed-plugins-errors-"))
+    host = PluginHost(plugins_dir=base / "missing")
+    seen: list[list[str]] = []
+
+    def work() -> None:
+        host.discover()
+        seen.append(list(host.errors))
+
+    try:
+        worker = threading.Thread(target=work)
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive(), "发现插件的测试线程没有结束"
+        assert seen and seen[0], "缺失目录的发现错误应该记在调用线程上"
+        assert host.errors == [], "别的线程不能看到上一次发现留下的错误"
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
 
 
 def test_intervals_merge_defaults_and_clamp():

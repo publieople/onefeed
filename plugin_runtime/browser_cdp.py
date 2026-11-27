@@ -174,7 +174,7 @@ def _domain_matches(domain: str, suffix: str) -> bool:
     return left == right or left.endswith("." + right)
 
 
-_COOKIE_CACHE: tuple[float, tuple[dict[str, Any], ...]] | None = None
+_COOKIE_CACHE: tuple[float, str, tuple[dict[str, Any], ...]] | None = None
 
 
 def alive() -> bool:
@@ -186,13 +186,17 @@ def alive() -> bool:
 def cookies(ttl: float = 2.0) -> list[dict[str, Any]]:
     """读 sidecar 当前 cookie；Chrome 没开就返回空，不主动拉起。"""
     global _COOKIE_CACHE
-    if not endpoint():
+    url = endpoint()
+    if not url:
         return []
     now = time.time()
-    if _COOKIE_CACHE is not None and now - _COOKIE_CACHE[0] <= ttl:
-        return [dict(c) for c in _COOKIE_CACHE[1]]
+    # 缓存必须带上 endpoint：测试或双实例切换端口时，不能把上一个端口的
+    # cookie 当成当前 sidecar 的登录态。
+    if (_COOKIE_CACHE is not None and _COOKIE_CACHE[1] == url
+            and now - _COOKIE_CACHE[0] <= ttl):
+        return [dict(c) for c in _COOKIE_CACHE[2]]
     if not alive():
-        _COOKIE_CACHE = (now, ())
+        _COOKIE_CACHE = (now, url, ())
         return []
     try:
         from playwright.sync_api import sync_playwright
@@ -200,7 +204,7 @@ def cookies(ttl: float = 2.0) -> list[dict[str, Any]]:
         with sync_playwright() as pw:
             _browser, ctx = connect(pw)
             rows = tuple(dict(c) for c in ctx.cookies())
-        _COOKIE_CACHE = (now, rows)
+        _COOKIE_CACHE = (now, url, rows)
         return [dict(c) for c in rows]
     except Exception:
         return []
@@ -251,6 +255,9 @@ def clear_cookies(domain: str | None = None) -> bool | None:
 
 def launch_hint(error: str) -> str:
     low = str(error or "").lower()
+    if "找不到 chrome" in low:
+        return ("本机没找到 Chrome 或 Edge：装一个浏览器，或把 ONEFEED_CHROME_EXE 指向浏览器路径。"
+                "（" + str(error)[:200] + "）")
     if "econnrefused" in low or "connection refused" in low or "connect_over_cdp" in low:
         return ("专用 Chrome 没连上：先启动它，或在设置里打开专用浏览器模式。"
                 "（" + str(error)[:200] + "）")

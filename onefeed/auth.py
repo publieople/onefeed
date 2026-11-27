@@ -89,6 +89,26 @@ def _profile_dir(plugin_id: str) -> Path:
     return _login_dir() / plugin_id
 
 
+def _legacy_profile_path(plugin_id: str) -> Path | None:
+    """旧登录 profile 的只读路径；不建目录，越界（..、a/b）返回 None。"""
+    root = state_root() / "login"
+    candidate = root / plugin_id
+    try:
+        if candidate.resolve().parent != root.resolve():
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
+def _same_path(left: Path, right: Path) -> bool | None:
+    """True=同一个，False=不同，None=判不出来（保守当作同一个，别删）。"""
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return None
+
+
 # bili CLI 的凭证字段（小写）；Chrome cookie 是大写，落盘前映射。
 _BILI_COOKIE_MAP = {
     "sessdata": "SESSDATA",
@@ -488,13 +508,23 @@ def session_state(plugin_id: str) -> str | None:
 
 
 def logout(plugin_id: str) -> dict[str, Any]:
+    if plugin_id not in SPECS and plugin_id not in CLI_SPECS:
+        raise KeyError(f"{plugin_id} 没有内置登录流程")
     removed = []
+    window_closed = False
+    window_pending = False
     with _LOCK:
         session = _SESSIONS.pop(plugin_id, None)
     if session is not None:
         session.stop.set()
         session.thread.join(8)
-        removed.append("登录窗口")
+        if session.thread.is_alive():
+            # 线程还活着时别谎报“登录窗口已关”；它可能还占着 profile。
+            window_pending = True
+            removed.append("登录窗口（还在收尾）")
+        else:
+            window_closed = True
+            removed.append("登录窗口")
 
     cookie_path = _cookie_path(plugin_id)
     if cookie_path.exists():
@@ -509,6 +539,28 @@ def logout(plugin_id: str) -> dict[str, Any]:
 
     if browser_cdp.enabled():
         spec = SPECS.get(plugin_id)
+        # 以前默认不开 CDP，登录 profile 落在 state_root()/login/<plugin>；
+        # 切到专用 Chrome 后这个旧目录不会再被读写，退出时顺手清掉。
+        # 只算路径、不建目录；plugin_id 已在上方校验，这里再挡一次越界与共享 profile。
+        legacy_profile = _legacy_profile_path(plugin_id)
+        legacy_removed = False
+        legacy_kept = ""
+        if legacy_profile is not None and legacy_profile.exists():
+            shared = _same_path(legacy_profile, browser_cdp.profile_dir())
+            if window_pending:
+                legacy_kept = "旧登录 profile 先留着（登录窗口还在收尾）"
+            elif shared is True:
+                legacy_kept = "旧登录 profile 和专用 Chrome 的 profile 是同一个，没有删"
+            elif shared is None:
+                legacy_kept = "无法确认旧登录 profile 是否与专用 Chrome 共用，先留着"
+            else:
+                for attempt in range(3):
+                    try:
+                        shutil.rmtree(legacy_profile)
+                        legacy_removed = True
+                        break
+                    except OSError:
+                        time.sleep(0.2)
         result = browser_cdp.clear_cookies(str(spec["domain"])) if spec else False
         cleared = result is True
         clear_failed = result is None
@@ -519,10 +571,18 @@ def logout(plugin_id: str) -> dict[str, Any]:
         # 返回 False，但状态文件可能已经删掉，这时要说清楚 profile 里的登录态还在。
         running = browser_cdp.alive()
         parts: list[str] = []
-        if "登录窗口" in removed:
+        if window_closed:
             parts.append("登录窗口已关")
+        elif window_pending:
+            parts.append("登录窗口还在收尾，没有确认关掉")
         if "cookie" in removed:
             parts.append("状态文件已删")
+        if legacy_removed:
+            parts.append("旧登录 profile 已删")
+        elif legacy_kept:
+            parts.append(legacy_kept)
+        elif legacy_profile is not None and legacy_profile.exists():
+            parts.append("旧登录 profile 没删掉（可能被占用）")
         if cleared:
             parts.append("专用 Chrome 的登录 cookie 已清")
         if clear_failed:
@@ -548,8 +608,10 @@ def logout(plugin_id: str) -> dict[str, Any]:
 
     # 和 CDP 分支一样按实际结果说话：只删了 cookie 文件就别宣称 profile 也删了。
     parts: list[str] = []
-    if "登录窗口" in removed:
+    if window_closed:
         parts.append("登录窗口已关")
+    elif window_pending:
+        parts.append("登录窗口还在收尾，没有确认关掉")
     if "cookie" in removed:
         parts.append("状态文件已删")
     if profile_removed:

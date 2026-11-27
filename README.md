@@ -172,19 +172,24 @@ uv run python -m onefeed --preflight
 在它里面打开该平台的登录页；你在窗口里扫码/输密码，登录态留在 sidecar profile。
 宿主每 2 秒读一次 cookie，看到登录态就落盘并**自动关掉登录标签页**（不关整个 Chrome）。四态分别是
 `idle`（没窗口）/ `waiting`（窗口开着，等你登录）/ `ok`（拿到 cookie）/ `closed`（窗口被关掉）。
-判据只认登录后才出现的 cookie（小红书 `id_token`，抖音 `sessionid` / `sessionid_ss`）。
+判据只认登录后才出现的 cookie（B 站 `SESSDATA`、知乎 `z_c0`、小红书 `id_token`，
+抖音 `sessionid` / `sessionid_ss`）。
 
 sidecar 默认开启，默认地址 `http://127.0.0.1:9223`，不需要设环境变量；
-`ONEFEED_BROWSER_PROFILE` 可指定独立 profile 目录，`ONEFEED_CHROME_PORT` 可换端口。
-只有显式把 `ONEFEED_BROWSER_CDP` 设为空字符串才回退旧的 Playwright persistent context
-（每个插件一个 `<状态目录>/login/<plugin-id>/` profile）。
+`ONEFEED_BROWSER_PROFILE` 可指定独立 profile 目录。`ONEFEED_CHROME_PORT` 可换端口，
+但只在没有设置 `ONEFEED_BROWSER_CDP` 时生效（显式 URL 里的端口优先）。
+同一台机器跑多个实例时必须各给一个端口（`ONEFEED_CHROME_PORT` 或不同的 `ONEFEED_BROWSER_CDP`），
+否则会共用 9223 上的同一个 sidecar。只有显式把 `ONEFEED_BROWSER_CDP` 设为空字符串才回退旧的
+Playwright persistent context（每个插件一个 `<状态目录>/login/<plugin-id>/` profile）。
 
 **登录态怎么给插件**：CDP 模式下插件直接复用同一个 sidecar profile，不再注入 cookie；
 旧模式仍把登录态写到 `<状态目录>/cookies/<plugin-id>.json`
 （`{"cookies":[{"name","value","domain",...}]}`，也接受 `{name: value}` 的字典形式），
 宿主按插件 `settings.cookieFile` → 该默认路径的顺序找到它，在 `browser` 抓取前注入。
 状态文件在两种模式下都会写，供设置页显示登录状态。「退出」会删状态文件；
-CDP 模式下还会清 sidecar 的登录 cookie，但不删共享 profile。
+CDP 模式下还会清 sidecar 的登录 cookie，并顺手删除旧的 `<状态目录>/login/<plugin-id>` profile；
+共享的 sidecar profile 不删。登录窗口还在收尾、旧 profile 与 sidecar profile 是同一个、
+或删除失败时会保留，并在退出提示里说明。退出只接受内置登录流程的 plugin id，其它 id 返回 400。
 
 B 站也走同一套登录窗口：设置页点「打开登录窗口」扫 passport 二维码；宿主会把
 `SESSDATA` / `bili_jct` 等 cookie 映射写入本机 `bili` CLI 的 `credential.json`，

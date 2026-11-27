@@ -187,6 +187,9 @@ def main() -> int:
     check(xhs2["state"] == "available", "放了 id_token 就是已登录")
     out = client.post("/api/auth/xiaohongshu/logout").json()
     check(out["ok"] and not cookie_path.exists(), "退出会删 cookie 文件")
+    bad = client.post("/api/auth/%2E%2E/logout")
+    check(bad.status_code == 400, "非法 plugin_id 退出要 400，不能拿去拼路径")
+    check(bad.json()["error"]["code"] == "no_login_flow", "非法 plugin_id 走 no_login_flow")
 
     # ---------------------------------------------------------------- 评论
     app.state.refresher.host = FakeHost(Path(_TMP_STATE), {"bilibili"})

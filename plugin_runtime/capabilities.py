@@ -40,7 +40,7 @@ SAFE_ENV_KEYS = ("PATH", "PATHEXT", "SystemRoot", "windir", "COMSPEC", "USERPROF
                  "TEMP", "TMP", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
                  "PROCESSOR_ARCHITECTURE", "PYTHONUTF8", "PYTHONIOENCODING",
                  "ONEFEED_HOME", "ONEFEED_BROWSER_CDP", "ONEFEED_BROWSER_PROFILE",
-                 "ONEFEED_CHROME_EXE", "ONEFEED_BROWSER_PROXY")
+                 "ONEFEED_CHROME_PORT", "ONEFEED_CHROME_EXE", "ONEFEED_BROWSER_PROXY")
 PROXY_CANDIDATES = ("", "http://127.0.0.1:7890", "http://127.0.0.1:10809")
 
 # Chrome 的 user-data-dir 一个进程独占：详情和评论并发时会互相把对方顶掉，
