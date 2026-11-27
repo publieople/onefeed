@@ -28,7 +28,8 @@ from plugin_runtime.paths import state_root
 SPECS: dict[str, dict[str, Any]] = {
     "xiaohongshu": {
         "label": "小红书",
-        "url": "https://www.xiaohongshu.com/explore",
+        # 直接开登录页：/explore 是游客 feed，看不到二维码，用户没法扫码。
+        "url": "https://www.xiaohongshu.com/login",
         "domain": ".xiaohongshu.com",
         "cookies": ("id_token",),
         "impact": "小红书首页推荐需要登录，未登录只能拿到公开页。",
