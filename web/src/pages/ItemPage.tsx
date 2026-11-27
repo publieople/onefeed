@@ -550,7 +550,8 @@ function SummaryPanel({
   }
 
   // 规则兜底且没有要点时，真正的内容只有标题；别再把它标成「AI 总结」，否则用户以为 AI 坏了。
-  if (s && s.engine === "rules" && !s.provider && !s.points.length) {
+  const rulesOnly = Boolean(s && s.engine === "rules" && !s.provider);
+  if (rulesOnly && s && !s.points.length) {
     return (
       <div className="mt-5 rounded-xl border border-line p-5">
         <p className="text-[13px] leading-relaxed text-muted">
@@ -575,6 +576,11 @@ function SummaryPanel({
 
   return (
     <div className="fade-in mt-5 rounded-xl border border-line p-5">
+      {rulesOnly ? (
+        <p className="mb-3 rounded-lg bg-wash px-2.5 py-1.5 text-[12px] leading-relaxed text-muted">
+          这段要点由本地规则整理，还没有用 AI 模型；配好模型后会按「简洁 / 平衡 / 详细」重写。
+        </p>
+      ) : null}
       {rewriting ? (
         <div
           role="status"
@@ -730,6 +736,7 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
   const [detailLoading, setDetailLoading] = useState(() => !peekItem(id)?.detail);
   const [comments, setComments] = useState<CommentsResponse | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentsRetry, setCommentsRetry] = useState(0);
   const [commentNext, setCommentNext] = useState<string | null>(null);
   const [commentExpanded, setCommentExpanded] = useState(false);
   const [commentLoadingMore, setCommentLoadingMore] = useState(false);
@@ -835,7 +842,7 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [id]);
+  }, [id, commentsRetry]);
 
   /* 总结走流式：先出 TLDR，再一条条出要点，比干等十几秒好受得多 */
   const summaryAlive = useRef(true);
@@ -1501,9 +1508,16 @@ export default function ItemPage({ ctx }: { ctx?: OutletCtx }) {
             {comments.reason || "这个平台暂时读不到评论。"}
           </p>
         ) : comments.error ? (
-          <p className="mt-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-700 dark:text-amber-300">
-            评论没取到：{comments.error}
-          </p>
+          <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5 text-[12px] text-amber-700 dark:text-amber-300">
+            <span>评论没取到：{comments.error}</span>
+            <button
+              type="button"
+              onClick={() => setCommentsRetry((n) => n + 1)}
+              className="ml-2 underline underline-offset-2 hover:text-ink"
+            >
+              重试
+            </button>
+          </div>
         ) : comments.items.length === 0 ? (
           <p className="mt-2 text-[12px] text-fade">暂时没取到评论。</p>
         ) : (

@@ -168,13 +168,13 @@ uv run python -m onefeed --preflight
 7 个平台、详情抽屉与插件市场说明，不依赖 Python 和网络。真实版本要现场采集，断网时先用快照顶住，网恢复再演实时。
 
 **登录怎么给**：设置页里点「打开登录窗口」，宿主会连到一个**专用 Chrome sidecar**
-（独立 `user-data-dir`，默认 CDP `http://127.0.0.1:9223`，不碰你日常浏览器），
+（独立 `user-data-dir`，不碰你日常浏览器；`ONEFEED_BROWSER_CDP` 留空时这个模式关闭），
 在它里面打开该平台的登录页；你在窗口里扫码/输密码，登录态留在 sidecar profile。
-宿主每 2 秒读一次 cookie，看到登录态就落盘并**自动关窗**。四态分别是
+宿主每 2 秒读一次 cookie，看到登录态就落盘并**自动关掉登录标签页**（不关整个 Chrome）。四态分别是
 `idle`（没窗口）/ `waiting`（窗口开着，等你登录）/ `ok`（拿到 cookie）/ `closed`（窗口被关掉）。
 判据只认登录后才出现的 cookie（小红书 `id_token`，抖音 `sessionid` / `sessionid_ss`）。
 
-要启用 sidecar，设置 `ONEFEED_BROWSER_CDP`（默认 `http://127.0.0.1:9223`）、
+要启用 sidecar，设置 `ONEFEED_BROWSER_CDP`（例如 `http://127.0.0.1:9223`；留空关闭）、
 `ONEFEED_BROWSER_PROFILE`（独立 profile 目录）；未设置时回退到旧的 Playwright persistent context
 （每个插件一个 `<状态目录>/login/<plugin-id>/` profile）。
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -32,6 +33,23 @@ class FakeCtx:
 
     def close(self):
         self.closed = True
+
+
+class FakePage:
+    """CDP 标签页：只测 _poll 的关页判断，不需要真的导航。"""
+
+    def __init__(self, closed=True):
+        self._closed = closed
+        self.url = "https://www.douyin.com/"
+
+    def is_closed(self):
+        return self._closed
+
+    def bring_to_front(self):
+        pass
+
+    def goto(self, *args, **kwargs):
+        pass
 
 
 def _cookie(name, value="1", domain=".douyin.com"):
@@ -106,6 +124,51 @@ def case_window_closed():
     print("case_window_closed ok")
 
 
+def case_cdp_tab_closed_while_context_alive():
+    """CDP 下关的是标签页，context 活着、cookies() 不抛错，也要立刻判 closed。"""
+    class Ctx(FakeCtx):
+        def __init__(self):
+            super().__init__([_cookie("ttwid")])
+
+    session = auth._Session("douyin", auth.SPECS["douyin"])
+    session.state = "waiting"
+    session.ready.set()
+    session._poll(Ctx(), FakePage(closed=True))
+    assert session.state == "closed", session.state
+    assert "关掉" in session.message, session.message
+    print("case_cdp_tab_closed_while_context_alive ok")
+
+
+def case_logout_sidecar_down_keeps_profile_message():
+    """sidecar 没运行时不能谎报“专用 Chrome 的 cookie 都清了”。"""
+    old_cdp = os.environ.get("ONEFEED_BROWSER_CDP")
+    old_profile = os.environ.get("ONEFEED_BROWSER_PROFILE")
+    cookie_path = state_root() / "cookies" / "douyin.json"
+    cookie_path.parent.mkdir(parents=True, exist_ok=True)
+    cookie_path.write_text(json.dumps({"cookies": [{"name": "sessionid"}]}), encoding="utf-8")
+    with tempfile.TemporaryDirectory(prefix="onefeed-logout-test-") as td:
+        os.environ["ONEFEED_BROWSER_CDP"] = "http://127.0.0.1:9223"
+        os.environ["ONEFEED_BROWSER_PROFILE"] = td
+        try:
+            with patch.object(auth.browser_cdp, "clear_cookies", return_value=False), \
+                    patch.object(auth.browser_cdp, "alive", return_value=False):
+                result = auth.logout("douyin")
+            assert "专用 Chrome 没在运行" in result["message"], result["message"]
+            assert "都清了" not in result["message"], result["message"]
+            assert not cookie_path.exists(), "cookie 状态文件应被删掉"
+        finally:
+            if old_cdp is None:
+                os.environ.pop("ONEFEED_BROWSER_CDP", None)
+            else:
+                os.environ["ONEFEED_BROWSER_CDP"] = old_cdp
+            if old_profile is None:
+                os.environ.pop("ONEFEED_BROWSER_PROFILE", None)
+            else:
+                os.environ["ONEFEED_BROWSER_PROFILE"] = old_profile
+            cookie_path.unlink(missing_ok=True)
+    print("case_logout_sidecar_down_keeps_profile_message ok")
+
+
 def case_stop_flag():
     """logout 把 stop 置上后，轮询立刻退出，不会拖 10 分钟。"""
     class Ctx(FakeCtx):
@@ -166,6 +229,7 @@ def case_cookie_names_reads_file():
 
 def main() -> int:
     cases = [case_wait_then_ok, case_scoped_by_domain, case_window_closed,
+             case_cdp_tab_closed_while_context_alive, case_logout_sidecar_down_keeps_profile_message,
              case_stop_flag, case_bili_cookie_syncs_to_cli, case_cookie_names_reads_file]
     for case in cases:
         case()

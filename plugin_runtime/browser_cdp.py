@@ -50,6 +50,9 @@ def find_chrome() -> str | None:
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
         os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
         "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
         "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
         "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -98,7 +101,7 @@ def _launch(url: str) -> None:
     args = [
         exe,
         f"--remote-debugging-port={port}",
-        "--remote-allow-origins=*",
+        "--remote-debugging-address=127.0.0.1",
         f"--user-data-dir={_win_path(profile)}",
         "--no-first-run",
         "--no-default-browser-check",
@@ -138,7 +141,7 @@ def ensure(timeout: float = 20.0) -> str:
     raise RuntimeError(
         f"专用 Chrome 没有在 {url} 起来。检查 Chrome 是否被已有实例接管、"
         f"或手动启动：chrome.exe --remote-debugging-port={_port(url)} "
-        f"--remote-allow-origins=* --user-data-dir={_win_path(profile_dir())}")
+        f"--remote-debugging-address=127.0.0.1 --user-data-dir={_win_path(profile_dir())}")
 
 
 def connect(pw) -> tuple[Any, Any]:

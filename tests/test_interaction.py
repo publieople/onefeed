@@ -427,6 +427,32 @@ def test_item_page_hands_questions_to_global_agent() -> None:
     assert "streamItemChat" not in API, "旧客户端流也一起清掉"
 
 
+@case
+def test_platform_chips_follow_installed_plugins() -> None:
+    """筛选 chips 要跟已装插件走：只拿 summary 会漏掉已装但还没内容的平台。"""
+    assert "health: Health | null;" in APP
+    assert "summary, health, settings, reloadSettings, bump," in APP
+    assert "ctx.health?.platforms.map((p) => p.platform)" in FEED
+    assert "?? ctx.summary?.platforms.map((p) => p.platform)" in FEED
+
+
+@case
+def test_comments_failure_can_be_retried() -> None:
+    """评论超时文案写着「稍后可重试」，旁边就必须真有一个重试按钮。"""
+    assert "const [commentsRetry, setCommentsRetry] = useState(0);" in ITEM
+    assert "}, [id, commentsRetry]);" in ITEM
+    assert "setCommentsRetry((n) => n + 1)" in ITEM
+    assert "评论没取到" in ITEM and "重试" in ITEM
+
+
+@case
+def test_rules_summary_says_it_is_not_ai() -> None:
+    """规则兜底有要点时也不能冒充 AI 总结，面板顶部要写清来源。"""
+    assert 'const rulesOnly = Boolean(s && s.engine === "rules" && !s.provider);' in ITEM
+    assert "if (rulesOnly && s && !s.points.length)" in ITEM
+    assert "这段要点由本地规则整理，还没有用 AI 模型" in ITEM
+
+
 def main() -> int:
     failed = 0
     for name, fn in CASES:

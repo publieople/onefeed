@@ -520,7 +520,7 @@ export default function SettingsPage({ ctx }: { ctx: OutletCtx }) {
   const authReady = authRows.filter((id) => auth[id]?.state === "available").length;
   const installed = plugins?.installed ?? [];
   const enabledCount = installed.filter((p) => p.enabled).length;
-  // 插件目录已经收敛到 4 个；设置里的间隔输入跟着后端已装清单走，别让用户看到不存在的平台。
+  // 设置里的间隔输入跟着后端已装清单走，别让用户看到不存在的平台。
   const intervalPlatforms = plugins ? platformList(installed.map((p) => p.id)) : PLATFORMS;
 
   const jump = (id: string) => {

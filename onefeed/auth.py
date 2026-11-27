@@ -342,6 +342,15 @@ class _Session:
         wanted = {str(n) for n in self.spec["cookies"]}
         deadline = time.time() + MAX_WAIT_SEC
         while not self.stop.is_set():
+            # CDP 模式下关掉的是标签页，context 还活着，ctx.cookies() 不会抛错；
+            # 只看 cookie 会把一个已经关掉的登录页当成还开着，一直守满 10 分钟。
+            try:
+                if page is not None and page.is_closed():
+                    self.state = "closed"
+                    self.message = "登录窗口被关掉了；重新打开一次就行"
+                    return
+            except Exception:
+                pass
             if time.time() > deadline:
                 self.state = "error"
                 self.message = f"等了 {MAX_WAIT_SEC // 60} 分钟没等到登录 cookie，窗口已关掉，重试一次"
@@ -499,10 +508,26 @@ def logout(plugin_id: str) -> dict[str, Any]:
 
     if browser_cdp.enabled():
         spec = SPECS.get(plugin_id)
-        if spec and browser_cdp.clear_cookies(str(spec["domain"])):
+        cleared = bool(spec and browser_cdp.clear_cookies(str(spec["domain"])))
+        if cleared:
             removed.append("专用 Chrome cookie")
+
+        # 别用 removed 判断“都清了”：sidecar 没运行时 clear_cookies() 会直接
+        # 返回 False，但状态文件可能已经删掉，这时要说清楚 profile 里的登录态还在。
+        running = browser_cdp.alive()
+        parts: list[str] = []
+        if "登录窗口" in removed:
+            parts.append("登录窗口已关")
+        if "cookie" in removed:
+            parts.append("状态文件已删")
+        if cleared:
+            parts.append("专用 Chrome 的登录 cookie 已清")
+        if not running and browser_cdp.profile_dir().exists():
+            parts.append("专用 Chrome 没在运行，profile 里的登录态还在")
+        elif running and not cleared:
+            parts.append("专用 Chrome 里没有清到该站点的 cookie（可能本来就没登录）")
         return {"plugin": plugin_id, "removed": removed,
-                "message": "已退出：状态文件与专用 Chrome 的登录 cookie 都清了" if removed else "本来就没有登录态"}
+                "message": "已退出：" + "；".join(parts) if parts else "本来就没有登录态"}
 
     profile = _profile_dir(plugin_id)
     if profile.exists():

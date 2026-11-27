@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -79,10 +80,19 @@ def case_launch_args_include_proxy():
 
     args = captured["args"]
     assert "--remote-debugging-port=9223" in args
+    assert "--remote-debugging-address=127.0.0.1" in args
+    assert "--remote-allow-origins=*" not in args
     assert any(a.startswith("--user-data-dir=") for a in args)
     assert "--proxy-server=http://127.0.0.1:7890" in args
     assert args[-1] == "about:blank"
-    assert captured["kwargs"].get("start_new_session") is True
+    if os.name == "nt":
+        # Windows 用 creationflags 脱离父进程，不能同时传 POSIX 的 start_new_session。
+        flags = captured["kwargs"].get("creationflags")
+        assert flags is not None
+        assert flags & getattr(subprocess, "DETACHED_PROCESS", 0)
+        assert "start_new_session" not in captured["kwargs"]
+    else:
+        assert captured["kwargs"].get("start_new_session") is True
     print("case_launch_args_include_proxy ok")
 
 

@@ -663,7 +663,10 @@ export default function FeedPage({ ctx }: Props) {
           selected={selected}
           counts={counts}
           total={ctx.summary?.total ?? 0}
-          platforms={ctx.summary?.platforms.map((p) => p.platform)}
+          platforms={
+            ctx.health?.platforms.map((p) => p.platform)
+            ?? ctx.summary?.platforms.map((p) => p.platform)
+          }
           onChange={(ids) => patch({ platforms: ids, keyword: "" })}
         />
       </section>

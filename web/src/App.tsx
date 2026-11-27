@@ -60,6 +60,8 @@ export interface OutletCtx {
   /** 只重试指定平台（保留冷却语义，不整轮重跑） */
   refreshPlatforms: (platforms: string[]) => void;
   summary: Summary | null;
+  /** 健康检查里的平台清单 = 已装插件 + 有旧内容但插件已缺失的平台，筛选 chips 用它。 */
+  health: Health | null;
   settings: SettingsResponse | null;
   reloadSettings: () => Promise<void>;
   bump: () => void;
@@ -438,7 +440,7 @@ export default function App() {
   const ctx: OutletCtx = {
     progress, reloadKey, refreshSeq, autoKey, autoRunning, autoProgress, autoResult, autoRefresh,
     refresh, refreshPlatforms,
-    summary, settings, reloadSettings, bump,
+    summary, health, settings, reloadSettings, bump,
   };
 
   return (
