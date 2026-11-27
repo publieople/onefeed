@@ -7,10 +7,12 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +39,43 @@ def wait_idle(runner: RefreshRunner, timeout: float = 5.0) -> None:
     while runner.running() and time.time() < deadline:
         time.sleep(0.02)
     assert not runner.running(), "后台线程没有按时收尾"
+
+
+def test_plugin_discovery_is_thread_safe():
+    """刷新线程、关注流线程和 /api/plugins 会同时发现插件。
+
+    修复前 _manifests 被并发 clear：一个线程刚写入的 id 会被另一个线程清掉，
+    先到的线程再看到它，就误报「插件 id 重复」并少发现平台。
+    """
+    root = Path(tempfile.mkdtemp(prefix="onefeed-plugins-race-"))
+    ids = ("bilibili", "douyin", "xiaohongshu", "zhihu")
+    for pid in ids:
+        plugin = root / pid
+        plugin.mkdir()
+        (plugin / "plugin.json").write_text(json.dumps({
+            "schemaVersion": 1,
+            "id": pid,
+            "name": pid,
+            "version": "1.0.0",
+            "capabilities": ["http"],
+            "kinds": ["article"],
+            "feeds": [{"id": "default", "name": "默认"}],
+            "entry": "index.js",
+        }), encoding="utf-8")
+        (plugin / "index.js").write_text("", encoding="utf-8")
+
+    host = PluginHost(plugins_dir=root)
+    bad: list[tuple] = []
+
+    def work(_: int) -> None:
+        for _ in range(40):
+            found = host.discover()
+            if len(found) != len(ids):
+                bad.append(("partial", [m.id for m in found], tuple(host.errors)))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(work, range(8)))
+    assert not bad, bad[:3]
 
 
 def test_intervals_merge_defaults_and_clamp():

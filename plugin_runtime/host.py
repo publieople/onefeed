@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -90,44 +91,52 @@ class PluginHost:
         self.host_version = host_version
         self._manifests: dict[str, Manifest] = {}
         self.errors: list[str] = []
+        # discover() 会被刷新线程、关注流线程和 /api/plugins 同时调用；
+        # 共享的 _manifests/errors 若不加锁，后进来的线程会把先到的清单清掉，
+        # 先到的线程再看到自己的 id 已在表里，就误报「插件 id 重复」。
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------ 发现
     def discover(self) -> list[Manifest]:
-        self._manifests.clear()
-        self.errors.clear()
-        if not self.plugins_dir.is_dir():
-            # 缺目录是配置问题，不是这一轮采集的致命错误：
-            # 记进 errors 让插件页/健康检查说清楚，发现结果按空处理。
-            # 以前这里直接抛 ManifestError，CI 没有 plugins/ 时连「平台冷却」
-            # 这种不需要真插件的路径都会 500。
-            self.errors.append(f"插件目录不存在: {self.plugins_dir}")
-            return []
-        found: list[Manifest] = []
-        for child in sorted(self.plugins_dir.iterdir()):
-            try:
-                if not child.is_dir() or not (child / "plugin.json").is_file():
+        # 整个发现过程必须原子：_manifests 是实例级缓存，多个线程同时清空/写入时，
+        # 后进来的线程会让先到的线程看到「同一个 id 出现两次」，触发假重复报错。
+        with self._lock:
+            self._manifests.clear()
+            self.errors.clear()
+            if not self.plugins_dir.is_dir():
+                # 缺目录是配置问题，不是这一轮采集的致命错误：
+                # 记进 errors 让插件页/健康检查说清楚，发现结果按空处理。
+                # 以前这里直接抛 ManifestError，CI 没有 plugins/ 时连「平台冷却」
+                # 这种不需要真插件的路径都会 500。
+                self.errors.append(f"插件目录不存在: {self.plugins_dir}")
+                return []
+            found: list[Manifest] = []
+            for child in sorted(self.plugins_dir.iterdir()):
+                try:
+                    if not child.is_dir() or not (child / "plugin.json").is_file():
+                        continue
+                    m = load_manifest(child, host_version=self.host_version)
+                except ManifestError as exc:
+                    self.errors.append(str(exc))
                     continue
-                m = load_manifest(child, host_version=self.host_version)
-            except ManifestError as exc:
-                self.errors.append(str(exc))
-                continue
-            except OSError as exc:
-                # 单个插件目录读不动（权限、删到一半、杀软占着）不该拖垮整轮发现
-                self.errors.append(f"插件目录读不动：{child}（{exc}）")
-                continue
-            if m.id in self._manifests:
-                self.errors.append(f"插件 id 重复：{m.id}（{child}）")
-                continue
-            self._manifests[m.id] = m
-            found.append(m)
-        return found
+                except OSError as exc:
+                    # 单个插件目录读不动（权限、删到一半、杀软占着）不该拖垮整轮发现
+                    self.errors.append(f"插件目录读不动：{child}（{exc}）")
+                    continue
+                if m.id in self._manifests:
+                    self.errors.append(f"插件 id 重复：{m.id}（{child}）")
+                    continue
+                self._manifests[m.id] = m
+                found.append(m)
+            return found
 
     def get(self, plugin_id: str) -> Manifest:
-        if not self._manifests:
-            self.discover()
-        if plugin_id not in self._manifests:
-            raise KeyError(f"未找到插件 {plugin_id}（已发现 {sorted(self._manifests)}）")
-        return self._manifests[plugin_id]
+        with self._lock:
+            if not self._manifests:
+                self.discover()
+            if plugin_id not in self._manifests:
+                raise KeyError(f"未找到插件 {plugin_id}（已发现 {sorted(self._manifests)}）")
+            return self._manifests[plugin_id]
 
     # ------------------------------------------------------------ 调用
     def run(self, plugin_id: str, method: str, args: dict | None = None,
