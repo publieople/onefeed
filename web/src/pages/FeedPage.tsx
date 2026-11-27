@@ -195,7 +195,9 @@ export default function FeedPage({ ctx }: Props) {
   const playedSeq = useRef(0);
   const oldIds = useRef<Set<string>>(new Set());
   const captured = useRef<FeedItem[] | null>(null);
-  const animatedIds = useRef<Set<string>>(new Set());
+  // 返回首页时 FeedPage 是重挂的；缓存里这批卡离开前已经入过场了，先记成已入场，
+  // 否则 18 张卡会一起重播 .rise，看起来像整屏又在加载。
+  const animatedIds = useRef<Set<string>>(new Set(feed.items.map((item) => item.id)));
   const feedRef = useRef(feed);
   feedRef.current = feed;
   const freshTimer = useRef<number | null>(null);

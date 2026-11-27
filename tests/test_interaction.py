@@ -475,6 +475,20 @@ def test_rules_summary_says_it_is_not_ai() -> None:
     assert "这段要点由本地规则整理，还没有用 AI 模型" in ITEM
 
 
+@case
+def test_return_to_feed_reuses_cached_cards_without_replaying_them() -> None:
+    """从详情返回时缓存里已经有这一屏：首屏请求只校新，不压暗、不重播入场。"""
+    # 带缓存挂载的第一次请求不亮 loading，避免整块网格先 opacity-55 再回来
+    assert "const seedKey = useRef<string | null>(seed ? cacheKey : null);" in API
+    assert "const silent = !append && seedKey.current === cacheKey;" in API
+    assert "else if (!silent) setLoading(true);" in API
+    # 缓存里的卡片已经入过场；重挂后先把它们记进 animatedIds，才不会再挂 .rise
+    assert "new Set(feed.items.map((item) => item.id))" in FEED
+    assert "const rise = !inShow && !isNew && !animatedIds.current.has(item.id)" in FEED
+    # 首次访问仍然要演：没有缓存时 items 为空，animatedIds 也是空的
+    assert "const [items, setItems] = useState<FeedItem[]>(() => seed?.items ?? []);" in API
+
+
 def main() -> int:
     failed = 0
     for name, fn in CASES:

@@ -1081,6 +1081,10 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
     query.saved ? 1 : 0,
   ]);
   const seed = feedCache.get(cacheKey);
+  // 这个 key 是带着缓存挂载的：返回首页时首屏已经有卡，第一次请求只做静默校新，
+  // 不能把整块网格压暗——那 80ms 的变暗就是「退出视频卡一下」的来源。
+  // 记 key 而不是布尔值：若还没跑首次请求就先换了筛选，新 key 不该跟着静默。
+  const seedKey = useRef<string | null>(seed ? cacheKey : null);
   const [items, setItems] = useState<FeedItem[]>(() => seed?.items ?? []);
   // 合并时要拿「合并前的 id 集合」判断新条目到哪儿为止；state 在异步循环里会过期。
   const itemsRef = useRef<FeedItem[]>(seed?.items ?? []);
@@ -1134,8 +1138,12 @@ export function useFeed(query: FeedQuery, reloadKey: number, autoKey = 0) {
       if (!append) abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      // 缓存垫底的第一次请求不亮 loading：卡片已经在场，再压暗一次就是纯抖动。
+      // 拿到响应照样整批换数据，所以只是「不演」，不是「不取」。
+      const silent = !append && seedKey.current === cacheKey;
+      if (silent) seedKey.current = null;
       if (append) setMoreLoading(true);
-      else setLoading(true);
+      else if (!silent) setLoading(true);
       setError("");
       try {
         const data = await getJSON<FeedResponse>(build(cursor), controller.signal);

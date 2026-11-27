@@ -106,7 +106,7 @@ export default function RefreshProgress({
     !(dismissed > 0 && dismissed === started) &&
     (live || (finishedAt > 0 && lingered !== finishedAt));
 
-  // 宽度靠量出来的实际尺寸补间。grid-cols-[0fr]/[1fr] 那套在绝对定位的容器里
+  // 宽度靠量出来的实际尺寸补间。0fr/1fr 那套在绝对定位的容器里
   // 会把 1fr 算成 min-content（实测只剩 18px，内容全被裁掉），所以不用它。
   const inner = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
