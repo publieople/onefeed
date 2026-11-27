@@ -587,6 +587,9 @@ export default function FeedPage({ ctx }: Props) {
     return map;
   }, [ctx.summary]);
 
+  // 首启时后端会自动抓一轮；这时空态不能再叫人「点刷新」，否则两个提示互相打架。
+  const refreshing = Boolean(ctx.progress?.running);
+
   const newest = useMemo(() => {
     const list = ctx.summary?.platforms ?? [];
     const ts = Math.max(0, ...list.map((p) => p.last_fetched_at));
@@ -660,6 +663,7 @@ export default function FeedPage({ ctx }: Props) {
           selected={selected}
           counts={counts}
           total={ctx.summary?.total ?? 0}
+          platforms={ctx.summary?.platforms.map((p) => p.platform)}
           onChange={(ids) => patch({ platforms: ids, keyword: "" })}
         />
       </section>
@@ -804,7 +808,9 @@ export default function FeedPage({ ctx }: Props) {
               ? "跟底下的 AI 说「把这几条收藏起来」，或者点结果卡右边的星标。"
               : active
                 ? "当前筛选下没有匹配，换个条件试试。"
-                : "点右上角刷新，或者先到插件市场装两个来源。"}
+                : refreshing
+                  ? "正在抓取第一轮内容，抓完会自动出现在这里。"
+                  : "第一次用的话，先登录、确认来源，再抓第一轮。"}
           </p>
           {savedOnly ? (
             <button
@@ -813,6 +819,11 @@ export default function FeedPage({ ctx }: Props) {
             >
               看全部内容
             </button>
+          ) : refreshing ? (
+            <span className="mt-4 flex items-center gap-2 rounded-lg bg-wash px-4 py-2 text-[13px] text-muted">
+              <RefreshCw size={13} className="animate-spin" />
+              正在抓取 {ctx.progress?.done ?? 0}/{ctx.progress?.total ?? 0}
+            </span>
           ) : active ? (
             // 空态给的动作要和原因对上：筛选出 0 条时，刷新不会让结果出现，清条件才会
             <button
@@ -822,9 +833,28 @@ export default function FeedPage({ ctx }: Props) {
               清空筛选条件
             </button>
           ) : (
-            <button onClick={ctx.refresh} className="mt-4 rounded-lg bg-solid px-4 py-2 text-[13px] text-solid-fg">
-              现在刷新一轮
-            </button>
+            <>
+              <ol className="mt-5 w-full max-w-[360px] space-y-2 text-left text-[12.5px] leading-relaxed text-muted">
+                <li>
+                  1.{" "}
+                  <button type="button" onClick={() => navigate("/settings?section=auth")} className="text-ink underline decoration-line underline-offset-2 hover:decoration-ink">
+                    去设置 · 登录态
+                  </button>{" "}
+                  登录小红书 / 抖音 / 知乎（B 站不用登录）
+                </li>
+                <li>
+                  2.{" "}
+                  <button type="button" onClick={() => navigate("/market")} className="text-ink underline decoration-line underline-offset-2 hover:decoration-ink">
+                    到插件市场
+                  </button>{" "}
+                  确认要看的来源已经启用
+                </li>
+                <li>3. 回来点下面的「现在刷新一轮」</li>
+              </ol>
+              <button onClick={ctx.refresh} className="mt-4 rounded-lg bg-solid px-4 py-2 text-[13px] text-solid-fg">
+                现在刷新一轮
+              </button>
+            </>
           )}
         </div>
       ) : null}

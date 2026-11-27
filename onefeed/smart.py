@@ -207,7 +207,7 @@ def summary(store) -> dict[str, Any]:
     platforms = store.platforms()
     newest = max((p["last_fetched_at"] or 0) for p in platforms) if platforms else 0
     top = sorted(platforms, key=lambda p: -p["count"])[:3]
-    pieces = [f"库里共 {total} 条" if total else "还没有内容，先点右上角刷新"]
+    pieces = [f"库里共 {total} 条" if total else "还没有内容"]
     if top:
         pieces.append("主要来自 " + "、".join(
             f"{PLATFORM_LABELS.get(p['platform'], p['platform'])} {p['count']} 条" for p in top))

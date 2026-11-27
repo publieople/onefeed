@@ -20,6 +20,17 @@ export function platform(id: string): PlatformMeta {
   return PLATFORMS.find((p) => p.id === id) ?? { ...FALLBACK, id, label: id };
 }
 
+/**
+ * 实际可用的平台列表：传 undefined 表示还没拿到后端数据，保留静态清单；
+ * 传数组就只保留其中的平台，后端新装/卸载插件后前端不用再改代码。
+ */
+export function platformList(ids?: string[]): PlatformMeta[] {
+  if (!ids) return PLATFORMS;
+  const known = PLATFORMS.filter((p) => ids.includes(p.id));
+  const extras = ids.filter((id) => !PLATFORMS.some((p) => p.id === id)).map((id) => platform(id));
+  return [...known, ...extras];
+}
+
 export const KIND_LABEL: Record<string, string> = {
   video: "视频",
   images: "图文",

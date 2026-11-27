@@ -301,7 +301,8 @@ def test_frontend_says_when_nothing_can_change():
     assert 'data-refresh-bar="1"' in read("web/src/components/RefreshProgress.tsx"), "落点得是那件真进度"
     assert "force === true" in app, "只认严格 true，SyntheticEvent 不能被 stringify"
     page = read("web/src/pages/SettingsPage.tsx")
-    assert "平台抓取间隔" in page and "PLATFORMS.map" in page
+    assert "平台抓取间隔" in page and "intervalPlatforms.map" in page
+    assert "platformList(installed.map" in page, "间隔输入要跟着已装插件走，不能写死平台表"
     api = read("onefeed/api.py")
     assert '"intervals"' in api, "前端要知道当前生效值，不能只看空的覆盖表"
 
