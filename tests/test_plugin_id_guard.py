@@ -82,7 +82,9 @@ def expect_raise(fn, label: str, exc_type: type = Exception) -> Exception:
 
 GOOD_IDS = ["bilibili", "xiaohongshu", "demo", "a1", "of-plugin", "p" * 32]
 BAD_IDS = ["", ".", "..", "...", "../x", "..\\x", "a/b", "a\\b", "%2E", "%2e%2e",
-           "Bilibili", "1abc", "a", "a b", "a.b", "bili\tm", "p" * 33, "插件", "a\x00b"]
+           "Bilibili", "1abc", "a", "a b", "a.b", "bili\tm", "p" * 33, "插件", "a\x00b",
+           # T4 F1：re.match + $ 会放过末尾换行，必须 fullmatch 才算合法 id
+           "bilibili\n", "bilibili\n\n"]
 
 
 def case_validate_id() -> None:
@@ -92,8 +94,18 @@ def case_validate_id() -> None:
         expect_raise(lambda p=pid: market.validate_plugin_id(p),
                      f"非法 id 被拒：{pid!r}", market.InvalidPluginId)
     # 与清单同一套规则：装进去的目录名必须是宿主能加载的 id
-    from plugin_runtime.manifest import ID_RE
+    from plugin_runtime.manifest import ID_RE, validate_manifest
     check(market.ID_RE is ID_RE, "market 的 id 规则和清单是同一份（不各写一遍）")
+    manifest = {
+        "schemaVersion": 1, "id": "bilibili\n", "name": "B 站", "version": "1.0.0",
+        "minHostVersion": "0.2.0", "entry": "index.js", "capabilities": ["http"],
+        "kinds": ["list"], "feeds": [{"id": "main", "name": "主源"}],
+    }
+    errors = validate_manifest(manifest)
+    check(any("id 必填" in e for e in errors), "清单校验同样拒末尾换行 id")
+    manifest["id"] = "bilibili"
+    errors = validate_manifest(manifest)
+    check(errors == [], f"同一份清单换成合法 id 后没有报错（实际：{errors}）")
     check(issubclass(market.InvalidPluginId, ValueError), "InvalidPluginId 是 ValueError 子类")
     expect_raise(lambda: market.validate_plugin_id(None), "None 当 id 被拒",
                  market.InvalidPluginId)
@@ -211,6 +223,12 @@ def case_api_guard(tmp: Path) -> None:
             resp = client.delete("/api/plugins/%2E%2E")
             check(resp.status_code == 400, "DELETE %2E%2E 也是 400")
             check(_err(resp).get("code") == "invalid_plugin_id", "DELETE %2E%2E 报 invalid_plugin_id")
+
+            # T4 F1：%0A 解码成末尾换行，旧实现会放行到 uninstall（200 removed=false）
+            resp = client.delete("/api/plugins/bilibili%0A")
+            check(resp.status_code == 400, f"DELETE bilibili%0A 返回 400（实际 {resp.status_code}）")
+            check(_err(resp).get("code") == "invalid_plugin_id", "末尾换行 id 报 invalid_plugin_id")
+            check((plugin_root / "bilibili" / "plugin.json").exists(), "带换行的 DELETE 没删到 bilibili")
 
             # 拦截之后现场必须完好：插件根、已装插件、库里的记录都还在
             check(plugin_root.is_dir(), "接口拦截后插件根还在")

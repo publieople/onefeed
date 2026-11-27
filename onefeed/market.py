@@ -225,7 +225,8 @@ def validate_plugin_id(plugin_id: str) -> str:
     目录，rename 走整个根。
     """
     pid = str(plugin_id or "")
-    if not ID_RE.match(pid):
+    # fullmatch：Pattern.match + $ 会放过 "bilibili\n"（$ 也匹配末尾换行前的位置）
+    if not ID_RE.fullmatch(pid):
         raise InvalidPluginId(
             f"非法的插件 id：{pid!r}（小写字母开头，只用小写字母、数字、连字符，2–32 位）")
     return pid

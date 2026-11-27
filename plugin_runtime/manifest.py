@@ -111,7 +111,8 @@ def validate_manifest(data: Any, plugin_dir: Path | None = None,
         errors.append(f"schemaVersion 必须是 {SCHEMA_VERSION}，当前是 {data.get('schemaVersion')!r}")
 
     pid = data.get("id")
-    if not isinstance(pid, str) or not ID_RE.match(pid):
+    # fullmatch：match + $ 会放过 "bilibili\n"（$ 也匹配末尾换行前的位置）
+    if not isinstance(pid, str) or not ID_RE.fullmatch(pid):
         errors.append("id 必填：小写字母开头，仅含小写字母/数字/连字符，长度 2–32")
 
     if not isinstance(data.get("name"), str) or not data.get("name", "").strip():
