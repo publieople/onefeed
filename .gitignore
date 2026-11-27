@@ -46,5 +46,9 @@ design/review/
 .DS_Store
 Thumbs.db
 
+# 提交物里的个人信息（报名表含手机号，只随最终 zip 交付）
+docs/submission/附件1_报名表.docx
+docs/submission/*.zip
+
 # 临时提交信息
 .git-commit-msg.tmp

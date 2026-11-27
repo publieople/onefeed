@@ -1,330 +1,318 @@
 {
  "plugin": "xiaohongshu",
- "saved_at": 1794670204,
+ "saved_at": 1795584043,
  "items": [
   {
-   "id": "xiaohongshu:note:6aefeb59000000001802c758",
+   "id": "xiaohongshu:note:6ae815f9000000001100c3d3",
    "platform": "xiaohongshu",
-   "raw_id": "note:6aefeb59000000001802c758",
-   "title": "如果一个编程语言不支持循环",
    "kind": "images",
+   "title": "新发现的hack：查出谁被降智了",
    "text": "",
-   "author": "Dotnet 魔怔人",
-   "author_id": "6ad3669f000000000c02f401",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo326e80218l6dg5qmjcqfj5t019av6bm8",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/e1670a765491b8a40ba0f2a3ff50b4b8/notes_pre_post/1040g3k03279v2lp770005qmjcqfj5t01sp239p0!nc_n_webp_mw_1",
+   "author": "舒易简",
+   "author_id": "57df215450c4b44ec6492afe",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31l3h9gj1320048mt0ngl8anujs2078g",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/5c038075b8dc41040ad3892e82a8e7e9/notes_pre_post/1040g3k83272alk82ng6g48mt0ngl8anu65l83v0!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/e1670a765491b8a40ba0f2a3ff50b4b8/notes_pre_post/1040g3k03279v2lp770005qmjcqfj5t01sp239p0!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/5c038075b8dc41040ad3892e82a8e7e9/notes_pre_post/1040g3k83272alk82ng6g48mt0ngl8anu65l83v0!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6aefeb59000000001802c758?xsec_token=ABKFTdVst07q3-WUtV5LnwHgQULcBOjWuSmXiepj5rV8I%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6ae815f9000000001100c3d3?xsec_token=ABrB0oyd9ZrTzaWFX8dgUeO-AlNEG_9KfOca_KB9cWPsc%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 41,
+   "like": 409,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6ad24c810000000015002b91",
+   "id": "xiaohongshu:note:6b00476900000000090214f6",
    "platform": "xiaohongshu",
-   "raw_id": "note:6ad24c810000000015002b91",
-   "title": "Linus 开喷：别用 AI 就\"不懂底层\"？🐧",
    "kind": "images",
+   "title": "职场里，不可替代真的是好事吗？",
    "text": "",
-   "author": "数字拾光者",
-   "author_id": "675dabc3000000001801ec6e",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31dovu6eh0s6g5pqtlf1m3r3epvjdkto",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/16aaffff9080fb691b10c3a2051bf25c/notes_pre_post/1040g3k8326d223vnkedg5pqtlf1m3r3e7a061r0!nc_n_webp_mw_1",
+   "author": "大勺子Dashaozi",
+   "author_id": "5b792bd326b61b00016378f0",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo325a94f9t4c004agfqklt6u7gref5v3g",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/3236d95bff2c99a2d224ce10866ca646/1040g2sg327pu93qemcdg4agfqklt6u7g9ia3j3g!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/16aaffff9080fb691b10c3a2051bf25c/notes_pre_post/1040g3k8326d223vnkedg5pqtlf1m3r3e7a061r0!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/3236d95bff2c99a2d224ce10866ca646/1040g2sg327pu93qemcdg4agfqklt6u7g9ia3j3g!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6ad24c810000000015002b91?xsec_token=ABJX8o7th3lJswTtmdTnuaO5cDqKtDCtKyCEB3RtcBiQ0%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6b00476900000000090214f6?xsec_token=ABRXtuEPUHzRv6fBUOyXu7mLD4OTQ0L4x-PBM4tuMfhvo%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 31,
+   "like": 5501,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6ae1c5ec0000000035021338",
+   "id": "xiaohongshu:note:6b064f9d000000002a013176",
    "platform": "xiaohongshu",
-   "raw_id": "note:6ae1c5ec0000000035021338",
-   "title": "折腾了三年，Python 官方正式砍掉 JIT：为",
    "kind": "images",
+   "title": "增强你的antigravity",
    "text": "",
-   "author": "随机比特",
-   "author_id": "6563586200000000040384bc",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31gd9t931jq005pb3b1h1715se1p1b68",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/540636cdc0a4cd5bf7608b7fcb36a88d/spectrum/1040g0k0326s5klo144005pb3b1h1715sqre3s60!nc_n_webp_mw_1",
+   "author": "橘子滋滋滋滋",
+   "author_id": "677777ab000000001801fcaf",
+   "author_avatar": "https://cdn.xiaohongshu.com/sd-static/api/20261125132040/088a995a-a79f-482a-94f9-710d9df1fdc6?u=MGfPnxdH35d60FeCqGw-a8P-y5D6k_LoSoONJRvGs7FnHMCUp5dqKe6z7FJGgiCdSJ8YQQCdHbz--5d2xdfvHiLavHE7WP4jHqlUf9VFJHhYG-Ai40Pl0J2mj_APUWJty_sGp-P8Jaig2HElDlceow13g1gna0fSjIhl9S9AezwVXkHYCgec_BQJ2C-rnc4yzzf7OwVzmH6F5EaJ-wZroA==#?v=cb1",
+   "cover": "https://cdn.xiaohongshu.com/sd-static/api/20261125132040/088a995a-a79f-482a-94f9-710d9df1fdc6?u=MGfPnxdH35d60FeCqGw-a8P-y5D6k_LoSoONJRvGs7FnHMCUp5dqKe6z7FJGgiCdSJ8YQQCdHbz--5d2xdfvHiLavHE7WP4jHqlUf9VFJHgYIbFRS0PUPa3YZEOV3IbXNIGJNmJt5sBRhLw0u357ry0RXVhsf4klaCUyXUndR2hvrzxhkg8w42yKP_YiwUAy7JBWRPgubc-bNmHJQ8l70x-Vr2NVkIkCn8oeqnXJ47I1EmeP1LQJCUJt1GALOPK2l_AKYR3JR3hkUWmfLn0xf7bPzjeT68FeP6mbB_nkIgU=#?v=cb1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/540636cdc0a4cd5bf7608b7fcb36a88d/spectrum/1040g0k0326s5klo144005pb3b1h1715sqre3s60!nc_n_webp_mw_1"
+    "https://cdn.xiaohongshu.com/sd-static/api/20261125132040/088a995a-a79f-482a-94f9-710d9df1fdc6?u=MGfPnxdH35d60FeCqGw-a8P-y5D6k_LoSoONJRvGs7FnHMCUp5dqKe6z7FJGgiCdSJ8YQQCdHbz--5d2xdfvHiLavHE7WP4jHqlUf9VFJHgYIbFRS0PUPa3YZEOV3IbXNIGJNmJt5sBRhLw0u357ry0RXVhsf4klaCUyXUndR2hvrzxhkg8w42yKP_YiwUAy7JBWRPgubc-bNmHJQ8l70x-Vr2NVkIkCn8oeqnXJ47I1EmeP1LQJCUJt1GALOPK2l_AKYR3JR3hkUWmfLn0xf7bPzjeT68FeP6mbB_nkIgU=#?v=cb1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6ae1c5ec0000000035021338?xsec_token=ABWQT2rQEoLdBp-2P5sOnNAVU5XvGDA2U07tt4P4oqo38%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6b064f9d000000002a013176?xsec_token=ABw3-OK1W9-hELeew4JIhBG34oqMeQv_l6naPFMFq2hk4%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 53,
+   "like": 161,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6af3e7c6000000002a02cbc4",
+   "id": "xiaohongshu:note:6b006f2d000000002b038531",
    "platform": "xiaohongshu",
-   "raw_id": "note:6af3e7c6000000002a02cbc4",
-   "title": "老哥参加AI面试，头上放个鞋😂",
+   "kind": "images",
+   "title": "公司没 WiFi，干脆自己写个工具！",
+   "text": "",
+   "author": "麻袋背金条",
+   "author_id": "65f48b31000000000500c9e2",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo327sijb41me005pfkhcoh9if2m5km2t8",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/91d7e5b925596b54c06a76eb918ffc39/1040g2sg327q3q3lc6ee05pfkhcoh9if2tch5ou8!nc_n_webp_mw_1",
+   "images": [
+    "http://sns-webpic-qc.xhscdn.com/202611251320/91d7e5b925596b54c06a76eb918ffc39/1040g2sg327q3q3lc6ee05pfkhcoh9if2tch5ou8!nc_n_webp_mw_1"
+   ],
+   "url": "https://www.xiaohongshu.com/explore/6b006f2d000000002b038531?xsec_token=ABRXtuEPUHzRv6fBUOyXu7mFU02pKwQHeRdm18-D9VmXU%3D&xsec_source=pc_feed",
+   "published_at": 0,
+   "duration": 0,
+   "like": 27,
+   "comment": 0,
+   "share": 0,
+   "view": 0,
+   "tags": [],
+   "extra": {
+    "model_type": "note"
+   },
+   "fetched_at": 1795584043
+  },
+  {
+   "id": "xiaohongshu:note:6afbea3700000000180267ae",
+   "platform": "xiaohongshu",
    "kind": "video",
+   "title": "OpenWrt为什么把iptables换成nftables",
    "text": "",
-   "author": "量子位",
-   "author_id": "6228870a0000000010008e88",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/622887c64f1c23567e524733.jpg",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/5a4cd43ab4a54a1e64efa5ab5744c737/spectrum/1040g34o327ds8smomi205oh8gs5413k88e6nok0!nc_n_webp_mw_1",
+   "author": "安明未定义",
+   "author_id": "6a212000000000000103e400",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo324hb5uu3n4005qh14000fp00pbu6488",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/3f1527d92c4210e0bb863d7bd00c79c5/spectrum/1040g34o327lmh50h6a0g5qh14000fp002jn6amg!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/5a4cd43ab4a54a1e64efa5ab5744c737/spectrum/1040g34o327ds8smomi205oh8gs5413k88e6nok0!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/3f1527d92c4210e0bb863d7bd00c79c5/spectrum/1040g34o327lmh50h6a0g5qh14000fp002jn6amg!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6af3e7c6000000002a02cbc4?xsec_token=ABu0nzpSzwNeN58gwk_CeuJq7yY69PzSyWUtivFRDT4sc%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6afbea3700000000180267ae?xsec_token=ABYZYtKRfu5IM2xCi0NcLRR2gdUyFMT40aSUlxk6Huu2g%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 9207,
+   "like": 39,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6ad8bb38000000003101df9b",
+   "id": "xiaohongshu:note:6afc0303000000002501f966",
    "platform": "xiaohongshu",
-   "raw_id": "note:6ad8bb38000000003101df9b",
-   "title": "自己招自己，6分钟就被公司拒绝了😂",
-   "kind": "images",
+   "kind": "video",
+   "title": "谁发明的这种电子垃圾处理方式？！🎆",
    "text": "",
-   "author": "苏倩",
-   "author_id": "641f027a0000000011023304",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo322jp3lmen4005p0v09t4cco4c77ul10",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/8423035d802b2060c38d13e9f4e20adc/spectrum/1040g34o326jb11ebka205p0v09t4cco40iulkd8!nc_n_webp_mw_1",
+   "author": "REDstudio",
+   "author_id": "5c331bfb000000000601ae63",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/6257c5d1ef030096f72e80c7.jpg",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/37064dfbeefff6b9500a497b8dd4201b/1040g2sg327ln04bjn0e05n1j3fthjbj34q84mfg!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/8423035d802b2060c38d13e9f4e20adc/spectrum/1040g34o326jb11ebka205p0v09t4cco40iulkd8!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/37064dfbeefff6b9500a497b8dd4201b/1040g2sg327ln04bjn0e05n1j3fthjbj34q84mfg!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6ad8bb38000000003101df9b?xsec_token=ABnjS9WHTCzMg1UpyDygLihdswXn5AunKJY0arxuoQWkE%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6afc0303000000002501f966?xsec_token=ABo5KrrjtZdQAMjTAcYa0SPBcECGXuOBeTO86YpkvwdJ0%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 3334,
+   "like": 165,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6aeed1d8000000000e034485",
+   "id": "xiaohongshu:note:6afe79ef000000002b03cee9",
    "platform": "xiaohongshu",
-   "raw_id": "note:6aeed1d8000000000e034485",
-   "title": "如何判断一个github项目是否靠谱",
    "kind": "images",
+   "title": "让我笑抽过去好吗",
    "text": "",
-   "author": "只想搞钱同学",
-   "author_id": "668f62ee000000000b0331b9",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3154acv7v14605pkfcbn2ucdpc5uqjd0",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/6d886714379520db2c9d984b595a8a41/notes_pre_post/1040g3k03278taap6n8605pkfcbn2ucdpq5hkil8!nc_n_webp_mw_1",
+   "author": "灵魂哑巴",
+   "author_id": "63593f6c000000001802d342",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo320e1evdels005oqp7tm65kq2he4h6o8",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/5b653224b88b0ee213760ea7364af934/1040g008327o6j0run6005oqp7tm65kq2978lo8o!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/6d886714379520db2c9d984b595a8a41/notes_pre_post/1040g3k03278taap6n8605pkfcbn2ucdpq5hkil8!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/5b653224b88b0ee213760ea7364af934/1040g008327o6j0run6005oqp7tm65kq2978lo8o!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6aeed1d8000000000e034485?xsec_token=AB7s-PUt2bOAlZDcGFPsMz68_MDKinkoQ94DCfGaLkdyM%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6afe79ef000000002b03cee9?xsec_token=AB3Obk0kFEmatWYzpY2MJGRI6TwXPN7RQyU0tNk2rRQMU%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 31,
+   "like": 10000,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6ad2ecff000000001c01cc45",
+   "id": "xiaohongshu:note:6afe89b9000000002a024d38",
    "platform": "xiaohongshu",
-   "raw_id": "note:6ad2ecff000000001c01cc45",
-   "title": "上海🐔🐝",
    "kind": "images",
+   "title": "这就是两个研究生的恋爱",
    "text": "",
-   "author": "七点半出门.",
-   "author_id": "610fe5820000000001009f51",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo323diqr807u0g5onkrqv7qn965uhtm10",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/da6a0b802939a5fdbdb2795bf9d5440a/notes_pre_post/1040g3k0326c89po8l6005o8fsm1097qh02gbo8g!nc_n_webp_mw_1",
+   "author": "知鸢",
+   "author_id": "6aea8c120000000005006c00",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo327e0keihn8g05qnahg918r00rp0o8d0",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/5f929487ead84a05bf4f01992ed4db68/notes_pre_post/1040g3k8327o8heq97gdg5qnahg918r000otghog!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/da6a0b802939a5fdbdb2795bf9d5440a/notes_pre_post/1040g3k0326c89po8l6005o8fsm1097qh02gbo8g!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/5f929487ead84a05bf4f01992ed4db68/notes_pre_post/1040g3k8327o8heq97gdg5qnahg918r000otghog!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6ad2ecff000000001c01cc45?xsec_token=ABJX8o7th3lJswTtmdTnuaO61qnDTMecyQVuAywozP_iE%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6afe89b9000000002a024d38?xsec_token=AB3Obk0kFEmatWYzpY2MJGRPB2ejOR5M0jYDq98n4Swoc%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 8812,
+   "like": 19000,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6af7e339000000001802941e",
+   "id": "xiaohongshu:note:6b0663c5000000002b03b075",
    "platform": "xiaohongshu",
-   "raw_id": "note:6af7e339000000001802941e",
-   "title": "李四维这是咋了啊",
    "kind": "images",
+   "title": "LazygitGo 开发了一款极速Git客户端",
    "text": "",
-   "author": "加强牛魔",
-   "author_id": "64b91394000000002b009a9a",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3252gsfv63u0g5p5p2eaap6kqsbn0sjo",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/fd76d6f8da31b56ec945f3284c9fe7cd/notes_pre_post/1040g3k0327holuaf6q005p5p2eaap6kqg2j3bmo!nc_n_webp_mw_1",
+   "author": "汤姆逊波纹疾走",
+   "author_id": "60d288a50000000001001034",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo31irh7s95go005o6ih2ig841k5aiuo68",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/bce3a6ad6ba208673bd80c5263e4a6dc/1040g008327vssa8k6g005o6ih2ig841kc5ponn0!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/fd76d6f8da31b56ec945f3284c9fe7cd/notes_pre_post/1040g3k0327holuaf6q005p5p2eaap6kqg2j3bmo!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/bce3a6ad6ba208673bd80c5263e4a6dc/1040g008327vssa8k6g005o6ih2ig841kc5ponn0!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6af7e339000000001802941e?xsec_token=ABjHJEX2MBEP3ThzGUz073xCzEfpE4tASkLVDpm6ndr6g%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6b0663c5000000002b03b075?xsec_token=ABpZ0yu6y9cKzHSzuX3JA9KRUwAIzKO_gfnvxKT6k8XiY%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 3580,
+   "like": 8,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6ade2107000000002b01f766",
+   "id": "xiaohongshu:note:6af081470000000002004ebc",
    "platform": "xiaohongshu",
-   "raw_id": "note:6ade2107000000002b01f766",
-   "title": "开发者们，老实说，",
    "kind": "images",
+   "title": "不想天天报作息，我让AI自己看手表",
    "text": "",
-   "author": "温温",
-   "author_id": "63c016f90000000027029ad2",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo32572shrik46g5ou02rspt6mihq7mr10",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/ab16846ab1cb3eba20c82d9d403416e1/notes_pre_post/1040g3k0326ojoorhkc005ou02rspt6mi18vugkg!nc_n_webp_mw_1",
+   "author": "小同的AI工具箱",
+   "author_id": "5a2ff36adb2e6048481c2777",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo321d2g1cu7e604a0881pmk9rnhsn37dg",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/4b108887cc920b340112d3e78dfe5167/spectrum/1040g34o327ahutnb6a104a0881pmk9rnfqe6q7g!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/ab16846ab1cb3eba20c82d9d403416e1/notes_pre_post/1040g3k0326ojoorhkc005ou02rspt6mi18vugkg!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/4b108887cc920b340112d3e78dfe5167/spectrum/1040g34o327ahutnb6a104a0881pmk9rnfqe6q7g!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6ade2107000000002b01f766?xsec_token=ABpCEBiLBlL6xWsnJJvzyZlSu6sXSzX48BCN46bQmrKfc%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6af081470000000002004ebc?xsec_token=ABKpzSJbgs5gj7_t0K44k0N_cQCpMK5nuQMPRLnMzJFpM%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 9,
+   "like": 55,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6ae730ec000000000e0358bd",
+   "id": "xiaohongshu:note:6ae45d55000000001a023759",
    "platform": "xiaohongshu",
-   "raw_id": "note:6ae730ec000000000e0358bd",
-   "title": "香蕉meme：你最喜欢哪个APP?",
    "kind": "images",
+   "title": "我也是有5TB的人了",
    "text": "",
-   "author": "香蕉Meme",
-   "author_id": "6ad79159000000000f039801",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo3278t8550mq5g5qmni5cjv6019gjut9g",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/d6e018d4f46294d79a0df566d292fe49/spectrum/1040g0k03270i2prdma005qmni5cjv601s0sqb0o!nc_n_webp_mw_1",
+   "author": "我在和自己的无价值感作斗争",
+   "author_id": "5d347b76000000001603b742",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo326sulsje5g005n9kfdr5ndq269a4ul8",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/16dd3507dbe7da31dd09e8b88924daa3/notes_pre_post/1040g3k0326umi1tb70005n9kfdr5ndq2r3mu2t8!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/d6e018d4f46294d79a0df566d292fe49/spectrum/1040g0k03270i2prdma005qmni5cjv601s0sqb0o!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/16dd3507dbe7da31dd09e8b88924daa3/notes_pre_post/1040g3k0326umi1tb70005n9kfdr5ndq2r3mu2t8!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6ae730ec000000000e0358bd?xsec_token=ABW1NCans6keId6ggdk5ybxxHPOwiZLw6BXULPmihsWOY%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6ae45d55000000001a023759?xsec_token=ABZkJPwzOsrtDa0nTRrA8GMWvgcbIz83l2KRb5E9SyAeE%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 217,
+   "like": 18,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   },
   {
-   "id": "xiaohongshu:note:6af6d2b5000000001603f9f3",
+   "id": "xiaohongshu:note:6b0507e4000000002303e180",
    "platform": "xiaohongshu",
-   "raw_id": "note:6af6d2b5000000001603f9f3",
-   "title": "被iphone duo笑死",
-   "kind": "images",
+   "kind": "video",
+   "title": "看懂缝纫机的锁线原理：旋梭、挑线杆、送布牙的完美配合科普机械涨知识缝纫机",
    "text": "",
-   "author": "兔兔不吃草哦",
-   "author_id": "6af6d1fc000000000e03f406",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo327gnd4sin8605qnmq7u3nt0646v6a00",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/212186a19fe3630b0b472400ebd415b8/notes_pre_post/1040g3k8327gndp6578d05qnmq7u3nt060hu6rlo!nc_n_webp_mw_1",
+   "author": "满塘鸭子我嘴最硬",
+   "author_id": "5e0d85bc0000000001006a59",
+   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo32563em7f505g5ngdgmu08qip3p6qg30",
+   "cover": "http://sns-webpic-qc.xhscdn.com/202611251320/ffa6f5a036d2b27b5785ad6f53b8460d/1040g008327ujed0f70605ngdgmu08qipi5i7mkg!nc_n_webp_mw_1",
    "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/212186a19fe3630b0b472400ebd415b8/notes_pre_post/1040g3k8327gndp6578d05qnmq7u3nt060hu6rlo!nc_n_webp_mw_1"
+    "http://sns-webpic-qc.xhscdn.com/202611251320/ffa6f5a036d2b27b5785ad6f53b8460d/1040g008327ujed0f70605ngdgmu08qipi5i7mkg!nc_n_webp_mw_1"
    ],
-   "url": "https://www.xiaohongshu.com/explore/6af6d2b5000000001603f9f3?xsec_token=ABZ5xsz3pfs-5Z-iLgvMLhrr26KIQmR7IYIEK3_6FXSvs%3D&xsec_source=pc_feed",
+   "url": "https://www.xiaohongshu.com/explore/6b0507e4000000002303e180?xsec_token=AB5UoV_xcCuZzq1_LbfjySkvLxxT9HjpbTS0VgsNBdTUQ%3D&xsec_source=pc_feed",
    "published_at": 0,
    "duration": 0,
-   "like": 11000,
+   "like": 5786,
    "comment": 0,
    "share": 0,
    "view": 0,
    "tags": [],
-   "fetched_at": 1794670204,
    "extra": {
     "model_type": "note"
-   }
-  },
-  {
-   "id": "xiaohongshu:note:6af4852f000000001803a6a4",
-   "platform": "xiaohongshu",
-   "raw_id": "note:6af4852f000000001803a6a4",
-   "title": "官方这里能不能多加一个字",
-   "kind": "images",
-   "text": "",
-   "author": "望舒嘉欣",
-   "author_id": "66b5a243000000001d021aec",
-   "author_avatar": "https://sns-avatar-qc.xhscdn.com/avatar/1040g2jo320a4v99d68005pllk91nc6ncppf406g",
-   "cover": "http://sns-webpic-qc.xhscdn.com/202611142330/844ed5f8f6b2c906b3bec272ff1ca227/1040g008327efg2s3n0005pllk91nc6ncpl96k4g!nc_n_webp_mw_1",
-   "images": [
-    "http://sns-webpic-qc.xhscdn.com/202611142330/844ed5f8f6b2c906b3bec272ff1ca227/1040g008327efg2s3n0005pllk91nc6ncpl96k4g!nc_n_webp_mw_1"
-   ],
-   "url": "https://www.xiaohongshu.com/explore/6af4852f000000001803a6a4?xsec_token=AB93ArginQqz99X67Wb-78k92a_SAyW8ezZ-XgUqrk3co%3D&xsec_source=pc_feed",
-   "published_at": 0,
-   "duration": 0,
-   "like": 351,
-   "comment": 0,
-   "share": 0,
-   "view": 0,
-   "tags": [],
-   "fetched_at": 1794670204,
-   "extra": {
-    "model_type": "note"
-   }
+   },
+   "fetched_at": 1795584043
   }
  ]
 }

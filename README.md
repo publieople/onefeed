@@ -1,13 +1,13 @@
 # OneFeed
 
-> 一屏刷完你的 B 站、抖音、小红书。
+> 一屏刷完七个平台：B 站、抖音、小红书、知乎、知乎热榜、掘金、V2EX。
 
 上海中侨职业技术大学首届「AI+X」校园 Vibe Coding 创新黑客松参赛项目。
 团队 3 人。开发方式：**spec 驱动**（先写规格，再写代码，PR 必须引用 spec 条目）。
 
 ## 它解决什么
 
-同一个人每天要开三个 App、各刷十分钟，才能看完自己真正关心的内容。
+同一个人每天要开七个 App、来回切换，才能看完自己真正关心的内容。
 OneFeed 把各平台的**个人信息流**拉到一个本地面板里：
 
 - 扫码登录一次，之后不用来回切 App
@@ -51,7 +51,7 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 
 ## 当前状态
 
-运行时（`plugin_runtime/`）与官方插件集已跑通，七个平台吐同一套 `Item`（2026-11-17 实测）：
+运行时（`plugin_runtime/`）与官方插件集已跑通，七个平台吐同一套 `Item`（2026-11-27 复核）：
 
 | 插件 | 引擎 | 状态 |
 |---|---|---|
@@ -63,7 +63,7 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 | v2ex | `http` | ✅ 免登录（部分网络需代理） |
 | zhihu-hot | `http` | ✅ 免登录热榜 + 详情卡 |
 
-宿主应用（`onefeed/`）已经能跑：`python -m onefeed` 起一个本地 Web 应用，七平台卡片混排、五种 kind 卡片、独立详情页（含可翻页的插件评论区）、底部 AI 对话框（一句话找内容 / 刷一刷）、同题合并、插件市场（安装 / 卸载 / 更新 / 自动更新 / sha256 校验）、设置页、登录窗口、`--preflight` 现场自检、`--demo` 离线兜底。
+宿主应用（`onefeed/`）已经能跑：`python -m onefeed` 起一个本地 Web 应用，七平台卡片混排、五种 kind 卡片、独立详情页（含可翻页的插件评论区）、详情页三档 AI 总结与右栏追问、左栏 Agent 工作台（条件筛选、打开条目、批量总结、停止、自动抓取）、关注动态与 B 站关注名单、作者主页、滑到底自动检查、图文灯箱缩放、同题合并、插件市场（安装 / 卸载 / 更新 / 自动更新 / sha256 校验）、设置页、登录窗口、`--preflight` 现场自检、`--demo` 离线兜底。
 
 2026-11-24 增加关注流：顶栏「信息流 / 关注」切换，B 站 / 抖音 / 小红书 / 知乎四个平台的原生关注流，支持列表、按作者时间线、紧凑三种布局，关注页同步与主信息流刷新互不影响。详见 [`docs/following-2026-11-24.md`](docs/following-2026-11-24.md)。
 
@@ -73,9 +73,9 @@ https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json
 
 2026-11-25 图文灯箱改成从缩略图缩放展开：点开大图时同一张图从缩略图盒子长到整屏，关闭时缩回原位置，不再跳变；多图左右翻、原尺寸查看与键盘操作保持原样。详见 [`docs/lightbox-zoom-2026-11-25.md`](docs/lightbox-zoom-2026-11-25.md)。
 
-实测（2026-11-15 21:00，本机，端口 8791）：275 条 / 6 平台；卡片统一成「平台标签 + kind + 时间 / 媒体 / 标题 / 摘要 / 作者 + 互动」，缺封面走虚线占位块而不是假装加载失败；B 站抽屉能拉到 20 条真实评论（楼中楼 3 层内）；市场页能把 B 站 0.1.0 一键更新到 0.2.0；热度排序按平台内分位归一，六个平台都能上榜首；设置页可改插件目录、registry、每轮条数、评论条数、默认排序、保留天数与自动更新，保存即生效；`8787` 被别的程序占用时自动改用 `8788` 并在启动日志里说明。
+实测（2026-11-27 12:43，本机，端口 8787）：信息流 1902 条 / 7 平台，库内 1935 条（含 30 条作者补档、3 条直播动态），B 站关注名单 602 个；卡片统一成「平台标签 + kind + 时间 / 媒体 / 标题 / 摘要 / 作者 + 互动」，缺封面走虚线占位块；详情页能拉真实评论，AI 总结三档，Agent 回答完把过程折成「过程 N 步」；触底自动检查只查当前筛选平台，新增并进首屏且保留滚动；图文灯箱从缩略图缩放展开；插件市场 7 个插件，安装 / 更新 / 卸载 / sha256 校验可用；32 组验收脚本全过，GitHub Actions 的 python 与 web 两个 job 都绿；`8787` 被别的程序占用时自动改用 `8788` 并在启动日志里说明。
 
-截图：`design/ui-feed.png`（信息流）、`design/ui-drawer.png`（详情 + 评论）、`design/ui-settings.png` / `design/ui-settings-full.png`（设置页）、`design/ui-market.png` / `design/ui-market-after.png`（市场更新前后）。
+比赛用截图在 [`docs/submission/screenshots/`](docs/submission/screenshots/)：信息流、插件市场、关注名单、详情页 Agent、作者主页；早期视觉稿仍在 `design/`。
 
 ## 快速开始
 
@@ -100,7 +100,7 @@ uv run python -m onefeed --demo     # 断网演示：只读 fixtures，不碰网
 uv run python -m onefeed --preflight
 
 # 6) 验收
-uv run python tests/run_all.py            # 九项全跑（含联网的 real / e2e）
+uv run python tests/run_all.py            # 32 组全跑（含联网的 real / e2e）
 uv run python tests/run_all.py --offline  # 跳过联网用例
 ```
 
@@ -113,7 +113,7 @@ uv run python tests/run_all.py --offline  # 跳过联网用例
 
 ## 在线演示（GitHub Pages）
 
-只读演示站：<https://publieople.github.io/onefeed/>。打开就是真实前端 + 一份抓取快照（当前 65 条 / 6 个平台），不联网、不登录、不写任何东西。
+只读演示站：<https://publieople.github.io/onefeed/>。打开就是真实前端 + 一份抓取快照（当前 84 条 / 7 个平台），不联网、不登录、不写任何东西。
 
 只做只读是有意的：平台登录态是本机浏览器档案里的 HttpOnly cookie，静态页取不到、也不该转存到 localStorage；插件是 Python + QuickJS / Playwright，浏览器里根本没有运行时。演示站负责「长什么样、怎么用」，真采集在本机。
 
@@ -134,6 +134,17 @@ cd web && VITE_DEMO=1 VITE_BASE=/onefeed/ npm run build && cd ..       # 产物�
 
 规格见 [`specs/012-demo-site/spec.md`](specs/012-demo-site/spec.md)。
 
+## 比赛提交物（2026-11-27）
+
+这次黑客松的交付物放在 [`docs/submission/`](docs/submission/)：
+
+- [`OneFeed-项目简介.docx`](docs/submission/OneFeed-项目简介.docx) / [`.pdf`](docs/submission/OneFeed-项目简介.pdf)：4 页，问题、方案、能力、技术、交互、边界与团队。
+- [`OneFeed-5分钟路演.pptx`](docs/submission/OneFeed-5分钟路演.pptx) / [`.pdf`](docs/submission/OneFeed-5分钟路演.pdf)：6 页；逐页口播稿在 [`OneFeed-5分钟路演-口播稿.md`](docs/submission/OneFeed-5分钟路演-口播稿.md)。
+- [`OneFeed-90秒演示.mp4`](docs/submission/OneFeed-90秒演示.mp4)：1600×900 无声录屏，带步骤字幕；覆盖信息流、详情页 Agent、刷新胶囊、关注名单、触底检查与插件市场。
+- [`demo/index.html`](docs/submission/demo/index.html)：63 条真实样本 + 7 平台离线快照，双击即开；封面在 `demo/assets/`。
+- [`screenshots/`](docs/submission/screenshots/)：现场演示与材料用的 5 张截图。
+- 报名表与最终 zip 含个人信息，不放进公开仓库，随提交包单独交付。
+
 ## 现场怎么演（比赛 / 演示机）
 
 演示前先跑一次自检，别等到评委坐下才发现少东西：
@@ -153,8 +164,8 @@ uv run python -m onefeed --preflight
 
 两个脚本都是「先自检、通过了再起服务」，起完自动开浏览器。
 
-断网也不慌：离线快照在 `hackathon-submit/Undefined周铉/demo/index.html`，双击就能看 54 条真实数据、
-三个 Tab 与详情抽屉，不依赖 Python 和网络。真实版本要现场采集，断网时先用快照顶住，网恢复再演实时。
+断网也不慌：离线快照在 [`docs/submission/demo/index.html`](docs/submission/demo/index.html)，双击就能看 63 条真实数据、
+7 个平台、详情抽屉与插件市场说明，不依赖 Python 和网络。真实版本要现场采集，断网时先用快照顶住，网恢复再演实时。
 
 **登录怎么给**：设置页里点「打开登录窗口」，宿主用 Playwright 起一个**独立的 Chrome 窗口**
 （profile 在 `<状态目录>/login/<plugin-id>/`，不碰你日常浏览器），你在窗口里扫码/输密码，
@@ -173,10 +184,11 @@ B 站不弹窗：它的登录态由本机 `bili` CLI 管，设置页只给你一
 并实现 `comments(item, opts)`，详情页就会去拉评论。现在 B 站 / 知乎 / 小红书 / 抖音都有，
 掘金 / V2EX / 知乎热榜还没有——没声明的平台会明确写「这个插件没有提供评论接口」，而不是转圈或报错。
 
-**AI 入口是"底栏对话框"**：一句话说要看什么，宿主把它翻成检索条件（平台 / 类型 / 时间 / 关键词 / 排序），
-再查本地库把结果摆出来。模型只负责理解和措辞，内容永远来自本地 SQLite——没配 key 时用规则解析，
-断网也能演示；配了 key 走模型，模型超时或胡说一律静默落回规则。设置页可以排一条模型顺序表
-（比如先 MiniMax 再 DeepSeek），前面那个挂了自动换下一个，都挂才退回规则解析。
+**AI 入口共用一套会话**：主页左栏是 Agent 工作台，详情页右栏是同一个 Agent 的窄版，底栏胶囊随时唤起。
+一句话说要看什么，宿主把它翻成检索条件（平台 / 类型 / 时间 / 关键词 / 排序），再查本地库把结果摆出来；
+Agent 还能打开条目、批量总结、停止当前回答，库里没有时自主去平台抓一轮。模型只负责理解和措辞，
+内容永远来自本地 SQLite——没配 key 时用规则解析，断网也能演示；配了 key 走模型，模型超时或胡说一律静默落回规则。
+设置页可以排一条模型顺序表（比如先 MiniMax 再 DeepSeek），前面那个挂了自动换下一个，都挂才退回规则解析。
 
 **插件市场能更新**：市场页把 registry 版本和已装版本比一下，新的才显示 `v0.1.0 → v0.2.0` 和「更新」；
 顶部「全部更新 (N)」一次升完，单个失败不影响其它。设置页的 `auto_update` 开着时，每轮采集前先查一遍市场
@@ -245,7 +257,9 @@ spec 变更 → 评审通过 → 同步 tasks.md → 写代码 → PR 关联 tas
 - [`docs/following-accounts-2026-11-25.md`](docs/following-accounts-2026-11-25.md) — 关注名单、作者主页与 B 站直播过滤
 - [`docs/agent-auto-refresh-2026-11-25.md`](docs/agent-auto-refresh-2026-11-25.md) — Agent 过程收起、详情页右栏与触底自动检查
 - [`docs/lightbox-zoom-2026-11-25.md`](docs/lightbox-zoom-2026-11-25.md) — 图文灯箱从缩略图缩放展开与缩回
+- [`docs/status-2026-11-27.md`](docs/status-2026-11-27.md) — 当前状态、提交物清单与已知边界
+- [`specs/003-delivery/plan.md`](specs/003-delivery/plan.md) — 交付与路演计划（结构仍可参考，数字以本文为准）
 
 ## 许可
 
-MIT
+MIT，见 [LICENSE](LICENSE)。只读采集、登录态与平台条款的边界见 [DISCLAIMER.md](DISCLAIMER.md)。
