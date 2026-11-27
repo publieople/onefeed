@@ -308,7 +308,7 @@ def _is_public_http(url: str) -> bool:
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
-        return True  # 解析不了就交给请求阶段报错
+        return False  # 解析不出来就没法证明是公网，按拒绝处理（fail-closed）
     for info in infos:
         try:
             ip = ipaddress.ip_address(info[4][0])
@@ -317,6 +317,52 @@ def _is_public_http(url: str) -> bool:
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
             return False
     return True
+
+
+def _host_allowed(host: str, patterns: list[str]) -> bool:
+    """域名是否命中声明列表；语义与 media._host_allowed 一致（"*.x" 不匹配裸 x）。"""
+    host = (host or "").lower()
+    for pattern in patterns or []:
+        p = pattern.lower()
+        if p.startswith("*."):
+            if host.endswith(p[1:]):          # ".xhscdn.com"
+                return True
+        elif host == p:
+            return True
+    return False
+
+
+class _BlockedRedirect(Exception):
+    """重定向目标没通过校验：不是网络问题，不该换代理重试。"""
+
+
+class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """每一跳都复检：必须是公网地址、命中插件声明的域；跨 host 丢掉 Cookie / Referer。
+
+    OF-02：只校验首个 URL 时，插件（或被注入的接口）用一个 302 就能把宿主
+    内部的 /api/* 读出来；所以重定向必须逐跳走同一套校验。
+    """
+
+    def __init__(self, allowed_hosts: list[str] | None = None):
+        self.allowed_hosts = list(allowed_hosts or [])
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        if not _is_public_http(newurl):
+            raise _BlockedRedirect(f"重定向到非公网地址: {newurl}")
+        new_host = (urllib.parse.urlparse(newurl).hostname or "").lower()
+        if self.allowed_hosts and not _host_allowed(new_host, self.allowed_hosts):
+            raise _BlockedRedirect(f"重定向到未声明的域: {new_host}（plugin.json 的 httpHosts）")
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is None:
+            return None
+        old_host = (urllib.parse.urlparse(req.full_url).hostname or "").lower()
+        if old_host != new_host:
+            for key in ("Cookie", "Referer"):
+                try:
+                    new.remove_header(key)
+                except Exception:             # noqa: BLE001 - 没这个头就算了
+                    pass
+        return new
 
 
 class Capabilities:
@@ -384,6 +430,11 @@ class Capabilities:
 
         if not _is_public_http(url):
             raise PermissionError(f"拒绝请求非公网地址: {url}")
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+        if self.manifest.http_hosts and not _host_allowed(host, self.manifest.http_hosts):
+            raise PermissionError(
+                f"host 不在插件声明的 httpHosts 里: {host}"
+                f"（允许 {self.manifest.http_hosts}）")
 
         headers = {"User-Agent": UA, "Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9"}
         headers.update({str(k): str(v) for k, v in (req.get("headers") or {}).items()})
@@ -399,7 +450,7 @@ class Capabilities:
         method = str(req.get("method") or ("POST" if data is not None else "GET")).upper()
 
         if req.get("credential") == "self":
-            self._inject_cookie(headers, req)
+            self._inject_cookie(headers, req, host)
 
         timeout = min(float(req.get("timeoutMs") or 15000) / 1000.0, 30.0)
         self.log("info", f"http {method} {url[:120]}")
@@ -408,7 +459,10 @@ class Capabilities:
         # 直连优先；失败再试本机常见代理（Clash 7890 / v2ray 10809）
         for proxy in PROXY_CANDIDATES:
             handlers = {"http": proxy, "https": proxy} if proxy else {}
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler(handlers))
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler(handlers),
+                _GuardedRedirect(self.manifest.http_hosts),
+            )
             request = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
                 with opener.open(request, timeout=timeout) as resp:
@@ -418,6 +472,8 @@ class Capabilities:
                         raise ValueError("响应体超过 5MB，已截断拒绝")
                     return {"status": resp.status, "text": text,
                             "headers": {k.lower(): v for k, v in resp.headers.items()}}
+            except _BlockedRedirect as exc:
+                raise PermissionError(f"重定向被拒绝: {exc}") from exc
             except urllib.error.HTTPError as exc:
                 text = exc.read()[:MAX_BODY_BYTES].decode("utf-8", "replace")
                 return {"status": exc.code, "text": text,
@@ -427,13 +483,28 @@ class Capabilities:
                 continue
         raise RuntimeError(f"请求失败（直连与代理均不通）: {type(last).__name__}: {last}")
 
-    def _inject_cookie(self, headers: dict[str, str], req: dict[str, Any] | None = None) -> None:
+    def _cookie_hosts(self) -> list[str]:
+        """凭证允许注入的域：显式 cookieHosts 优先，否则用已声明的媒体域 + http 域。"""
+        if self.manifest.cookie_hosts:
+            return list(self.manifest.cookie_hosts)
+        return list(self.manifest.media_hosts) + list(self.manifest.http_hosts)
+
+    def _inject_cookie(self, headers: dict[str, str],
+                       req: dict[str, Any] | None = None, host: str = "") -> None:
         """credential=self：用插件自己配置的 cookie（宿主读取，明文不出宿主）。
+
+        只向插件声明过的域注入（OF-01）：以前谁调 http 都能带 cookie，
+        一次请求就能把平台登录态送去任意公网 host。
 
         cookieCase 是给那些「JSON 里存小写、HTTP 头必须大写」的平台用的：
         B 站凭证文件是 sessdata/dedeuserid，而 api.bilibili.com 只认
         SESSDATA/DedeUserID，键名原样拼会得到 code -101（账号未登录）。
         """
+        allowed = self._cookie_hosts()
+        if not host or not _host_allowed(host, allowed):
+            raise PermissionError(
+                f"拒绝向未声明的域注入 Cookie: {host or '(空)'}；"
+                "请在 plugin.json 里用 cookieHosts（或 mediaHosts / httpHosts）声明凭证可去的域")
         req = req or {}
         raw = self.settings.get("cookie")
         if raw:
