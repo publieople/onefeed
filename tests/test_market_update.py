@@ -443,6 +443,8 @@ def main() -> int:
         check(allresp.json()["result"]["pending"] == 0, "已经没有待更新的了")
 
         plugins = client.get("/api/plugins").json()
+        check(Path(plugins["plugins_dir"]) == sb2.plugin_root,
+              "安装/更新后的重新发现仍停在注入的插件目录")
         gamma = next(e for e in plugins["market"]["entries"] if e["id"] == "gamma")
         check(gamma["update_available"] is False, "更新后不再提示可更新")
         check(gamma["installed_version"] == "0.3.0", "市场页读到的新版本")

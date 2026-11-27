@@ -72,6 +72,19 @@ def _plugin_host(request: Request) -> PluginHost:
     return request.app.state.refresher.host
 
 
+def _plugins_dir(request: Request) -> Path:
+    """当前进程认的插件目录。
+
+    以 create_app 落下的 app.state.plugins_dir 为准，而不是每次重读 settings：
+    安装/更新后的重新发现必须留在同一个目录，否则 create_app(plugins_dir=...)
+    的注入会被默认目录覆盖（CI 没有 plugins/ 时尤其明显）。
+    """
+    raw = getattr(request.app.state, "plugins_dir", None)
+    if raw:
+        return Path(str(raw))
+    return settings_mod.resolve_plugins_dir(str(settings_mod.load().get("plugins_dir") or ""))
+
+
 # 关注页固定按这个顺序展示平台：B 站、抖音、小红书、知乎。
 # 插件没装 / 没声明 following / 没登录 都要如实显示，而不是从列表里消失。
 FOLLOWING_PLATFORMS = ("bilibili", "douyin", "xiaohongshu", "zhihu")
@@ -467,6 +480,7 @@ def _apply_settings(request: Request, conf: dict[str, Any],
     target = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
     current_dir = Path(str(getattr(runner.host, "plugins_dir", "") or ".")).resolve()
     if current_dir != target.resolve():
+        request.app.state.plugins_dir = target
         runner.host = PluginHost(plugins_dir=target)
         if following is not None:
             following.host = runner.host
@@ -1378,9 +1392,15 @@ def refresh(request: Request, payload: dict[str, Any] = Body(default={})) -> dic
     _COMMENT_CACHE.clear()  # 新一轮采集后评论可能变了，别拿旧缓存糊弄
     started, state = _runner(request).trigger(platforms=platforms, force=force, source=source)
     if not started:
+        if state.get("running"):
+            raise HTTPException(status_code=409, detail={
+                "code": "refresh_running", "message": "已经在刷新了",
+                "hint": "等这一轮结束，或者看 /api/progress 的进度"})
+        # 目录缺失 / 插件全没装上：这不是「已经在跑」，要如实说启动不了。
         raise HTTPException(status_code=409, detail={
-            "code": "refresh_running", "message": "已经在刷新了",
-            "hint": "等这一轮结束，或者看 /api/progress 的进度"})
+            "code": "refresh_unavailable",
+            "message": str(state.get("error") or "没有可用的插件"),
+            "hint": "去设置页看插件目录和已安装插件；目录和清单都正常后再刷新"})
     return {"ok": True, "state": state}
 
 
@@ -1434,18 +1454,14 @@ def install_plugin(request: Request, plugin_id: str) -> dict:
         raise HTTPException(status_code=400, detail={
             "code": "install_failed", "message": f"{type(exc).__name__}: {exc}"[:300],
             "hint": "检查网络、registry 缓存，或改用本地文件安装"})
-    conf = settings_mod.load()
-    target = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
-    _runner(request).host = PluginHost(plugins_dir=target)  # 重新发现插件目录
-    sync_installed(store, target)
+    _reload_plugins(request)  # 重新发现插件目录
     return {"ok": True, "result": result}
 
 
 def _reload_plugins(request: Request) -> None:
     """装/更新/卸载之后重新发现插件目录：目录是事实，库只是索引。"""
     store = _store(request)
-    conf = settings_mod.load()
-    target = settings_mod.resolve_plugins_dir(str(conf.get("plugins_dir") or ""))
+    target = _plugins_dir(request)
     _runner(request).host = PluginHost(plugins_dir=target)
     sync_installed(store, target)
 

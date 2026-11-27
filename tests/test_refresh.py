@@ -21,6 +21,7 @@ os.environ.setdefault("ONEFEED_HOME", tempfile.mkdtemp(prefix="onefeed-refresh-"
 from onefeed import settings as settings_mod  # noqa: E402
 from onefeed.service import RefreshRunner  # noqa: E402
 from onefeed.store import FRESH_KEY, Store  # noqa: E402
+from plugin_runtime.host import PluginHost  # noqa: E402
 
 
 def read(rel: str) -> str:
@@ -115,6 +116,38 @@ def test_trigger_skips_a_platform_that_just_ran():
     assert entry["next_at"] > time.time()
     assert "还要等" in entry["note"]
     assert state["done"] == state["total"] == 1
+
+
+def test_trigger_survives_a_missing_plugin_dir():
+    # CI 里没有仓库内的 plugins/：触发采集不能因为「发现插件失败」整段 500。
+    # 显式点名平台时，冷却仍要照常算，错误记在 host.errors 里交给插件页。
+    store = make_store()
+    run_id = store.start_run("v2ex")
+    store.finish_run(run_id, True, 3)
+
+    missing = Path(tempfile.mkdtemp(prefix="onefeed-no-plugins-")) / "plugins"
+    runner = RefreshRunner(store, host=PluginHost(plugins_dir=missing))
+    started, state = runner.trigger(platforms=["v2ex"])
+    assert started is True
+    assert state["running"] is False
+    assert state["plugins"]["v2ex"]["status"] == "skipped"
+    assert state["done"] == state["total"] == 1
+    assert any("插件目录不存在" in e for e in runner.host.errors)
+
+
+def test_refresh_api_explains_a_missing_plugin_dir():
+    from fastapi.testclient import TestClient
+
+    from onefeed.app import create_app
+
+    store = make_store()
+    missing = Path(tempfile.mkdtemp(prefix="onefeed-no-plugins-api-")) / "plugins"
+    client = TestClient(create_app(store=store, plugins_dir=missing))
+    resp = client.post("/api/refresh", json={})
+    assert resp.status_code == 409
+    error = resp.json()["error"]
+    assert error["code"] == "refresh_unavailable", "目录缺失不能伪装成「已经在刷新」"
+    assert "插件目录不存在" in error["message"]
 
 
 def test_trigger_batches_by_platform_and_force_bypasses_cooldown():

@@ -147,7 +147,10 @@ class RefreshRunner:
             labels = {m.id: (m.name or m.id) for m in self.host.discover()}
             ids = [p for p in (platforms or list(labels)) if p]
             if not ids:
-                self._state.update({"error": "没有可用的插件", "finished_at": int(time.time()),
+                reason = "没有可用的插件"
+                if self.host.errors:
+                    reason += "：" + self.host.errors[0]
+                self._state.update({"error": reason, "finished_at": int(time.time()),
                                     "phase": "idle"})
                 return False, json.loads(json.dumps(self._state))
             now = int(time.time())

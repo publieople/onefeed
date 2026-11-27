@@ -96,7 +96,12 @@ class PluginHost:
         self._manifests.clear()
         self.errors.clear()
         if not self.plugins_dir.is_dir():
-            raise ManifestError(f"插件目录不存在: {self.plugins_dir}")
+            # 缺目录是配置问题，不是这一轮采集的致命错误：
+            # 记进 errors 让插件页/健康检查说清楚，发现结果按空处理。
+            # 以前这里直接抛 ManifestError，CI 没有 plugins/ 时连「平台冷却」
+            # 这种不需要真插件的路径都会 500。
+            self.errors.append(f"插件目录不存在: {self.plugins_dir}")
+            return []
         found: list[Manifest] = []
         for child in sorted(self.plugins_dir.iterdir()):
             try:

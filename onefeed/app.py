@@ -32,6 +32,10 @@ def create_app(store: Store | None = None, plugins_dir: Path | None = None) -> F
     app.state.settings = conf
     plugins_dir = Path(plugins_dir) if plugins_dir is not None \
         else settings_mod.resolve_plugins_dir(conf.get("plugins_dir", ""))
+    # 这是本次进程真正认的插件目录：安装/更新后的重新发现必须回到这里。
+    # 以前 _reload_plugins 重新读 settings，会把 create_app(plugins_dir=...) 传入的
+    # 目录覆盖回默认目录；CI 没有默认 plugins/ 时，目录刷新就整段失效。
+    app.state.plugins_dir = plugins_dir
     # 上次进程如果在换插件目录的中途被强杀，先把隐藏备份恢复/收尾，再登记插件。
     market.recover_installs(app.state.store, plugins_dir)
     sync_installed(app.state.store, plugins_dir)
