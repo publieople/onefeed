@@ -32,11 +32,15 @@ MAX_HTML_CHARS = 2_000_000
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
 
-# 只保留与网络/编码相关的变量：本机 NO_PROXY 含 [::1]，任何读环境代理的库都会崩
+# 只保留与网络/编码相关的变量：本机 NO_PROXY 含 [::1]，任何读环境代理的库都会崩。
+# ONEFEED_* 是宿主自己的运行配置：不带下去，worker 会退回 ~/.onefeed 和自建 headless
+# Chromium，而不是当前实例的状态目录与正在登录的 sidecar Chrome。
 SAFE_ENV_KEYS = ("PATH", "PATHEXT", "SystemRoot", "windir", "COMSPEC", "USERPROFILE",
                  "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMDATA",
                  "TEMP", "TMP", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
-                 "PROCESSOR_ARCHITECTURE", "PYTHONUTF8", "PYTHONIOENCODING")
+                 "PROCESSOR_ARCHITECTURE", "PYTHONUTF8", "PYTHONIOENCODING",
+                 "ONEFEED_HOME", "ONEFEED_BROWSER_CDP", "ONEFEED_BROWSER_PROFILE",
+                 "ONEFEED_CHROME_EXE", "ONEFEED_BROWSER_PROXY")
 PROXY_CANDIDATES = ("", "http://127.0.0.1:7890", "http://127.0.0.1:10809")
 
 # Chrome 的 user-data-dir 一个进程独占：详情和评论并发时会互相把对方顶掉，

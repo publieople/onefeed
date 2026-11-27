@@ -10,7 +10,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from plugin_runtime import browser_cdp  # noqa: E402
+from plugin_runtime import browser_cdp, capabilities  # noqa: E402
 
 
 def case_endpoint_and_enabled():
@@ -111,10 +111,30 @@ def case_clear_cookies_does_not_launch():
     print("case_clear_cookies_does_not_launch ok")
 
 
+def case_clean_env_keeps_runtime_config():
+    keys = ["ONEFEED_HOME", "ONEFEED_BROWSER_CDP", "ONEFEED_BROWSER_PROFILE",
+            "ONEFEED_CHROME_EXE", "ONEFEED_BROWSER_PROXY"]
+    old = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in keys:
+            os.environ[key] = "test-" + key.lower()
+        env = capabilities.clean_env()
+        for key in keys:
+            assert env.get(key) == "test-" + key.lower(), key
+        assert env.get("PYTHONIOENCODING") == "utf-8"
+    finally:
+        for key, value in old.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    print("case_clean_env_keeps_runtime_config ok")
+
+
 def main() -> int:
     cases = [case_endpoint_and_enabled, case_profile_dir, case_win_path,
              case_launch_args_include_proxy, case_domain_matches_site_and_subdomains,
-             case_clear_cookies_does_not_launch]
+             case_clear_cookies_does_not_launch, case_clean_env_keeps_runtime_config]
     for case in cases:
         case()
     print(f"test_browser_cdp: {len(cases)} cases passed")
