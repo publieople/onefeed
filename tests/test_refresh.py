@@ -150,6 +150,47 @@ def test_refresh_api_explains_a_missing_plugin_dir():
     assert "插件目录不存在" in error["message"]
 
 
+def test_refresh_api_can_start_following_in_the_same_click():
+    from fastapi.testclient import TestClient
+
+    from onefeed.app import create_app
+
+    class FakeFollowing:
+        def __init__(self):
+            self.calls = []
+
+        def trigger(self, **kwargs):
+            self.calls.append(kwargs)
+            return True, {"running": True, "started_at": int(time.time())}
+
+    store = make_store()
+    missing = Path(tempfile.mkdtemp(prefix="onefeed-no-plugins-both-")) / "plugins"
+    app = create_app(store=store, plugins_dir=missing)
+    client = TestClient(app)
+    fake = FakeFollowing()
+    app.state.following = fake
+
+    resp = client.post("/api/refresh", json={"platforms": ["v2ex"], "force": True,
+                                             "with_following": True})
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["following"]["started"] is True, body
+    assert len(fake.calls) == 1, fake.calls
+    assert fake.calls[0]["platforms"] == ["v2ex"], fake.calls[0]
+    assert fake.calls[0]["force"] is True, fake.calls[0]
+
+    deadline = time.time() + 5
+    while app.state.refresher.running() and time.time() < deadline:
+        time.sleep(0.02)
+    assert not app.state.refresher.running(), "第一轮刷新没有收尾，第二个请求会撞 409"
+
+    fake.calls.clear()
+    resp = client.post("/api/refresh", json={"platforms": ["v2ex"], "force": True})
+    assert resp.status_code == 202, resp.text
+    assert resp.json().get("following") is None, resp.json()
+    assert fake.calls == [], "没点「全部平台」时不要偷偷同步关注流"
+
+
 def test_trigger_batches_by_platform_and_force_bypasses_cooldown():
     store = make_store()
     run_id = store.start_run("v2ex")

@@ -293,7 +293,11 @@ export default function App() {
       return;
     }
     try {
-      const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", { force: bypass });
+      const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", {
+        force: bypass,
+        // 顶栏是「刷新全部平台」：信息流和关注流同时开始，别只刷一半。
+        with_following: true,
+      });
       const state = res?.state;
       // 全部平台都在冷却时后端不会起线程：这一刻就能说清楚，不必等下一轮轮询。
       if (state && !state.running && state.error && state.error.includes("冷却")) {
@@ -373,6 +377,7 @@ export default function App() {
     try {
       const res = await postJSON<{ ok: boolean; state?: RunState }>("/api/refresh", {
         source: "auto",
+        with_following: true,
         ...(platforms?.length ? { platforms } : {}),
       });
       const state = res?.state;

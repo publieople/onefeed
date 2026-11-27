@@ -48,13 +48,21 @@ SPECS: dict[str, dict[str, Any]] = {
         "cookies": ("z_c0",),
         "impact": "知乎首页 2026 年起对游客直接跳登录页，推荐流和关注流都要求登录态。",
     },
+    "bilibili": {
+        "label": "B 站",
+        # 统一走宿主 Chrome 扫码；拿到 SESSDATA 后同时写给 bili CLI。
+        "url": "https://passport.bilibili.com/login",
+        "domain": ".bilibili.com",
+        "cookies": ("SESSDATA",),
+        "impact": "B 站关注流和个性化推荐需要登录；扫码后凭据会同步给本机 bili CLI，不用再去终端。",
+    },
 }
 
 # 登录态由外部 CLI 管理的平台，宿主不开窗口，只负责说清楚怎么弄。
 CLI_SPECS: dict[str, dict[str, str]] = {
     "bilibili": {
         "label": "B 站",
-        "hint": "B 站登录由本机 bili CLI 管理：终端执行 bili login 扫码，凭证 CLI 自己保存。",
+        "hint": "B 站登录已改走设置页的 Chrome 扫码；这里保留命令给排障用。",
         "command": "bili login",
     },
 }
@@ -79,6 +87,74 @@ def _cookie_path(plugin_id: str) -> Path:
 
 def _profile_dir(plugin_id: str) -> Path:
     return _login_dir() / plugin_id
+
+
+# bili CLI 的凭证字段（小写）；Chrome cookie 是大写，落盘前映射。
+_BILI_COOKIE_MAP = {
+    "sessdata": "SESSDATA",
+    "bili_jct": "bili_jct",
+    "buvid3": "buvid3",
+    "buvid4": "buvid4",
+    "dedeuserid": "DedeUserID",
+}
+
+
+def _bili_credential_path() -> Path:
+    return state_root() / "toolhome" / "bili-cli" / "credential.json"
+
+
+def bili_credential_ready() -> bool:
+    """bili CLI 是否已有可用的 SESSDATA；只读文件，不启动插件。"""
+    path = _bili_credential_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(str(data.get("sessdata") or "").strip())
+
+
+def _sync_bili_credential(cookies: list[dict[str, Any]]) -> Path | None:
+    """把 Chrome 的 B 站 cookie 写成 bili CLI 的 credential.json。
+
+    B 站插件所有 feed 都经 bili CLI，宿主只写 cookie 文件插件并不会用；
+    这一步是把「浏览器登录态」翻译成 CLI 能读的格式。
+    """
+    values: dict[str, str] = {}
+    for cookie in cookies:
+        name = str(cookie.get("name") or "").casefold()
+        value = str(cookie.get("value") or "")
+        if name in _BILI_COOKIE_MAP and value:
+            values[name] = value
+    sessdata = values.get("sessdata", "")
+    if not sessdata:
+        return None
+
+    path = _bili_credential_path()
+    existing: dict[str, Any] = {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            existing = loaded
+    except (OSError, json.JSONDecodeError):
+        pass
+    payload = {
+        "sessdata": sessdata,
+        "bili_jct": values.get("bili_jct") or str(existing.get("bili_jct") or ""),
+        "buvid3": values.get("buvid3") or str(existing.get("buvid3") or ""),
+        "buvid4": values.get("buvid4") or str(existing.get("buvid4") or ""),
+        "dedeuserid": values.get("dedeuserid") or str(existing.get("dedeuserid") or ""),
+        # ac_time_value 不在 cookie 里；已有就保留，没有就写 null（CLI 接受）。
+        "ac_time_value": existing.get("ac_time_value"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    try:
+        tmp.chmod(0o600)
+    except OSError:
+        pass
+    tmp.replace(path)
+    return path
 
 
 def _write_cookie_file(plugin_id: str, cookies: list[dict[str, Any]]) -> Path:
@@ -293,6 +369,13 @@ class _Session:
                 self.cookie = str(probe.get("name"))
                 self.state = "ok"
                 self.message = f"已拿到 {len(scoped)} 个 cookie（含 {probe.get('name')}），窗口已关闭"
+                if self.plugin_id == "bilibili":
+                    try:
+                        cred = _sync_bili_credential(scoped)
+                        if cred is not None:
+                            self.message += "；B 站凭证已同步给 bili CLI"
+                    except OSError as exc:
+                        self.message += "；B 站凭证同步失败：" + str(exc)[:120]
                 return
             time.sleep(POLL_SEC)
 
@@ -350,6 +433,25 @@ def check(plugin_id: str) -> dict[str, Any]:
                 data["message"] = "登录窗口已经关了；重新打开一次就行"
         return data
 
+    if plugin_id == "bilibili":
+        # 先看 CLI 凭证；没有再看专用 Chrome 里是否已经有登录 cookie。
+        # 后者是「用户自己在 sidecar 里登录过、但还没走过 OneFeed 登录按钮」的情况。
+        if bili_credential_ready():
+            return {"plugin": plugin_id, "state": "ok", "cookies": 0,
+                    "path": str(_bili_credential_path()),
+                    "message": "已登录（B 站凭证已同步给 bili CLI）"}
+        if browser_cdp.enabled():
+            try:
+                scoped = [c for c in browser_cdp.cookies()
+                          if str(c.get("domain") or "").endswith(".bilibili.com")]
+                cred = _sync_bili_credential(scoped)
+                if cred is not None:
+                    return {"plugin": plugin_id, "state": "ok", "cookies": len(scoped),
+                            "path": str(cred),
+                            "message": f"已登录（从专用 Chrome 同步了 {len(scoped)} 个 cookie）"}
+            except Exception:
+                pass
+
     if browser_cdp.enabled():
         names = browser_cdp.cookie_names(str(spec["domain"]))
         if any(n in set(spec["cookies"]) for n in names):
@@ -388,6 +490,12 @@ def logout(plugin_id: str) -> dict[str, Any]:
     if cookie_path.exists():
         cookie_path.unlink()
         removed.append("cookie")
+
+    if plugin_id == "bilibili":
+        cred_path = _bili_credential_path()
+        if cred_path.exists():
+            cred_path.unlink()
+            removed.append("bili CLI 凭证")
 
     if browser_cdp.enabled():
         spec = SPECS.get(plugin_id)

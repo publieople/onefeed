@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -119,6 +121,37 @@ def case_stop_flag():
     print("case_stop_flag ok")
 
 
+def case_bili_cookie_syncs_to_cli():
+    """B 站扫码拿到的大写 cookie 要写成 bili CLI 认识的小写 credential.json。"""
+    with tempfile.TemporaryDirectory() as td:
+        cookie_path = Path(td) / "cookies" / "bilibili.json"
+        cred_path = Path(td) / "toolhome" / "bili-cli" / "credential.json"
+        cookies = [
+            _cookie("SESSDATA", "abc", ".bilibili.com"),
+            _cookie("bili_jct", "jct", ".bilibili.com"),
+            _cookie("DedeUserID", "42", ".bilibili.com"),
+            _cookie("buvid3", "b3", ".bilibili.com"),
+            _cookie("buvid4", "b4", ".bilibili.com"),
+        ]
+        with patch.object(auth, "_cookie_path", return_value=cookie_path):
+            with patch.object(auth, "_bili_credential_path", return_value=cred_path):
+                session = auth._Session("bilibili", auth.SPECS["bilibili"])
+                session.state = "waiting"
+                session.ready.set()
+                session._poll(FakeCtx(cookies))
+                assert auth.bili_credential_ready() is True
+        assert session.state == "ok", session.state
+        assert "B 站凭证已同步" in session.message, session.message
+        data = json.loads(cred_path.read_text(encoding="utf-8"))
+        assert data["sessdata"] == "abc", data
+        assert data["bili_jct"] == "jct", data
+        assert data["dedeuserid"] == "42", data
+        assert data["buvid3"] == "b3", data
+        assert data["buvid4"] == "b4", data
+        assert data["ac_time_value"] is None, data
+    print("case_bili_cookie_syncs_to_cli ok")
+
+
 def case_cookie_names_reads_file():
     path = state_root() / "cookies" / "douyin.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,7 +166,7 @@ def case_cookie_names_reads_file():
 
 def main() -> int:
     cases = [case_wait_then_ok, case_scoped_by_domain, case_window_closed,
-             case_stop_flag, case_cookie_names_reads_file]
+             case_stop_flag, case_bili_cookie_syncs_to_cli, case_cookie_names_reads_file]
     for case in cases:
         case()
     print(f"test_auth_flow: {len(cases)} cases passed")

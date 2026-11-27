@@ -99,14 +99,10 @@ def _login_probe(plugin_id: str) -> tuple[bool | None, str]:
     None = 这个平台没有可读的 cookie 文件（B 站由 bili CLI 管），
     不能据此断言「没登录」；真正是否可用由同步结果说话。
     """
+    if plugin_id == "bilibili" and auth_mod.bili_credential_ready():
+        return True, "B 站凭证已同步到 bili CLI"
     spec = auth_mod.SPECS.get(plugin_id)
     if spec is None:
-        if plugin_id == "bilibili":
-            home = state_root() / "toolhome" / "bili-cli" / "credential.json"
-            appdata = Path.home() / "AppData" / "Roaming" / "bili-cli" / "credential.json"
-            if home.is_file() or appdata.is_file():
-                return True, "B 站登录由 bili CLI 管理"
-            return None, "B 站登录由本机 bili CLI 管理，同步失败时会说明"
         return None, ""
     if browser_cdp.enabled():
         names = browser_cdp.cookie_names(str(spec["domain"]))
@@ -1409,7 +1405,18 @@ def refresh(request: Request, payload: dict[str, Any] = Body(default={})) -> dic
             "code": "refresh_unavailable",
             "message": str(state.get("error") or "没有可用的插件"),
             "hint": "去设置页看插件目录和已安装插件；目录和清单都正常后再刷新"})
-    return {"ok": True, "state": state}
+
+    following: dict[str, Any] | None = None
+    if isinstance(payload, dict) and payload.get("with_following"):
+        # 顶栏「刷新全部平台」：信息流和关注流是两个库，必须同时触发。
+        # 关注流失败不能把已经启动的信息流回滚成 500，所以只回报状态。
+        try:
+            f_ok, f_state = _following_runner(request).trigger(
+                platforms=platforms, force=force, source=source)
+            following = {"started": bool(f_ok), "state": f_state}
+        except Exception as exc:  # noqa: BLE001 - 返回给前端定位，不影响信息流
+            following = {"started": False, "state": {"error": str(exc)[:200]}}
+    return {"ok": True, "state": state, "following": following}
 
 
 @router.get("/progress")
@@ -1546,7 +1553,14 @@ def _login_flow_hint() -> str:
 @router.get("/auth")
 def auth_rows() -> dict:
     """设置页「登录态」的行清单：后端有哪些登录流程，前端就画哪些行。"""
-    rows = [auth_mod.describe(pid) for pid in (*auth_mod.SPECS, *auth_mod.CLI_SPECS)]
+    # B 站同时出现在 SPECS（扫码）和 CLI_SPECS（二进制/凭证），行清单只能出现一次。
+    seen: set[str] = set()
+    rows = []
+    for pid in (*auth_mod.SPECS, *auth_mod.CLI_SPECS):
+        if pid in seen:
+            continue
+        seen.add(pid)
+        rows.append(auth_mod.describe(pid))
     return {"rows": rows}
 
 
@@ -1556,9 +1570,13 @@ def auth(request: Request, plugin_id: str) -> dict:
     info = auth_mod.describe(plugin_id)
     spec = auth_mod.SPECS.get(plugin_id)
     if spec is None:
-        # CLI 管的（B 站）或根本不需要登录的平台：如实说清楚，不给假按钮
+        # 纯 CLI 管的或根本不需要登录的平台：如实说清楚，不给假按钮
         return {**info, "state": "not_required",
                 "message": auth_mod.CLI_SPECS.get(plugin_id, {}).get("hint", "这个平台不需要登录")}
+
+    if plugin_id == "bilibili" and auth_mod.bili_credential_ready():
+        return {**info, "state": "available", "cookies": 0,
+                "message": "已登录（B 站凭证已同步给 bili CLI）", "hint": ""}
 
     path = state_root() / "cookies" / f"{plugin_id}.json"
     window = auth_mod.session_state(plugin_id)

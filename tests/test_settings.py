@@ -162,8 +162,9 @@ def main() -> int:
 
     # ---------------------------------------------------------------- 登录四态
     bili = client.get("/api/auth/bilibili").json()
-    check(bili["state"] == "not_required" and bili["can_login"] is False, "B 站走 CLI，不开登录窗口")
-    check("bili login" in bili["message"], "B 站提示里给出 CLI 命令")
+    check(bili["state"] == "need_login" and bili["can_login"] is True, "B 站可走 Chrome 扫码登录")
+    check(bili["login_url"] == "https://passport.bilibili.com/login", "B 站登录页指向 passport")
+    check("登录窗口" in bili["hint"], "B 站提示告诉用户点登录窗口")
     unknown = client.get("/api/auth/juejin").json()
     check(unknown["state"] == "not_required" and not unknown["can_login"], "其它插件不需要登录")
     xhs = client.get("/api/auth/xiaohongshu").json()
