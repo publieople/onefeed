@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from plugin_runtime.host import default_plugins_dir
+from plugin_runtime.manifest import ID_RE
 from plugin_runtime.paths import state_root
 
 FALLBACK_REGISTRY = "https://cdn.jsdelivr.net/gh/publieople/onefeed-plugins@main/registry.json"
@@ -178,6 +179,39 @@ def plugins_root() -> Path:
         return Path(default_plugins_dir())
 
 
+class InvalidPluginId(ValueError):
+    """插件 id 不能用做目录名（OF-04）："." / ".." / 带路径分隔符的 id 一律拒绝。"""
+
+
+def validate_plugin_id(plugin_id: str) -> str:
+    """把 URL 路径里的 plugin_id 校验成能安全当目录名用的 id。
+
+    和清单 id 用同一套规则（plugin_runtime.manifest.ID_RE）：小写字母开头、
+    只用小写字母/数字/连字符、2–32 位。字符集本身就把 "."、".."、"a/b"、
+    "a\\b" 挡在外面——以前 DELETE /api/plugins/%2E 会把插件根自己当成插件
+    目录，rename 走整个根。
+    """
+    pid = str(plugin_id or "")
+    if not ID_RE.match(pid):
+        raise InvalidPluginId(
+            f"非法的插件 id：{pid!r}（小写字母开头，只用小写字母、数字、连字符，2–32 位）")
+    return pid
+
+
+def plugin_target(root: Path, plugin_id: str) -> Path:
+    """插件目录 = 插件根 / id，且必须是根的下一层。
+
+    先校验 id，再确认拼出来的路径父目录就是插件根（不解析目标本身：开发时
+    用软链把插件目录指到仓库里是既有用法，删除/改名走的是链接本身）。
+    """
+    pid = validate_plugin_id(plugin_id)
+    root = Path(root)
+    target = root / pid
+    if target.name != pid or target.parent.resolve() != root.resolve():
+        raise InvalidPluginId(f"插件目录不在插件根内：{target}")
+    return target
+
+
 class InstallRollbackError(RuntimeError):
     """换入失败、回滚也失败时抛出：旧目录仍在备份位置，人工还能救回来。"""
 
@@ -322,12 +356,13 @@ def install(store, plugin_id: str) -> dict[str, Any]:
     先删掉。之前正是 shutil.rmtree(target) 之后任何一步失败（目录被占用、
     rename 失败、缓存复制失败）都会留下空目录或半截包，库里却还是旧记录。
     """
+    plugin_id = validate_plugin_id(plugin_id)
     entry = next((e for e in merged(store)["entries"] if e.get("id") == plugin_id), None)
     if entry is None:
         raise RuntimeError(f"registry 里没有 {plugin_id}")
     target_root = plugins_root()
     target_root.mkdir(parents=True, exist_ok=True)
-    target = target_root / plugin_id
+    target = plugin_target(target_root, plugin_id)
     expected = str(entry.get("sha256") or "")
     # 更新不能把用户关掉的插件又打开：先记住现有 enabled，写库时带回去
     previous = next((p for p in store.list_plugins() if p["id"] == plugin_id), None)
@@ -418,6 +453,7 @@ def cmp_version(a: str, b: str) -> int:
 
 def update(store, plugin_id: str) -> dict[str, Any]:
     """把一个已装插件升到 registry 上的版本。返回 from / to，方便前端说清升了什么。"""
+    plugin_id = validate_plugin_id(plugin_id)
     previous = next((p for p in store.list_plugins() if p["id"] == plugin_id), None)
     if previous is None:
         raise RuntimeError(f"{plugin_id} 还没装，先安装再更新")
@@ -468,8 +504,9 @@ def uninstall(store, plugin_id: str) -> dict[str, Any]:
     目录还在时也不直接 rmtree：先改名为备份，库删成功后再删备份。库删失败
     就把目录移回去，避免出现「目录没了、库里还显示已安装」的半截状态。
     """
+    plugin_id = validate_plugin_id(plugin_id)
     target_root = plugins_root()
-    target = target_root / plugin_id
+    target = plugin_target(target_root, plugin_id)
     if not _path_exists(target):
         store.delete_plugin(plugin_id)
         return {"ok": True, "id": plugin_id, "removed": False}

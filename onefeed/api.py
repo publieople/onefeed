@@ -1463,8 +1463,23 @@ def plugins(request: Request, refresh_market: bool = Query(False)) -> dict:
             "errors": list(getattr(host, "errors", []) or [])}
 
 
+def _checked_plugin_id(plugin_id: str) -> str:
+    """插件 id 直接来自 URL，先按目录名规则校验（OF-04）。
+
+    市场层也会校验一遍；这里先拦是为了给出明确的 invalid_plugin_id，
+    而不是让它混进 install_failed / uninstall_failed 里。
+    """
+    try:
+        return market.validate_plugin_id(plugin_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={
+            "code": "invalid_plugin_id", "message": str(exc)[:300],
+            "hint": "插件 id 只能小写字母开头，只用小写字母、数字、连字符，2–32 位"})
+
+
 @router.post("/plugins/{plugin_id}/install")
 def install_plugin(request: Request, plugin_id: str) -> dict:
+    plugin_id = _checked_plugin_id(plugin_id)
     store = _store(request)
     try:
         result = market.install(store, plugin_id)
@@ -1486,6 +1501,7 @@ def _reload_plugins(request: Request) -> None:
 
 @router.post("/plugins/{plugin_id}/update")
 def update_plugin(request: Request, plugin_id: str) -> dict:
+    plugin_id = _checked_plugin_id(plugin_id)
     store = _store(request)
     try:
         result = market.update(store, plugin_id)
@@ -1516,6 +1532,7 @@ def market_updates(request: Request) -> dict:
 
 @router.delete("/plugins/{plugin_id}")
 def uninstall_plugin(request: Request, plugin_id: str) -> dict:
+    plugin_id = _checked_plugin_id(plugin_id)
     store = _store(request)
     try:
         result = market.uninstall(store, plugin_id)
